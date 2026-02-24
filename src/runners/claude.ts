@@ -82,18 +82,13 @@ export function runWithClaude(agentDir: string, manifest: AgentManifest, options
 
   info(`Launching Claude Code with agent "${manifest.name}"...`);
 
-  // Resolve claude binary path explicitly
-  const claudePath = spawnSync('which', ['claude'], { encoding: 'utf-8' }).stdout.trim();
-  if (claudePath) {
-    info(`Claude binary: ${claudePath}`);
-  }
-
-  // Debug: print args (excluding system prompt content)
-  const debugArgs = args.map(a => a.length > 100 ? `${a.substring(0, 50)}...[${a.length} chars]` : a);
-  info(`Args: ${debugArgs.join(' ')}`);
+  // Resolve the real Claude Code binary, skipping any node_modules/.bin/claude
+  // that may shadow it (e.g. when running via npx)
+  const claudePath = resolveClaudeBinary();
+  info(`Claude binary: ${claudePath}`);
 
   try {
-    const result = spawnSync(claudePath || 'claude', args, {
+    const result = spawnSync(claudePath, args, {
       stdio: 'inherit',
       cwd: agentDir,
     });
@@ -256,4 +251,21 @@ function buildHooksSettings(agentDir: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolve the real Claude Code CLI binary, skipping node_modules/.bin/claude
+ * which may be a different package shadowing the real one (common with npx).
+ */
+function resolveClaudeBinary(): string {
+  const result = spawnSync('which', ['-a', 'claude'], { encoding: 'utf-8' });
+  if (result.status === 0) {
+    const paths = result.stdout.trim().split('\n').filter(Boolean);
+    // Prefer the first path that is NOT inside node_modules
+    const realClaude = paths.find(p => !p.includes('node_modules'));
+    if (realClaude) return realClaude;
+    // Fall back to first match if all are in node_modules
+    if (paths.length > 0) return paths[0];
+  }
+  return 'claude';
 }
