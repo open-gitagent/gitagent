@@ -11,6 +11,22 @@ Every AI framework has its own structure. There's no universal, portable way to 
 - **Compliance-ready** — First-class support for FINRA, Federal Reserve, and SEC regulatory requirements
 - **Composable** — Agents can extend, depend on, and delegate to other agents
 
+## Patterns
+
+Four architectural patterns emerge when you treat agents as git repos:
+
+### Human-in-the-Loop for RL Agents
+When an agent updates memory or learns a new skill, it creates a branch + PR for human review before merging to main. Git's review workflow becomes your supervision layer.
+
+### Shared Context
+Root-level `context.md`, `skills/`, `tools/`, and `knowledge/` are automatically inherited by all sub-agents. One source of truth, no duplication.
+
+### Branch-based Deployment
+Use git branches (`dev` → `staging` → `main`) to promote agent changes through environments, just like shipping software.
+
+### Knowledge Tree
+The `knowledge/` folder stores entity relationships as a hierarchical tree with embeddings, letting agents reason over structured data at runtime.
+
 ## Quick Start
 
 ```bash
