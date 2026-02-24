@@ -23,6 +23,16 @@ export function runWithClaude(agentDir: string, manifest: AgentManifest, options
 
   const args: string[] = [];
 
+  // Model
+  if (manifest.model?.preferred) {
+    args.push('--model', manifest.model.preferred);
+  }
+
+  // Fallback model
+  if (manifest.model?.fallback?.length) {
+    args.push('--fallback-model', manifest.model.fallback[0]);
+  }
+
   // Max turns
   if (manifest.runtime?.max_turns) {
     args.push('--max-turns', String(manifest.runtime.max_turns));
