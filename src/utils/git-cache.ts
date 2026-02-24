@@ -43,7 +43,9 @@ export function resolveRepo(url: string, options: ResolveRepoOptions = {}): Reso
   }
 
   if (existsSync(dir) && options.refresh) {
-    execSync('git pull --depth 1', { cwd: dir, stdio: 'pipe' });
+    // Nuke cached clone and re-clone fresh to avoid divergent branch issues
+    rmSync(dir, { recursive: true, force: true });
+    cloneRepo(url, branch, dir);
     return { dir };
   }
 
