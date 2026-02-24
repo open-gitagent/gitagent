@@ -1,6 +1,6 @@
 {
   "name": "@shreyaskapale/gitagent",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A framework-agnostic, git-native standard for defining AI agents",
   "type": "module",
   "bin": {

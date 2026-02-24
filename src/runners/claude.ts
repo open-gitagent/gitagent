@@ -82,8 +82,18 @@ export function runWithClaude(agentDir: string, manifest: AgentManifest, options
 
   info(`Launching Claude Code with agent "${manifest.name}"...`);
 
+  // Resolve claude binary path explicitly
+  const claudePath = spawnSync('which', ['claude'], { encoding: 'utf-8' }).stdout.trim();
+  if (claudePath) {
+    info(`Claude binary: ${claudePath}`);
+  }
+
+  // Debug: print args (excluding system prompt content)
+  const debugArgs = args.map(a => a.length > 100 ? `${a.substring(0, 50)}...[${a.length} chars]` : a);
+  info(`Args: ${debugArgs.join(' ')}`);
+
   try {
-    const result = spawnSync('claude', args, {
+    const result = spawnSync(claudePath || 'claude', args, {
       stdio: 'inherit',
       cwd: agentDir,
     });
