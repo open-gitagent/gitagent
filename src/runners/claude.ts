@@ -21,9 +21,7 @@ export function runWithClaude(agentDir: string, manifest: AgentManifest, options
   writeFileSync(promptFile, systemPrompt, 'utf-8');
   tmpFiles.push(promptFile);
 
-  // Use --append-system-prompt to layer agent on top of Claude Code defaults
-  // --append-system-prompt works in both interactive and print modes
-  const args: string[] = ['--append-system-prompt', systemPrompt];
+  const args: string[] = [];
 
   // Model
   if (manifest.model?.preferred) {
@@ -77,6 +75,10 @@ export function runWithClaude(agentDir: string, manifest: AgentManifest, options
   if (options.prompt) {
     args.push('-p', options.prompt);
   }
+
+  // Append system prompt LAST to prevent the long prompt string
+  // from interfering with argument parsing of other flags
+  args.push('--append-system-prompt', systemPrompt);
 
   info(`Launching Claude Code with agent "${manifest.name}"...`);
 
