@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitagent.dev/schemas/marketplace.schema.json",
+  "title": "Skill Marketplace Package",
+  "description": "Schema for marketplace.json — the skill distribution manifest used by registry providers",
+  "type": "object",
+  "required": ["name", "version", "description", "skill"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z](?:[a-z0-9]|-(?!-))*[a-z0-9]$|^[a-z]$",
+      "description": "Package name (must match skill name)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$",
+      "description": "Package version (semver)"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "description": "Package description"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author name or organization"
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier"
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri",
+      "description": "Homepage URL"
+    },
+    "repository": {
+      "type": "string",
+      "description": "Source repository URL"
+    },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Search keywords"
+    },
+    "skill": {
+      "type": "object",
+      "required": ["name", "description"],
+      "description": "Embedded Agent Skills frontmatter",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "license": { "type": "string" },
+        "compatibility": { "type": "string", "maxLength": 500 },
+        "allowed-tools": { "type": "string" },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of files included in the package"
+    },
+    "registry": {
+      "type": "string",
+      "description": "Registry provider this package was published to"
+    },
+    "published_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 publication timestamp"
+    },
+    "downloads": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total download count"
+    }
+  },
+  "additionalProperties": false
+}

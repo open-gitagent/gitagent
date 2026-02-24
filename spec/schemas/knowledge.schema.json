@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitagent.dev/schemas/knowledge.schema.json",
+  "title": "gitagent Knowledge Index",
+  "description": "Schema for knowledge/index.yaml",
+  "type": "object",
+  "required": ["documents"],
+  "properties": {
+    "documents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "File path relative to knowledge/"
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" },
+            "uniqueItems": true,
+            "description": "Tags for retrieval and categorization"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "description": "Retrieval priority"
+          },
+          "always_load": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether to include in every session context"
+          },
+          "description": {
+            "type": "string",
+            "description": "What this document contains"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

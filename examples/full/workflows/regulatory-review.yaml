@@ -1,0 +1,68 @@
+name: regulatory-review
+description: Complete regulatory compliance review workflow
+version: 1.0.0
+inputs:
+  - name: document
+    type: file
+    required: true
+    description: Document to review
+  - name: framework
+    type: string
+    default: all
+    description: Regulatory framework to apply
+outputs:
+  - name: report
+    type: string
+    description: Compliance analysis report
+steps:
+  - id: classify
+    action: Classify document type and identify applicable regulations
+    skill: regulatory-analysis
+    outputs: [doc_type, applicable_rules, risk_level]
+    compliance:
+      audit_level: detailed
+
+  - id: analyze
+    action: Analyze document against each applicable rule
+    depends_on: [classify]
+    skill: regulatory-analysis
+    inputs:
+      rules: ${{ steps.classify.outputs.applicable_rules }}
+    outputs: [findings, confidence_scores]
+    compliance:
+      audit_level: full
+
+  - id: verify-facts
+    action: Verify factual claims in the analysis
+    depends_on: [analyze]
+    agent: fact-checker
+    inputs:
+      claims: ${{ steps.analyze.outputs.findings }}
+    outputs: [verified_findings]
+    compliance:
+      audit_level: detailed
+
+  - id: human-review
+    action: Route high-severity findings for human review
+    depends_on: [verify-facts]
+    skill: document-review
+    conditions:
+      - ${{ steps.analyze.outputs.findings.critical_count > 0 }}
+    compliance:
+      requires_approval: true
+      audit_level: full
+
+  - id: generate-report
+    action: Generate final compliance report
+    depends_on: [verify-facts, human-review]
+    tool: generate-report
+    inputs:
+      title: "Regulatory Compliance Review"
+      findings: ${{ steps.verify-facts.outputs.verified_findings }}
+    outputs: [report]
+    compliance:
+      audit_level: full
+
+error_handling:
+  on_step_failure: escalate
+  escalation_target: chief-compliance-officer

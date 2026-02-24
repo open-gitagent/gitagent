@@ -1,0 +1,36 @@
+name: lint-check
+description: Run linting checks on source code
+version: 1.0.0
+input_schema:
+  type: object
+  properties:
+    code:
+      type: string
+      description: Source code to lint
+    language:
+      type: string
+      enum: [javascript, typescript, python, go, rust]
+      description: Programming language
+  required: [code, language]
+output_schema:
+  type: object
+  properties:
+    issues:
+      type: array
+      items:
+        type: object
+        properties:
+          line: { type: integer }
+          column: { type: integer }
+          severity: { type: string, enum: [error, warning, info] }
+          message: { type: string }
+          rule: { type: string }
+implementation:
+  type: script
+  path: lint-check.sh
+  runtime: bash
+  timeout: 30
+annotations:
+  requires_confirmation: false
+  read_only: true
+  cost: none

@@ -1,0 +1,79 @@
+mappings:
+  - capability: regulatory_analysis
+    rules:
+      - id: finra-3110
+        name: "FINRA Rule 3110 — Supervision"
+        controls:
+          - designated_supervisor_assigned
+          - written_supervisory_procedures
+          - human_in_the_loop_enforcement
+          - supervisory_review_cadence
+      - id: sr-11-7
+        name: "SR 11-7 — Model Risk Management"
+        controls:
+          - model_inventory_registration
+          - validation_cadence_compliance
+          - conceptual_soundness_documentation
+          - ongoing_monitoring_active
+          - outcomes_analysis_active
+
+  - capability: customer_communication
+    rules:
+      - id: finra-2210
+        name: "FINRA Rule 2210 — Communications with the Public"
+        controls:
+          - fair_balanced_check
+          - no_misleading_check
+          - no_promissory_check
+          - principal_pre_review
+          - communication_classification
+      - id: finra-4511
+        name: "FINRA Rule 4511 — Books and Records"
+        controls:
+          - communication_retention
+          - format_compliance_17a4
+          - immutable_audit_trail
+
+  - capability: credit_decision_support
+    rules:
+      - id: ecoa-reg-b
+        name: "Equal Credit Opportunity Act / Regulation B"
+        controls:
+          - adverse_action_notice_generation
+          - no_protected_class_input
+          - specific_actionable_reasons
+      - id: cfpb-circular-2022-03
+        name: "CFPB Circular 2022-03 — Adverse Action and Complex Algorithms"
+        controls:
+          - explainable_decision_reasons
+          - no_black_box_defense
+          - lda_search_documentation
+
+  - capability: data_processing
+    rules:
+      - id: sec-reg-sp
+        name: "SEC Regulation S-P — Privacy of Consumer Information"
+        controls:
+          - pii_redaction
+          - data_classification
+          - consent_verification
+          - cross_border_restrictions
+      - id: sec-reg-sid
+        name: "SEC Regulation S-ID — Identity Theft Prevention"
+        controls:
+          - identity_theft_red_flags
+
+  - capability: vendor_integration
+    rules:
+      - id: sr-23-4
+        name: "SR 23-4 — Third-Party Risk Management"
+        controls:
+          - vendor_due_diligence
+          - ongoing_vendor_monitoring
+          - soc_report_review
+          - subcontractor_risk_assessment
+      - id: finra-21-29
+        name: "FINRA Regulatory Notice 21-29 — Outsourcing"
+        controls:
+          - vendor_supervisory_procedures
+          - vendor_ai_change_notification

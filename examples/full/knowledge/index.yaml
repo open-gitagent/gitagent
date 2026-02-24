@@ -1,0 +1,9 @@
+documents:
+  - path: finra-rules-summary.md
+    tags: [finra, rules, reference]
+    priority: high
+    always_load: true
+  - path: federal-reserve-guidance.md
+    tags: [federal-reserve, sr-letters, guidance]
+    priority: high
+    always_load: true

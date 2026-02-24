@@ -1,0 +1,27 @@
+spec_version: "0.1.0"
+name: gitagent-helper
+version: 1.0.0
+description: Your AI assistant for building, running, and managing git-native AI agents with gitagent
+author: gitagent
+license: MIT
+model:
+  preferred: claude-sonnet-4-5-20250929
+  fallback:
+    - claude-haiku-4-5-20251001
+  constraints:
+    temperature: 0.2
+    max_tokens: 8192
+skills:
+  - get-started
+  - create-agent
+  - run-agent
+  - export-agent
+  - manage-skills
+runtime:
+  max_turns: 30
+  timeout: 300
+tags:
+  - gitagent
+  - cli
+  - developer-tools
+  - assistant

@@ -1,0 +1,667 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitagent.dev/schemas/agent-yaml.schema.json",
+  "title": "gitagent Manifest",
+  "description": "Schema for agent.yaml — the gitagent manifest file",
+  "type": "object",
+  "required": ["name", "version", "description"],
+  "properties": {
+    "spec_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "gitagent specification version this manifest conforms to",
+      "default": "0.1.0"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Agent identifier (lowercase, hyphens allowed)"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$",
+      "description": "Semantic version (e.g., 1.0.0, 1.0.0-beta.1)"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-line description of the agent"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author name or organization"
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier"
+    },
+    "model": {
+      "type": "object",
+      "properties": {
+        "preferred": {
+          "type": "string",
+          "description": "Primary model ID (e.g., claude-opus-4-6, gpt-4o)"
+        },
+        "fallback": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Fallback model IDs in priority order"
+        },
+        "constraints": {
+          "type": "object",
+          "description": "Model parameter constraints",
+          "properties": {
+            "temperature": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "Sampling temperature"
+            },
+            "max_tokens": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Maximum output tokens"
+            },
+            "top_p": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Nucleus sampling threshold"
+            },
+            "top_k": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Top-k sampling"
+            },
+            "stop_sequences": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Sequences that stop generation"
+            },
+            "presence_penalty": {
+              "type": "number",
+              "minimum": -2,
+              "maximum": 2
+            },
+            "frequency_penalty": {
+              "type": "number",
+              "minimum": -2,
+              "maximum": 2
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "extends": {
+      "type": "string",
+      "description": "Parent agent (git URL or local path)"
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/dependency"
+      }
+    },
+    "skills": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "uniqueItems": true,
+      "description": "Enabled skill directory names"
+    },
+    "tools": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+      "uniqueItems": true,
+      "description": "Enabled tool file names (without extension)"
+    },
+    "agents": {
+      "type": "object",
+      "description": "Sub-agent configuration",
+      "additionalProperties": {
+        "$ref": "#/$defs/sub_agent_config"
+      }
+    },
+    "delegation": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["auto", "explicit", "router"],
+          "description": "How sub-agents are invoked"
+        },
+        "router": {
+          "type": "string",
+          "description": "Router agent name (when mode=router)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum conversation turns"
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Runtime temperature override"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timeout in seconds"
+        }
+      },
+      "additionalProperties": false
+    },
+    "a2a": {
+      "type": "object",
+      "description": "Agent-to-Agent (A2A) protocol metadata",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "A2A endpoint URL"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Declared A2A capabilities"
+        },
+        "authentication": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["none", "api_key", "oauth2", "mtls"],
+              "description": "Authentication mechanism"
+            },
+            "credentials_ref": {
+              "type": "string",
+              "description": "Reference to credentials (env var name or secret path)"
+            }
+          },
+          "additionalProperties": false
+        },
+        "protocols": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["a2a", "mcp"]
+          },
+          "description": "Supported server protocols"
+        }
+      },
+      "additionalProperties": false
+    },
+    "compliance": {
+      "$ref": "#/$defs/compliance_config"
+    },
+    "registries": {
+      "type": "array",
+      "description": "Skill registry providers for marketplace integration",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Provider name (e.g., skillsmp, github, or custom)"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Provider API endpoint URL"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Arbitrary key-value metadata. Values must be strings, numbers, or booleans.",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string" },
+          { "type": "number" },
+          { "type": "boolean" }
+        ]
+      }
+    }
+  },
+  "additionalProperties": false,
+
+  "$defs": {
+    "dependency": {
+      "type": "object",
+      "required": ["name", "source"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "source": {
+          "type": "string",
+          "description": "Git URL, local path, or registry reference"
+        },
+        "version": {
+          "type": "string",
+          "description": "Semver range (e.g., ^1.0.0, ~2.3.0)"
+        },
+        "mount": {
+          "type": "string",
+          "description": "Mount path relative to agent root"
+        },
+        "vendor_management": {
+          "$ref": "#/$defs/vendor_management_entry"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "vendor_management_entry": {
+      "type": "object",
+      "description": "Vendor due diligence metadata per SR 23-4",
+      "properties": {
+        "due_diligence_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Date of last due diligence review"
+        },
+        "soc_report": {
+          "type": "boolean",
+          "description": "SOC 2 report obtained"
+        },
+        "risk_assessment": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "description": "Vendor risk rating"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "sub_agent_config": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "delegation": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["auto", "explicit", "router"]
+            },
+            "triggers": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Conditions that activate this sub-agent (e.g., factual_claim_detected, confidence_low, domain_mismatch)"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "escalation_trigger": {
+      "type": "object",
+      "description": "A single escalation trigger condition",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["confidence_below"],
+          "properties": {
+            "confidence_below": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Escalate when confidence score falls below this threshold"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["action_type"],
+          "properties": {
+            "action_type": {
+              "type": "string",
+              "description": "Escalate for specific action types (e.g., customer_communication, trade_execution, credit_decision, regulatory_filing)"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["error_detected"],
+          "properties": {
+            "error_detected": {
+              "type": "boolean",
+              "description": "Escalate when an error is detected"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["data_classification_above"],
+          "properties": {
+            "data_classification_above": {
+              "type": "string",
+              "enum": ["public", "internal", "confidential", "restricted"],
+              "description": "Escalate when data classification exceeds this level"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["token_count_above"],
+          "properties": {
+            "token_count_above": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Escalate when output exceeds this token count"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["custom"],
+          "properties": {
+            "custom": {
+              "type": "string",
+              "description": "Custom escalation condition (natural language description)"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "compliance_config": {
+      "type": "object",
+      "description": "Regulatory compliance configuration",
+      "properties": {
+        "risk_tier": {
+          "type": "string",
+          "enum": ["low", "standard", "high", "critical"],
+          "description": "Risk classification. High/critical tiers enforce stricter requirements."
+        },
+        "frameworks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Regulatory framework identifier. Standard values: finra, federal_reserve, sec, cfpb, occ, fdic, bsa_aml. Custom values allowed for non-US frameworks (e.g., eu_ai_act, uk_fca, mas_singapore, gdpr)."
+          },
+          "uniqueItems": true,
+          "description": "Applicable regulatory frameworks"
+        },
+        "supervision": {
+          "$ref": "#/$defs/supervision_config"
+        },
+        "recordkeeping": {
+          "$ref": "#/$defs/recordkeeping_config"
+        },
+        "model_risk": {
+          "$ref": "#/$defs/model_risk_config"
+        },
+        "data_governance": {
+          "$ref": "#/$defs/data_governance_config"
+        },
+        "communications": {
+          "$ref": "#/$defs/communications_config"
+        },
+        "vendor_management": {
+          "$ref": "#/$defs/vendor_management_config"
+        }
+      },
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "risk_tier": { "enum": ["high", "critical"] }
+        },
+        "required": ["risk_tier"]
+      },
+      "then": {
+        "required": ["supervision", "recordkeeping"],
+        "properties": {
+          "supervision": {
+            "required": ["human_in_the_loop"],
+            "properties": {
+              "human_in_the_loop": {
+                "enum": ["always", "conditional"]
+              }
+            }
+          },
+          "recordkeeping": {
+            "required": ["audit_logging"],
+            "properties": {
+              "audit_logging": { "const": true }
+            }
+          }
+        }
+      }
+    },
+
+    "supervision_config": {
+      "type": "object",
+      "description": "Supervision configuration per FINRA Rule 3110",
+      "properties": {
+        "designated_supervisor": {
+          "type": ["string", "null"],
+          "description": "Principal responsible for oversight"
+        },
+        "review_cadence": {
+          "type": "string",
+          "enum": ["daily", "weekly", "monthly", "quarterly", "semi_annual", "annual"],
+          "description": "How often the agent is reviewed"
+        },
+        "human_in_the_loop": {
+          "type": "string",
+          "enum": ["always", "conditional", "advisory", "none"],
+          "description": "Level of human involvement. 'always': every decision. 'conditional': per escalation_triggers. 'advisory': human notified but not blocking. 'none': fully autonomous."
+        },
+        "escalation_triggers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/escalation_trigger" },
+          "description": "Conditions that trigger human escalation"
+        },
+        "override_capability": {
+          "type": "boolean",
+          "description": "Whether humans can override agent decisions"
+        },
+        "kill_switch": {
+          "type": "boolean",
+          "description": "Whether agent can be immediately halted"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "recordkeeping_config": {
+      "type": "object",
+      "description": "Recordkeeping per FINRA Rule 4511 / SEC 17a-4",
+      "properties": {
+        "audit_logging": {
+          "type": "boolean",
+          "description": "Whether all decisions and actions are logged"
+        },
+        "log_format": {
+          "type": "string",
+          "enum": ["structured_json", "plaintext"],
+          "description": "Format of audit log entries"
+        },
+        "retention_period": {
+          "type": "string",
+          "pattern": "^\\d+[ymd]$",
+          "description": "Minimum retention period (e.g., 6y = 6 years, 90d = 90 days, 18m = 18 months)"
+        },
+        "log_contents": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "prompts_and_responses",
+              "tool_calls",
+              "decision_pathways",
+              "model_version",
+              "timestamps"
+            ]
+          },
+          "uniqueItems": true,
+          "description": "Categories of data to log. Any subset is valid."
+        },
+        "immutable": {
+          "type": "boolean",
+          "description": "Whether logs are write-once (WORM). Required for SEC 17a-4 compliance."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "model_risk_config": {
+      "type": "object",
+      "description": "Model risk management per SR 11-7",
+      "properties": {
+        "inventory_id": {
+          "type": ["string", "null"],
+          "description": "ID in firm's model inventory"
+        },
+        "validation_cadence": {
+          "type": "string",
+          "enum": ["monthly", "quarterly", "semi_annual", "annual"],
+          "description": "How often the model is validated"
+        },
+        "validation_type": {
+          "type": "string",
+          "enum": ["full", "targeted", "change_based"],
+          "description": "Type of validation. 'full': three-pillar SR 11-7. 'targeted': specific area. 'change_based': triggered by changes."
+        },
+        "conceptual_soundness": {
+          "type": ["string", "null"],
+          "description": "Path or URL to conceptual soundness documentation"
+        },
+        "ongoing_monitoring": {
+          "type": "boolean",
+          "description": "Whether continuous performance monitoring is active"
+        },
+        "outcomes_analysis": {
+          "type": "boolean",
+          "description": "Whether model outputs are compared to actual results (back-testing)"
+        },
+        "drift_detection": {
+          "type": "boolean",
+          "description": "Whether model degradation is monitored over time"
+        },
+        "parallel_testing": {
+          "type": "boolean",
+          "description": "Whether running alongside an existing system for comparison"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "data_governance_config": {
+      "type": "object",
+      "description": "Data governance per SEC Reg S-P and CFPB guidance",
+      "properties": {
+        "pii_handling": {
+          "type": "string",
+          "enum": ["redact", "encrypt", "prohibit", "allow"],
+          "description": "'redact': strip PII from outputs. 'encrypt': encrypt at rest. 'prohibit': reject PII input. 'allow': no restrictions."
+        },
+        "data_classification": {
+          "type": "string",
+          "enum": ["public", "internal", "confidential", "restricted"],
+          "description": "Maximum data sensitivity level this agent processes"
+        },
+        "consent_required": {
+          "type": "boolean",
+          "description": "Whether explicit user consent is required before data processing"
+        },
+        "cross_border": {
+          "type": "boolean",
+          "description": "Whether data may cross jurisdictional boundaries"
+        },
+        "bias_testing": {
+          "type": "boolean",
+          "description": "Whether regular bias testing is performed"
+        },
+        "lda_search": {
+          "type": "boolean",
+          "description": "Whether Less Discriminatory Alternative search is required (CFPB Circular 2022-03)"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "communications_config": {
+      "type": "object",
+      "description": "Communications compliance per FINRA Rule 2210",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["correspondence", "retail", "institutional"],
+          "description": "'correspondence': <=25 retail investors/30 days. 'retail': >25 retail investors/30 days. 'institutional': institutional investors only."
+        },
+        "pre_review_required": {
+          "type": "boolean",
+          "description": "Whether principal pre-approval is required before sending"
+        },
+        "fair_balanced": {
+          "type": "boolean",
+          "description": "Whether outputs must present risks and benefits in balanced manner"
+        },
+        "no_misleading": {
+          "type": "boolean",
+          "description": "Whether misleading, exaggerated, or promissory statements are prohibited"
+        },
+        "disclosures_required": {
+          "type": "boolean",
+          "description": "Whether AI-generated nature must be disclosed to recipients"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "vendor_management_config": {
+      "type": "object",
+      "description": "Third-party vendor management per SR 23-4",
+      "properties": {
+        "due_diligence_complete": {
+          "type": "boolean",
+          "description": "Whether vendor due diligence has been performed"
+        },
+        "soc_report_required": {
+          "type": "boolean",
+          "description": "Whether SOC 2 Type II report is required from vendors"
+        },
+        "vendor_ai_notification": {
+          "type": "boolean",
+          "description": "Whether vendors must notify of AI/model changes"
+        },
+        "subcontractor_assessment": {
+          "type": "boolean",
+          "description": "Whether fourth-party (subcontractor) risk has been assessed"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

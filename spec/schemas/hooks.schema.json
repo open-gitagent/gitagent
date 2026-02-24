@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitagent.dev/schemas/hooks.schema.json",
+  "title": "gitagent Hooks Configuration",
+  "description": "Schema for hooks/hooks.yaml",
+  "type": "object",
+  "required": ["hooks"],
+  "properties": {
+    "hooks": {
+      "type": "object",
+      "properties": {
+        "on_session_start": {
+          "$ref": "#/$defs/hookList",
+          "description": "Fired when agent session begins"
+        },
+        "on_session_end": {
+          "$ref": "#/$defs/hookList",
+          "description": "Fired when agent session ends"
+        },
+        "pre_tool_use": {
+          "$ref": "#/$defs/hookList",
+          "description": "Fired before a tool is invoked"
+        },
+        "post_tool_use": {
+          "$ref": "#/$defs/hookList",
+          "description": "Fired after a tool returns"
+        },
+        "on_error": {
+          "$ref": "#/$defs/hookList",
+          "description": "Fired when an error occurs"
+        },
+        "pre_response": {
+          "$ref": "#/$defs/hookList",
+          "description": "Fired before agent sends a response"
+        },
+        "post_response": {
+          "$ref": "#/$defs/hookList",
+          "description": "Fired after agent sends a response"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "hookList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/hookEntry"
+      }
+    },
+    "hookEntry": {
+      "type": "object",
+      "required": ["script", "description"],
+      "properties": {
+        "script": {
+          "type": "string",
+          "description": "Path to hook script relative to hooks/"
+        },
+        "description": {
+          "type": "string",
+          "description": "What this hook does"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "Timeout in seconds"
+        },
+        "compliance": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this hook is required for regulatory compliance"
+        },
+        "fail_open": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, hook failure allows action to proceed. If false (default), hook failure blocks."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

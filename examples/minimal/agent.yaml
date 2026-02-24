@@ -1,0 +1,4 @@
+spec_version: "0.1.0"
+name: hello-agent
+version: 0.1.0
+description: A minimal hello world agent

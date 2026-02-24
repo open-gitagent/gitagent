@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitagent.dev/schemas/config.schema.json",
+  "title": "gitagent Configuration",
+  "description": "Schema for config/default.yaml and config/<env>.yaml. Env configs are deep-merged onto default.",
+  "type": "object",
+  "properties": {
+    "log_level": {
+      "type": "string",
+      "enum": ["debug", "info", "warn", "error"],
+      "default": "info",
+      "description": "Logging verbosity"
+    },
+    "compliance_mode": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable compliance enforcement hooks and validation"
+    },
+    "audit_logging": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable audit logging override"
+    },
+    "model_override": {
+      "type": ["string", "null"],
+      "default": null,
+      "description": "Override model.preferred from agent.yaml"
+    },
+    "temperature_override": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 2,
+      "default": null,
+      "description": "Override runtime temperature"
+    },
+    "timeout_override": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "default": null,
+      "description": "Override runtime timeout in seconds"
+    },
+    "env_vars": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Environment variables to set for tool scripts"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,15 @@
+spec_version: "0.1.0"
+name: fact-checker
+version: 1.0.0
+description: Verifies factual claims against authoritative regulatory sources
+model:
+  preferred: claude-haiku-4-5-20251001
+  constraints:
+    temperature: 0.0
+    max_tokens: 2048
+runtime:
+  max_turns: 10
+  timeout: 60
+tags:
+  - verification
+  - fact-checking

@@ -1,0 +1,24 @@
+spec_version: "0.1.0"
+name: code-review-agent
+version: 1.0.0
+description: Automated code review agent with best-practice enforcement
+author: gitagent-examples
+license: MIT
+model:
+  preferred: claude-sonnet-4-5-20250929
+  fallback:
+    - claude-haiku-4-5-20251001
+  constraints:
+    temperature: 0.2
+    max_tokens: 4096
+skills:
+  - code-review
+tools:
+  - lint-check
+  - complexity-analysis
+runtime:
+  max_turns: 20
+  timeout: 120
+tags:
+  - code-review
+  - developer-tools

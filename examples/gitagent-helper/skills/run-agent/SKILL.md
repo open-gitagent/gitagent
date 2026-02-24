@@ -1,0 +1,87 @@
+---
+name: run-agent
+description: Help users run agents with different adapters — Claude, OpenAI, Lyzr, GitHub Models, and more
+license: MIT
+metadata:
+  author: gitagent
+  version: "1.0.0"
+  category: execution
+---
+
+# Run Agents
+
+## When to Use
+When a user wants to run an agent locally, from a git repo, or with a specific adapter/framework.
+
+## Basic Usage
+
+```bash
+# Run local agent with Claude (default)
+gitagent run -d ./my-agent
+
+# Run from git repo
+gitagent run -r https://github.com/user/agent
+
+# Run with a prompt (one-shot mode)
+gitagent run -d ./my-agent -p "Review my code"
+```
+
+## Adapters
+
+| Adapter | Flag | Env Var Required | Interactive |
+|---------|------|-----------------|-------------|
+| Claude | `-a claude` | *(uses Claude Code auth)* | Yes |
+| OpenAI | `-a openai` | `OPENAI_API_KEY` | No |
+| CrewAI | `-a crewai` | — | No |
+| OpenClaw | `-a openclaw` | `ANTHROPIC_API_KEY` | No (`-p` required) |
+| Nanobot | `-a nanobot` | `ANTHROPIC_API_KEY` | Yes |
+| Lyzr | `-a lyzr` | `LYZR_API_KEY` | No (`-p` required) |
+| GitHub | `-a github` | `GITHUB_TOKEN` | No (`-p` required) |
+| Git | `-a git` | *(auto-detects)* | Depends |
+| Prompt | `-a prompt` | — | Print only |
+
+## Examples
+
+```bash
+# Claude (interactive)
+gitagent run -d ./my-agent
+
+# GitHub Models (one-shot, streaming)
+export GITHUB_TOKEN="ghp_..."
+gitagent run -d ./my-agent -a github -p "Explain this codebase"
+
+# Lyzr (creates agent on Lyzr Studio + chats)
+export LYZR_API_KEY="..."
+gitagent run -r https://github.com/user/agent -a lyzr -p "Hello"
+
+# Lyzr one-liner (clone + create + chat)
+gitagent lyzr run -r https://github.com/user/agent -p "Hello"
+
+# Auto-detect adapter from repo
+gitagent run -r https://github.com/user/agent -a git -p "Hello"
+
+# Just print the system prompt
+gitagent run -d ./my-agent -a prompt
+```
+
+## Git Caching
+
+Repos cloned via `-r` are cached at `~/.gitagent/cache/`:
+```bash
+# Use cache (default)
+gitagent run -r https://github.com/user/agent
+
+# Force refresh
+gitagent run -r https://github.com/user/agent --refresh
+
+# No cache (temp dir, deleted after)
+gitagent run -r https://github.com/user/agent --no-cache
+```
+
+## Auto-Detection (`-a git`)
+
+The git adapter detects the best runner from the repo:
+1. `.gitagent_adapter` file (explicit hint)
+2. Model name (claude-* → claude, gpt-* → openai)
+3. Framework files (CLAUDE.md, .cursorrules, crew.yaml, .lyzr_agent_id, .github_models)
+4. Default: claude

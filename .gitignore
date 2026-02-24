@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.gitagent/
+*.tsbuildinfo
+.env
+.DS_Store
+site/
+site-v2/
+.claude/
+gitagent.png

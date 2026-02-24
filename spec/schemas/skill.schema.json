@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitagent.dev/schemas/skill.schema.json",
+  "title": "Agent Skills Frontmatter",
+  "description": "Schema for YAML frontmatter in SKILL.md files — adopts the Agent Skills open standard (agentskills.io)",
+  "type": "object",
+  "required": ["name", "description"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z](?:[a-z0-9]|-(?!-))*[a-z0-9]$|^[a-z]$",
+      "description": "Skill identifier: kebab-case, max 64 chars, no consecutive hyphens, no leading/trailing hyphens"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "description": "What this skill does (max 1024 characters)"
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier or 'proprietary'"
+    },
+    "compatibility": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Free-text compatibility notes (max 500 characters)"
+    },
+    "allowed-tools": {
+      "type": "string",
+      "description": "Space-delimited list of tool names this skill may invoke (experimental)"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Arbitrary key-value metadata (string values per Agent Skills standard)",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": false
+}

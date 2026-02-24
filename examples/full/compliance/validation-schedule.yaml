@@ -1,0 +1,72 @@
+schedule:
+  - type: full_validation
+    description: "SR 11-7 three-pillar validation (conceptual soundness, ongoing monitoring, outcomes analysis)"
+    cadence: quarterly
+    last_completed: null
+    next_due: null
+    owner: model-risk-team
+    sr_11_7_elements:
+      - conceptual_soundness
+      - ongoing_monitoring
+      - outcomes_analysis
+
+  - type: bias_testing
+    description: "Fair lending bias testing per CFPB supervisory expectations"
+    cadence: quarterly
+    last_completed: null
+    next_due: null
+    owner: fair-lending-team
+    cfpb_elements:
+      - disparate_impact_analysis
+      - lda_search
+      - alternative_data_review
+
+  - type: supervisory_review
+    description: "FINRA 3110/3120 supervisory system review"
+    cadence: monthly
+    last_completed: null
+    next_due: null
+    owner: designated-supervisor
+    finra_rules: ["3110", "3120"]
+    checklist:
+      - agent_performance_review
+      - escalation_trigger_effectiveness
+      - human_override_log_review
+      - kill_switch_test
+
+  - type: communications_review
+    description: "FINRA 2210 communications compliance sample review"
+    cadence: weekly
+    last_completed: null
+    next_due: null
+    owner: compliance-team
+    finra_rules: ["2210"]
+    checklist:
+      - fair_balanced_sampling
+      - misleading_statement_check
+      - disclosure_completeness
+
+  - type: recordkeeping_audit
+    description: "FINRA 4511 / SEC 17a-4 recordkeeping compliance"
+    cadence: quarterly
+    last_completed: null
+    next_due: null
+    owner: records-management
+    rules: ["4511", "17a-4"]
+    checklist:
+      - retention_period_compliance
+      - immutability_verification
+      - format_compliance
+      - completeness_check
+
+  - type: vendor_review
+    description: "SR 23-4 third-party risk management review"
+    cadence: annual
+    last_completed: null
+    next_due: null
+    owner: vendor-management
+    sr_23_4_elements:
+      - due_diligence_refresh
+      - soc_report_review
+      - subcontractor_assessment
+      - ai_change_notification_review

@@ -1,0 +1,23 @@
+spec_version: "0.1.0"
+name: lyzr-research-agent
+version: 1.0.0
+description: AI research assistant that summarizes topics, answers questions, and drafts reports — powered by Lyzr
+author: gitagent-examples
+license: MIT
+model:
+  preferred: gpt-4.1
+  fallback:
+    - gpt-4.1-mini
+  constraints:
+    temperature: 0.3
+    max_tokens: 4096
+    top_p: 0.9
+skills:
+  - research
+runtime:
+  max_turns: 10
+  timeout: 180
+tags:
+  - lyzr
+  - research
+  - assistant

@@ -1,0 +1,5 @@
+documents:
+  - path: owasp-top-10.md
+    tags: [security, owasp, reference]
+    priority: high
+    always_load: true

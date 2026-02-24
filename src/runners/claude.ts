@@ -1,0 +1,247 @@
+import { writeFileSync, unlinkSync, existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import yaml from 'js-yaml';
+import { exportToSystemPrompt } from '../adapters/system-prompt.js';
+import { AgentManifest } from '../utils/loader.js';
+import { loadAllSkills, getAllowedTools } from '../utils/skill-loader.js';
+import { error, info, warn } from '../utils/format.js';
+
+export interface ClaudeRunOptions {
+  prompt?: string;
+}
+
+export function runWithClaude(agentDir: string, manifest: AgentManifest, options: ClaudeRunOptions = {}): void {
+  const systemPrompt = exportToSystemPrompt(agentDir);
+  const tmpFiles: string[] = [];
+
+  const promptFile = join(tmpdir(), `gitagent-${randomBytes(4).toString('hex')}.md`);
+  writeFileSync(promptFile, systemPrompt, 'utf-8');
+  tmpFiles.push(promptFile);
+
+  // Use --append-system-prompt to layer agent on top of Claude Code defaults
+  // --append-system-prompt works in both interactive and print modes
+  const args: string[] = ['--append-system-prompt', systemPrompt];
+
+  // Model
+  if (manifest.model?.preferred) {
+    args.push('--model', manifest.model.preferred);
+  }
+
+  // Fallback model
+  if (manifest.model?.fallback?.length) {
+    args.push('--fallback-model', manifest.model.fallback[0]);
+  }
+
+  // Max turns
+  if (manifest.runtime?.max_turns) {
+    args.push('--max-turns', String(manifest.runtime.max_turns));
+  }
+
+  // Permission mode from compliance supervision
+  if (manifest.compliance?.supervision?.human_in_the_loop === 'always') {
+    args.push('--permission-mode', 'plan');
+    info('Compliance: human_in_the_loop=always → using plan permission mode');
+  }
+
+  // Collect allowed tools from skills and tool definitions
+  const allowedTools = collectAllowedTools(agentDir);
+  if (allowedTools.length > 0) {
+    for (const tool of allowedTools) {
+      args.push('--allowedTools', tool);
+    }
+  }
+
+  // Map sub-agents from agents/ directory
+  const subagents = buildSubagentConfig(agentDir, manifest);
+  if (subagents) {
+    args.push('--agents', JSON.stringify(subagents));
+  }
+
+  // Add knowledge and skill directories as extra working dirs
+  const extraDirs = collectExtraDirs(agentDir);
+  for (const dir of extraDirs) {
+    args.push('--add-dir', dir);
+  }
+
+  // Map hooks to Claude Code settings
+  const settingsFile = buildHooksSettings(agentDir);
+  if (settingsFile) {
+    args.push('--settings', settingsFile);
+    tmpFiles.push(settingsFile);
+  }
+
+  // Initial prompt (print mode)
+  if (options.prompt) {
+    args.push('-p', options.prompt);
+  }
+
+  info(`Launching Claude Code with agent "${manifest.name}"...`);
+
+  try {
+    const result = spawnSync('claude', args, {
+      stdio: 'inherit',
+      cwd: agentDir,
+    });
+
+    if (result.error) {
+      error(`Failed to launch Claude Code: ${result.error.message}`);
+      info('Make sure Claude Code CLI is installed: npm install -g @anthropic-ai/claude-code');
+      process.exit(1);
+    }
+
+    process.exit(result.status ?? 0);
+  } finally {
+    for (const f of tmpFiles) {
+      try { unlinkSync(f); } catch { /* ignore */ }
+    }
+  }
+}
+
+/**
+ * Collect allowed tools from skills (allowed-tools frontmatter)
+ * and tool definitions (tools/*.yaml names).
+ */
+function collectAllowedTools(agentDir: string): string[] {
+  const tools: Set<string> = new Set();
+
+  // From skills' allowed-tools
+  const skillsDir = join(agentDir, 'skills');
+  const skills = loadAllSkills(skillsDir);
+  for (const skill of skills) {
+    for (const tool of getAllowedTools(skill.frontmatter)) {
+      tools.add(tool);
+    }
+  }
+
+  // From tools/*.yaml definitions
+  const toolsDir = join(agentDir, 'tools');
+  if (existsSync(toolsDir)) {
+    const files = readdirSync(toolsDir).filter(f => f.endsWith('.yaml'));
+    for (const file of files) {
+      try {
+        const content = readFileSync(join(toolsDir, file), 'utf-8');
+        const toolConfig = yaml.load(content) as { name?: string };
+        if (toolConfig?.name) {
+          tools.add(toolConfig.name);
+        }
+      } catch { /* skip malformed tools */ }
+    }
+  }
+
+  return Array.from(tools);
+}
+
+/**
+ * Build --agents JSON config from agents/ directory sub-agents.
+ */
+function buildSubagentConfig(agentDir: string, manifest: AgentManifest): object[] | null {
+  if (!manifest.agents) return null;
+
+  const agents: object[] = [];
+  for (const [name, config] of Object.entries(manifest.agents)) {
+    const subDir = join(agentDir, 'agents', name);
+    let instructions = config.description ?? '';
+
+    // Load sub-agent's SOUL.md if it exists
+    const soulPath = join(subDir, 'SOUL.md');
+    if (existsSync(soulPath)) {
+      instructions += '\n\n' + readFileSync(soulPath, 'utf-8');
+    }
+
+    agents.push({
+      name,
+      description: config.description ?? name,
+      instructions,
+      ...(config.delegation?.triggers ? { triggers: config.delegation.triggers } : {}),
+    });
+  }
+
+  return agents.length > 0 ? agents : null;
+}
+
+/**
+ * Collect extra directories (knowledge, skills) to add via --add-dir.
+ */
+function collectExtraDirs(agentDir: string): string[] {
+  const dirs: string[] = [];
+
+  const knowledgeDir = join(agentDir, 'knowledge');
+  if (existsSync(knowledgeDir)) {
+    dirs.push(knowledgeDir);
+  }
+
+  const skillsDir = join(agentDir, 'skills');
+  if (existsSync(skillsDir)) {
+    dirs.push(skillsDir);
+  }
+
+  return dirs;
+}
+
+/**
+ * Map hooks/hooks.yaml to Claude Code settings format.
+ * Claude Code hooks: { hooks: { "<event>": [{ command, ...}] } }
+ */
+function buildHooksSettings(agentDir: string): string | null {
+  const hooksPath = join(agentDir, 'hooks', 'hooks.yaml');
+  if (!existsSync(hooksPath)) return null;
+
+  try {
+    const content = readFileSync(hooksPath, 'utf-8');
+    const hooksConfig = yaml.load(content) as {
+      hooks?: Record<string, Array<{
+        script: string;
+        description?: string;
+        timeout?: number;
+      }>>;
+    };
+
+    if (!hooksConfig?.hooks) return null;
+
+    // Map gitagent hook events to Claude Code hook events
+    const eventMap: Record<string, string> = {
+      'on_session_start': 'PreToolUse',
+      'pre_tool_use': 'PreToolUse',
+      'post_tool_use': 'PostToolUse',
+      'pre_response': 'PostToolUse',
+      'post_response': 'PostToolUse',
+      'on_error': 'PostToolUse',
+      'on_session_end': 'PostToolUse',
+    };
+
+    const ccHooks: Record<string, Array<{ type: string; command: string }>> = {};
+
+    for (const [event, hooks] of Object.entries(hooksConfig.hooks)) {
+      const ccEvent = eventMap[event];
+      if (!ccEvent) continue;
+
+      if (!ccHooks[ccEvent]) {
+        ccHooks[ccEvent] = [];
+      }
+
+      for (const hook of hooks) {
+        const scriptPath = join(agentDir, 'hooks', hook.script);
+        if (existsSync(scriptPath)) {
+          ccHooks[ccEvent].push({
+            type: 'command',
+            command: `bash ${scriptPath}`,
+          });
+        }
+      }
+    }
+
+    if (Object.keys(ccHooks).length === 0) return null;
+
+    const settings = { hooks: ccHooks };
+    const tmpFile = join(tmpdir(), `gitagent-hooks-${randomBytes(4).toString('hex')}.json`);
+    writeFileSync(tmpFile, JSON.stringify(settings), 'utf-8');
+
+    warn(`Mapped ${Object.values(ccHooks).flat().length} hooks to Claude Code settings`);
+    return tmpFile;
+  } catch {
+    return null;
+  }
+}

@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitagent.dev/schemas/workflow.schema.json",
+  "title": "gitagent Workflow",
+  "description": "Schema for workflow YAML files in workflows/",
+  "type": "object",
+  "required": ["name", "steps"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Workflow identifier"
+    },
+    "description": {
+      "type": "string",
+      "description": "What this workflow does"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$"
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["string", "number", "boolean", "file", "object", "array"]
+          },
+          "description": { "type": "string" },
+          "required": { "type": "boolean", "default": true },
+          "default": {
+            "description": "Default value for this input (type varies)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "action"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique step identifier"
+          },
+          "action": {
+            "type": "string",
+            "description": "What this step does (natural language or tool reference)"
+          },
+          "skill": {
+            "type": "string",
+            "description": "Skill to use for this step"
+          },
+          "tool": {
+            "type": "string",
+            "description": "Tool to invoke for this step"
+          },
+          "agent": {
+            "type": "string",
+            "description": "Sub-agent to delegate to"
+          },
+          "inputs": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Input parameters (supports ${{ }} expressions)"
+          },
+          "outputs": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Named outputs from this step"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Step IDs that must complete first"
+          },
+          "conditions": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Conditions that must be true to execute (supports ${{ }} expressions)"
+          },
+          "retry": {
+            "type": "object",
+            "properties": {
+              "max_attempts": { "type": "integer", "minimum": 1 },
+              "backoff": { "type": "string", "enum": ["linear", "exponential"] }
+            },
+            "additionalProperties": false
+          },
+          "compliance": {
+            "type": "object",
+            "properties": {
+              "requires_approval": {
+                "type": "boolean",
+                "description": "Step requires human approval before execution"
+              },
+              "audit_level": {
+                "type": "string",
+                "enum": ["none", "basic", "detailed", "full"],
+                "description": "Level of audit logging for this step"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "error_handling": {
+      "type": "object",
+      "properties": {
+        "on_step_failure": {
+          "type": "string",
+          "enum": ["abort", "skip", "retry", "escalate"],
+          "default": "abort"
+        },
+        "escalation_target": {
+          "type": "string",
+          "description": "Who to escalate to on failure"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

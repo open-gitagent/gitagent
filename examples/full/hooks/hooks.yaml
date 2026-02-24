@@ -1,0 +1,49 @@
+hooks:
+  on_session_start:
+    - script: scripts/load-compliance-context.sh
+      description: Load regulatory context and verify compliance configuration
+      timeout: 10
+      compliance: true
+      fail_open: false
+
+  pre_tool_use:
+    - script: scripts/audit-tool-call.sh
+      description: Log tool invocation to immutable audit trail
+      timeout: 5
+      compliance: true
+      fail_open: false
+
+  post_tool_use:
+    - script: scripts/validate-tool-output.sh
+      description: Check tool output for PII and compliance violations
+      timeout: 10
+      compliance: true
+      fail_open: false
+
+  pre_response:
+    - script: scripts/check-communications-compliance.sh
+      description: Verify response meets FINRA 2210 fair/balanced standards
+      timeout: 15
+      compliance: true
+      fail_open: false
+
+  post_response:
+    - script: scripts/audit-response.sh
+      description: Log response to audit trail with model version and timestamp
+      timeout: 5
+      compliance: true
+      fail_open: false
+
+  on_error:
+    - script: scripts/escalate-error.sh
+      description: Escalate errors to designated supervisor per FINRA 3110
+      timeout: 10
+      compliance: true
+      fail_open: true
+
+  on_session_end:
+    - script: scripts/finalize-audit-log.sh
+      description: Seal audit log and verify retention compliance
+      timeout: 15
+      compliance: true
+      fail_open: false

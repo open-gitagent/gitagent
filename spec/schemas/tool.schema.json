@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitagent.dev/schemas/tool.schema.json",
+  "title": "gitagent Tool Definition",
+  "description": "Schema for tool YAML files in tools/. Compatible with MCP tool definitions.",
+  "type": "object",
+  "required": ["name", "description", "input_schema"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Tool identifier (lowercase, hyphens allowed)"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable description of what the tool does"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$"
+    },
+    "input_schema": {
+      "type": "object",
+      "description": "JSON Schema describing tool input parameters",
+      "required": ["type", "properties"],
+      "properties": {
+        "type": { "type": "string", "const": "object" },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string" },
+              "description": { "type": "string" },
+              "enum": { "type": "array" },
+              "default": {},
+              "format": { "type": "string" },
+              "items": { "type": "object" },
+              "properties": { "type": "object" },
+              "required": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["type"]
+          }
+        },
+        "required": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "output_schema": {
+      "type": "object",
+      "description": "JSON Schema describing tool output format. Recommended for MCP compliance."
+    },
+    "implementation": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["script", "mcp_server", "http"],
+          "description": "'script': local executable. 'mcp_server': MCP server tool. 'http': REST API endpoint."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to implementation script (relative to tools/)"
+        },
+        "runtime": {
+          "type": "string",
+          "enum": ["node", "python3", "bash", "deno", "ruby", "go"],
+          "description": "Script runtime environment"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "HTTP endpoint or MCP server URL"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "description": "HTTP method (for type: http)"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "HTTP headers (for type: http)"
+        },
+        "timeout": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timeout in seconds"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "script" } } },
+          "then": { "required": ["path", "runtime"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "http" } } },
+          "then": { "required": ["url", "method"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "mcp_server" } } },
+          "then": { "required": ["url"] }
+        }
+      ]
+    },
+    "annotations": {
+      "type": "object",
+      "description": "Tool metadata annotations",
+      "properties": {
+        "requires_confirmation": {
+          "type": "boolean",
+          "default": false,
+          "description": "Requires user confirmation before execution"
+        },
+        "read_only": {
+          "type": "boolean",
+          "default": false,
+          "description": "Tool only reads data, no side effects"
+        },
+        "cost": {
+          "type": "string",
+          "enum": ["none", "low", "medium", "high"],
+          "description": "Estimated cost per invocation"
+        },
+        "compliance_sensitive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Tool interacts with regulated data or systems"
+        },
+        "idempotent": {
+          "type": "boolean",
+          "default": false,
+          "description": "Tool can be safely retried without side effects"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

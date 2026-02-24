@@ -1,0 +1,3 @@
+documents:
+  - path: command-reference.md
+    always_load: true

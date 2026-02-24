@@ -1,0 +1,47 @@
+name: generate-report
+description: Generate formatted compliance analysis reports
+version: 1.0.0
+input_schema:
+  type: object
+  properties:
+    title:
+      type: string
+      description: Report title
+    findings:
+      type: array
+      items:
+        type: object
+        properties:
+          severity:
+            type: string
+            enum: [critical, high, medium, low, informational]
+          rule:
+            type: string
+          description:
+            type: string
+          remediation:
+            type: string
+    format:
+      type: string
+      enum: [markdown, pdf, html]
+      default: markdown
+  required: [title, findings]
+output_schema:
+  type: object
+  properties:
+    report:
+      type: string
+      description: Generated report content
+    path:
+      type: string
+      description: Path to saved report file
+implementation:
+  type: script
+  path: generate-report.sh
+  runtime: bash
+  timeout: 60
+annotations:
+  requires_confirmation: true
+  read_only: false
+  cost: low
+  compliance_sensitive: true

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitagent.dev/schemas/memory.schema.json",
+  "title": "gitagent Memory Configuration",
+  "description": "Schema for memory/memory.yaml",
+  "type": "object",
+  "properties": {
+    "layers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "path"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Layer identifier"
+          },
+          "path": {
+            "type": "string",
+            "description": "File or directory path relative to memory/"
+          },
+          "max_lines": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum lines (for file layers)"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["markdown", "yaml", "json"],
+            "default": "markdown"
+          },
+          "rotation": {
+            "type": "string",
+            "enum": ["daily", "weekly", "monthly", "quarterly", "yearly"],
+            "description": "Rotation schedule for directory-based layers"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "update_triggers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["on_session_end", "on_explicit_save", "on_milestone", "periodic"]
+      }
+    },
+    "archive_policy": {
+      "type": "object",
+      "properties": {
+        "max_entries": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum archive entries before rotation"
+        },
+        "compress_after": {
+          "type": "string",
+          "pattern": "^\\d+[dmy]$",
+          "description": "Compress entries older than this (e.g., 90d)"
+        },
+        "retention_period": {
+          "type": "string",
+          "pattern": "^\\d+[dmy]$",
+          "description": "Delete entries older than this"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

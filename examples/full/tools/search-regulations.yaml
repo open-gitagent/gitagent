@@ -1,0 +1,60 @@
+name: search-regulations
+description: Search FINRA, SEC, and Federal Reserve regulatory databases
+version: 1.0.0
+input_schema:
+  type: object
+  properties:
+    query:
+      type: string
+      description: Search query for regulations
+    framework:
+      type: string
+      enum: [finra, sec, federal_reserve, cfpb, all]
+      description: Regulatory framework to search
+      default: all
+    date_range:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+    document_type:
+      type: string
+      enum: [rule, notice, guidance, circular, sr_letter, all]
+      default: all
+  required: [query]
+output_schema:
+  type: object
+  properties:
+    results:
+      type: array
+      items:
+        type: object
+        properties:
+          title:
+            type: string
+          citation:
+            type: string
+          framework:
+            type: string
+          effective_date:
+            type: string
+          excerpt:
+            type: string
+          url:
+            type: string
+    total_count:
+      type: integer
+implementation:
+  type: script
+  path: search-regulations.py
+  runtime: python3
+  timeout: 30
+annotations:
+  requires_confirmation: false
+  read_only: true
+  cost: low
+  compliance_sensitive: true
