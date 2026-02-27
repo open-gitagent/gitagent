@@ -6,7 +6,7 @@ By participating in this project, you agree to abide by its terms.
 
 ## Reporting
 
-If you experience or witness unacceptable behavior, please report it by contacting the project maintainers at **shreyas@gitagent.sh**.
+If you experience or witness unacceptable behavior, please report it by contacting the project maintainers at **shreyas@lyzr.ai**.
 
 Reports will be reviewed and investigated promptly and fairly. All reporters will be treated with respect and confidentiality.
 
