@@ -77,3 +77,26 @@ mappings:
         controls:
           - vendor_supervisory_procedures
           - vendor_ai_change_notification
+
+  - capability: duty_segregation
+    rules:
+      - id: finos-ai-governance
+        name: "FINOS AI Governance — Multi-Agent Isolation"
+        controls:
+          - role_definition
+          - conflict_matrix_enforcement
+          - assignment_validation
+          - state_isolation
+          - credential_segregation
+      - id: finra-3110-sod
+        name: "FINRA Rule 3110 — Supervisory Separation"
+        controls:
+          - maker_checker_separation
+          - approval_workflow_enforcement
+          - independent_review_requirement
+      - id: soc2-logical-access
+        name: "SOC 2 — Logical Access Controls"
+        controls:
+          - role_based_access_control
+          - credential_isolation
+          - cross_boundary_approval

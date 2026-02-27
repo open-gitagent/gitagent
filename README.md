@@ -18,7 +18,7 @@ Every AI framework has its own structure. There's no universal, portable way to 
 
 - **Git-native** — Version control, branching, diffing, and collaboration built in
 - **Framework-agnostic** — Export to any framework with adapters
-- **Compliance-ready** — First-class support for FINRA, Federal Reserve, and SEC regulatory requirements
+- **Compliance-ready** — First-class support for FINRA, Federal Reserve, SEC, and segregation of duties
 - **Composable** — Agents can extend, depend on, and delegate to other agents
 
 ## The Standard
@@ -34,6 +34,7 @@ my-agent/
 │
 │   # ── Behavior & Rules ──────────────────────────────────
 ├── RULES.md                # Hard constraints, must-always/must-never, safety boundaries
+├── DUTIES.md               # Segregation of duties policy and role boundaries
 ├── AGENTS.md               # Framework-agnostic fallback instructions
 │
 │   # ── Capabilities ──────────────────────────────────────
@@ -58,7 +59,8 @@ my-agent/
 ├── agents/                 # Sub-agent definitions (recursive structure)
 │   └── fact-checker/
 │       ├── agent.yaml
-│       └── SOUL.md
+│       ├── SOUL.md
+│       └── DUTIES.md       # This agent's role, permissions, boundaries
 ├── examples/               # Calibration interactions (few-shot)
 │
 │   # ── Runtime ───────────────────────────────────────────
@@ -75,6 +77,31 @@ These are the architectural patterns that emerge when you define agents as git-n
 When an agent learns a new skill or writes to memory, it opens a branch + PR for human review before merging.
 
 <img src="patterns/human-in-the-loop.png" alt="Human-in-the-Loop" width="600" />
+
+### Segregation of Duties (SOD)
+No single agent should control a critical process end-to-end. Define roles (`maker`, `checker`, `executor`, `auditor`), a conflict matrix (which roles can't be the same agent), and handoff workflows — all in `agent.yaml` + `DUTIES.md`. The validator catches violations before deployment.
+
+```yaml
+compliance:
+  segregation_of_duties:
+    roles:
+      - id: maker
+        description: Creates proposals
+        permissions: [create, submit]
+      - id: checker
+        description: Reviews and approves
+        permissions: [review, approve, reject]
+    conflicts:
+      - [maker, checker]         # maker cannot approve own work
+    assignments:
+      loan-originator: [maker]
+      credit-reviewer: [checker]
+    handoffs:
+      - action: credit_decision
+        required_roles: [maker, checker]
+        approval_required: true
+    enforcement: strict
+```
 
 ### Live Agent Memory
 The `memory/` folder holds a `runtime/` subfolder where agents write live knowledge — `dailylog.md`, `key-decisions.md`, and `context.md` — persisting state across sessions.
@@ -183,6 +210,18 @@ compliance:
   model_risk:
     validation_cadence: quarterly
     ongoing_monitoring: true
+  segregation_of_duties:
+    roles:
+      - id: analyst
+        permissions: [create, submit]
+      - id: reviewer
+        permissions: [review, approve, reject]
+    conflicts:
+      - [analyst, reviewer]
+    assignments:
+      compliance-analyst: [analyst]
+      fact-checker: [reviewer]
+    enforcement: strict
 ```
 
 ## CLI Commands
@@ -217,6 +256,16 @@ gitagent has first-class support for financial regulatory compliance:
 ### SEC / CFPB
 - **Reg S-P** — Customer privacy, PII handling
 - **CFPB Circular 2022-03** — Explainable adverse action, Less Discriminatory Alternative search
+
+### Segregation of Duties
+- **Roles & Permissions** — Define maker, checker, executor, auditor roles with controlled permissions
+- **Conflict Matrix** — Declare which role pairs cannot be held by the same agent
+- **Handoff Workflows** — Require multi-agent participation for critical actions (credit decisions, regulatory filings)
+- **Isolation** — Full state and credential segregation between roles
+- **DUTIES.md** — Root-level policy + per-agent role declarations
+- **Enforcement** — Strict (blocks deployment) or advisory (warnings only)
+
+Inspired by [Salient AI](https://www.trysalient.com/)'s purpose-built agent architecture and the [FINOS AI Governance Framework](https://air-governance-framework.finos.org/mitigations/mi-22_multi-agent-isolation-and-segmentation.html).
 
 Run `gitagent audit` for a full compliance checklist against your agent configuration.
 
@@ -264,7 +313,7 @@ See the `examples/` directory:
 
 - **`examples/minimal/`** — 2-file hello world (agent.yaml + SOUL.md)
 - **`examples/standard/`** — Code review agent with skills, tools, and rules
-- **`examples/full/`** — Production compliance agent with all directories, hooks, workflows, sub-agents, and regulatory artifacts
+- **`examples/full/`** — Production compliance agent with all directories, hooks, workflows, sub-agents, SOD with DUTIES.md, and regulatory artifacts
 - **`examples/gitagent-helper/`** — Helper agent that assists with creating gitagent definitions
 - **`examples/lyzr-agent/`** — Example Lyzr Studio integration
 
