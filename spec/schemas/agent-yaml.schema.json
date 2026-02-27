@@ -429,6 +429,9 @@
         },
         "vendor_management": {
           "$ref": "#/$defs/vendor_management_config"
+        },
+        "segregation_of_duties": {
+          "$ref": "#/$defs/segregation_of_duties_config"
         }
       },
       "additionalProperties": false,
@@ -659,6 +662,116 @@
         "subcontractor_assessment": {
           "type": "boolean",
           "description": "Whether fourth-party (subcontractor) risk has been assessed"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "segregation_of_duties_config": {
+      "type": "object",
+      "description": "Segregation of duties configuration for multi-agent systems. Ensures no single agent has complete control over critical processes.",
+      "properties": {
+        "roles": {
+          "type": "array",
+          "description": "Roles that agents can hold in this system",
+          "items": {
+            "type": "object",
+            "required": ["id", "description"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]*$",
+                "description": "Role identifier (snake_case)"
+              },
+              "description": {
+                "type": "string",
+                "description": "Human-readable role description"
+              },
+              "permissions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["create", "submit", "review", "approve", "reject", "execute", "audit", "report"]
+                },
+                "uniqueItems": true,
+                "description": "Permissions granted to this role"
+              }
+            },
+            "additionalProperties": false
+          },
+          "minItems": 2
+        },
+        "conflicts": {
+          "type": "array",
+          "description": "Pairs of role IDs that cannot be held by the same agent (SOD matrix)",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "assignments": {
+          "type": "object",
+          "description": "Maps agent names to their assigned roles",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          }
+        },
+        "isolation": {
+          "type": "object",
+          "description": "Isolation level between agents with different roles",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": ["full", "shared", "none"],
+              "description": "'full': agents cannot access each other's state. 'shared': read-only cross-access. 'none': no isolation."
+            },
+            "credentials": {
+              "type": "string",
+              "enum": ["separate", "shared"],
+              "description": "'separate': each role has its own credential scope. 'shared': agents share credentials."
+            }
+          },
+          "additionalProperties": false
+        },
+        "handoffs": {
+          "type": "array",
+          "description": "Critical actions requiring multi-role participation",
+          "items": {
+            "type": "object",
+            "required": ["action", "required_roles"],
+            "properties": {
+              "action": {
+                "type": "string",
+                "description": "Action type requiring handoff (e.g., credit_decision, loan_disbursement)"
+              },
+              "required_roles": {
+                "type": "array",
+                "items": { "type": "string" },
+                "minItems": 2,
+                "description": "Roles that must participate sequentially"
+              },
+              "approval_required": {
+                "type": "boolean",
+                "description": "Whether explicit approval is needed at each handoff",
+                "default": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "enforcement": {
+          "type": "string",
+          "enum": ["strict", "advisory"],
+          "description": "'strict': SOD violations are errors. 'advisory': SOD violations are warnings.",
+          "default": "strict"
         }
       },
       "additionalProperties": false
