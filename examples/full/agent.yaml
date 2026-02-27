@@ -96,6 +96,42 @@ compliance:
     soc_report_required: true
     vendor_ai_notification: true
     subcontractor_assessment: true
+  segregation_of_duties:
+    roles:
+      - id: analyst
+        description: Performs regulatory analysis and generates findings
+        permissions:
+          - create
+          - submit
+      - id: reviewer
+        description: Reviews analysis for accuracy and completeness
+        permissions:
+          - review
+          - approve
+          - reject
+      - id: auditor
+        description: Audits completed reviews and maintains compliance trail
+        permissions:
+          - audit
+          - report
+    conflicts:
+      - [analyst, reviewer]
+      - [analyst, auditor]
+      - [reviewer, auditor]
+    assignments:
+      compliance-analyst: [analyst]
+      fact-checker: [reviewer]
+    isolation:
+      state: full
+      credentials: separate
+    handoffs:
+      - action: regulatory_filing
+        required_roles: [analyst, reviewer]
+        approval_required: true
+      - action: customer_communication
+        required_roles: [analyst, reviewer]
+        approval_required: true
+    enforcement: strict
 tags:
   - compliance
   - financial-services
