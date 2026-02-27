@@ -9,7 +9,7 @@
 The standard is designed to be:
 - **Framework-agnostic** — works with Claude Code, OpenAI, LangChain, CrewAI, AutoGen, and others
 - **Git-native** — version control, branching, diffing, and collaboration built in
-- **Compliance-ready** — first-class support for FINRA, Federal Reserve, and interagency regulatory requirements
+- **Compliance-ready** — first-class support for FINRA, Federal Reserve, interagency regulatory requirements, and segregation of duties
 - **Composable** — agents can extend, depend on, and delegate to other agents
 
 ## 2. Directory Structure
@@ -19,6 +19,7 @@ my-agent/
 ├── agent.yaml              # [REQUIRED] Agent manifest
 ├── SOUL.md                 # [REQUIRED] Identity and personality
 ├── RULES.md                # Hard constraints and boundaries
+├── DUTIES.md                 # Segregation of duties policy and role declaration
 ├── AGENTS.md               # Framework-agnostic fallback instructions
 ├── README.md               # Human documentation
 ├── skills/                 # Reusable capability modules
@@ -194,6 +195,48 @@ compliance:
     soc_report_required: false        # SOC 2 report required
     vendor_ai_notification: true      # Vendor must notify of AI changes
     subcontractor_assessment: false   # Fourth-party risk assessed
+
+  # Segregation of duties (multi-agent duty separation)
+  segregation_of_duties:
+    roles:                                   # Define roles for agents (min 2)
+      - id: maker                            # Initiates/creates
+        description: Creates proposals and initiates actions
+        permissions: [create, submit]
+      - id: checker                          # Reviews/approves
+        description: Reviews and approves maker outputs
+        permissions: [review, approve, reject]
+      - id: executor                         # Executes approved work
+        description: Executes approved actions
+        permissions: [execute]
+      - id: auditor                          # Audits completed work
+        description: Reviews completed actions for compliance
+        permissions: [audit, report]
+
+    conflicts:                               # SOD conflict matrix
+      - [maker, checker]                     # Maker cannot approve own work
+      - [maker, auditor]                     # Maker cannot audit own work
+      - [executor, checker]                  # Executor cannot approve what they execute
+      - [executor, auditor]                  # Executor cannot audit own execution
+
+    assignments:                             # Bind roles to agents
+      loan-originator: [maker]
+      credit-reviewer: [checker]
+      loan-processor: [executor]
+      compliance-auditor: [auditor]
+
+    isolation:
+      state: full                            # full | shared | none
+      credentials: separate                  # separate | shared
+
+    handoffs:                                # Critical actions requiring multi-role handoff
+      - action: credit_decision
+        required_roles: [maker, checker]
+        approval_required: true
+      - action: loan_disbursement
+        required_roles: [maker, checker, executor]
+        approval_required: true
+
+    enforcement: strict                      # strict | advisory
 ```
 
 ### Example Minimal agent.yaml
@@ -364,6 +407,30 @@ For regulated agents, RULES.md should include explicit regulatory constraints:
 - Redact customer identifiers in all intermediate reasoning
 - Never transmit restricted data across jurisdictional boundaries
 ```
+
+## 5a. DUTIES.md — Segregation of Duties
+
+Declares the agent's duties, role boundaries, and the system-wide SOD policy. DUTIES.md exists at two levels:
+
+**Root level** (`DUTIES.md`) — Documents the system-wide segregation of duties policy: all roles, the conflict matrix, handoff workflows, isolation policy, and enforcement mode. This is the SOD equivalent of `RULES.md` — it defines the policy that all agents in the system must follow.
+
+**Per-agent level** (`agents/<name>/DUTIES.md`) — Declares this specific agent's role, permissions, boundaries, and handoff participation. Each sub-agent's DUTIES.md answers: what is my role, what can I do, what must I not do, and who do I hand off to.
+
+### Root DUTIES.md Recommended Sections
+
+- **Roles** — Table of all roles, assigned agents, and permissions
+- **Conflict Matrix** — Which role pairs cannot be held by the same agent
+- **Handoff Workflows** — Step-by-step handoff chains for critical actions
+- **Isolation Policy** — State and credential isolation levels
+- **Enforcement** — Strict vs advisory mode
+
+### Per-Agent DUTIES.md Recommended Sections
+
+- **Role** — This agent's assigned role
+- **Permissions** — What actions this agent can take
+- **Boundaries** — Must/must-not rules specific to this role
+- **Handoff Participation** — Where this agent sits in handoff chains
+- **Isolation** — This agent's isolation constraints
 
 ## 6. AGENTS.md — Framework-Agnostic Instructions
 
@@ -864,6 +931,13 @@ A valid gitagent repository must:
 5. All referenced tools must exist in `tools/`
 6. All referenced sub-agents must exist in `agents/`
 7. `hooks.yaml` scripts must exist at specified paths
+8. If `compliance.segregation_of_duties` is present:
+   - `roles` must define at least 2 roles with unique IDs
+   - `conflicts` pairs must reference defined role IDs
+   - `assignments` must reference defined role IDs
+   - No agent in `assignments` may hold roles that appear together in `conflicts`
+   - `handoffs.required_roles` must reference defined role IDs and include at least 2
+   - Assigned agents should exist in the `agents` section
 
 ## 19. CLI Commands
 
@@ -941,6 +1015,15 @@ All schemas are in `spec/schemas/`:
 | SR 23-4 | Third-Party Risk Management | `dependencies.vendor_management` |
 | SR 21-8 | BSA/AML Model Risk | `compliance.model_risk` for AML agents |
 | CFPB Circular 2022-03 | Adverse Action + AI | `compliance.data_governance.lda_search` |
+
+### Segregation of Duties References
+
+| Document | Subject | gitagent Impact |
+|----------|---------|-----------------|
+| FINOS AI Governance Framework | Multi-Agent Isolation & Segmentation | `compliance.segregation_of_duties` |
+| SOC 2 Type II | Logical Access Controls | `segregation_of_duties.isolation` |
+| SR 11-7 Section IV | Independent Review | `segregation_of_duties.conflicts` (maker/checker separation) |
+| FINRA 3110 | Supervisory Systems (duty separation) | `segregation_of_duties.handoffs` |
 
 ---
 

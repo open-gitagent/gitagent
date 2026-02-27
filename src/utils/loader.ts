@@ -115,6 +115,25 @@ export interface ComplianceConfig {
     vendor_ai_notification?: boolean;
     subcontractor_assessment?: boolean;
   };
+  segregation_of_duties?: {
+    roles?: Array<{
+      id: string;
+      description: string;
+      permissions?: string[];
+    }>;
+    conflicts?: Array<[string, string]>;
+    assignments?: Record<string, string[]>;
+    isolation?: {
+      state?: string;
+      credentials?: string;
+    };
+    handoffs?: Array<{
+      action: string;
+      required_roles: string[];
+      approval_required?: boolean;
+    }>;
+    enforcement?: string;
+  };
 }
 
 export function loadAgentManifest(dir: string): AgentManifest {
