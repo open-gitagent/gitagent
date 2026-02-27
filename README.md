@@ -23,19 +23,67 @@ Every AI framework has its own structure. There's no universal, portable way to 
 
 ## Patterns
 
-Four architectural patterns emerge when you treat agents as git repos:
+These are the architectural patterns that emerge when you define agents as git-native file systems.
 
 ### Human-in-the-Loop for RL Agents
-When an agent updates memory or learns a new skill, it creates a branch + PR for human review before merging to main. Git's review workflow becomes your supervision layer.
+When an agent learns a new skill or writes to memory, it opens a branch + PR for human review before merging.
 
-### Shared Context
-Root-level `context.md`, `skills/`, `tools/`, and `knowledge/` are automatically inherited by all sub-agents. One source of truth, no duplication.
+<img src="patterns/human-in-the-loop.png" alt="Human-in-the-Loop" width="600" />
+
+### Live Agent Memory
+The `memory/` folder holds a `runtime/` subfolder where agents write live knowledge — `dailylog.md`, `key-decisions.md`, and `context.md` — persisting state across sessions.
+
+<img src="patterns/live-agent-memory.png" alt="Live Agent Memory" width="600" />
+
+### Agent Versioning
+Every change to your agent is a git commit. Roll back broken prompts, revert bad skills, and explore past versions — full undo history for your agent.
+
+<img src="patterns/agent-versioning.png" alt="Agent Versioning" width="600" />
+
+### Shared Context & Skills via Monorepo
+Root-level `context.md`, `skills/`, `tools/` are automatically shared across every agent in the monorepo. No duplication, one source of truth.
+
+<img src="patterns/shared-context.png" alt="Shared Context" width="600" />
 
 ### Branch-based Deployment
 Use git branches (`dev` → `staging` → `main`) to promote agent changes through environments, just like shipping software.
 
+<img src="patterns/branch-deployment.png" alt="Branch-based Deployment" width="600" />
+
 ### Knowledge Tree
 The `knowledge/` folder stores entity relationships as a hierarchical tree with embeddings, letting agents reason over structured data at runtime.
+
+<img src="patterns/knowledge-tree.png" alt="Knowledge Tree" width="600" />
+
+### Agent Forking & Remixing
+Fork any public agent repo, customize its `SOUL.md`, add your own skills, and PR improvements back upstream — open-source collaboration for AI agents.
+
+<img src="patterns/agent-forking.png" alt="Agent Forking & Remixing" width="600" />
+
+### CI/CD for Agents
+Run `gitagent validate` on every push via GitHub Actions. Test agent behavior in CI, block bad merges, and auto-deploy — treat agent quality like code quality.
+
+<img src="patterns/ci-cd-agents.png" alt="CI/CD for Agents" width="600" />
+
+### Agent Diff & Audit Trail
+`git diff` shows exactly what changed between agent versions. `git blame` traces every line to who wrote it and when — full traceability out of the box.
+
+<img src="patterns/agent-diff-audit.png" alt="Agent Diff & Audit Trail" width="600" />
+
+### Tagged Releases
+Tag stable agent versions like `v1.1.0`. Pin production to a tag, canary new versions on staging, and roll back instantly if something breaks.
+
+<img src="patterns/tagged-releases.png" alt="Tagged Releases" width="600" />
+
+### Secret Management via .gitignore
+Agent tools that need API keys read from a local `.env` file — kept out of version control via `.gitignore`. Agent config is shareable, secrets stay local.
+
+<img src="patterns/secret-management.png" alt="Secret Management" width="600" />
+
+### Agent Lifecycle with Hooks
+Define `bootstrap.md` and `teardown.md` in the `hooks/` folder to control what an agent does on startup and before it stops.
+
+<img src="patterns/agent-automation-hooks.png" alt="Agent Lifecycle Hooks" width="600" />
 
 ## Quick Start
 
