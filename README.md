@@ -27,24 +27,45 @@ Your repository becomes your agent. Drop these files into any git repo and it be
 
 ```
 my-agent/
-├── agent.yaml          # [REQUIRED] Manifest — name, version, model, skills, tools, compliance
-├── SOUL.md             # [REQUIRED] Identity, personality, communication style, values
-├── RULES.md            # Hard constraints, must-always/must-never, safety boundaries
-├── AGENTS.md           # Framework-agnostic fallback instructions
-├── skills/             # Reusable capability modules (SKILL.md + scripts)
-├── tools/              # MCP-compatible tool definitions (YAML schemas)
-├── knowledge/          # Reference documents the agent can consult
-├── memory/             # Persistent cross-session memory
-├── workflows/          # Multi-step procedures/playbooks
-├── hooks/              # Lifecycle event handlers (audit logging, compliance checks)
-├── examples/           # Calibration interactions (few-shot)
-├── agents/             # Sub-agent definitions (recursive structure)
-├── compliance/         # Regulatory compliance artifacts
-├── config/             # Environment-specific overrides
-└── .gitagent/          # Runtime state (gitignored)
+│
+│   # ── Core Identity (required) ──────────────────────────
+├── agent.yaml              # Manifest — name, version, model, skills, tools, compliance
+├── SOUL.md                 # Identity, personality, communication style, values
+│
+│   # ── Behavior & Rules ──────────────────────────────────
+├── RULES.md                # Hard constraints, must-always/must-never, safety boundaries
+├── AGENTS.md               # Framework-agnostic fallback instructions
+│
+│   # ── Capabilities ──────────────────────────────────────
+├── skills/                 # Reusable capability modules (SKILL.md + scripts)
+│   └── code-review/
+│       ├── SKILL.md
+│       └── review.sh
+├── tools/                  # MCP-compatible tool definitions (YAML schemas)
+├── workflows/              # Multi-step procedures/playbooks
+│
+│   # ── Knowledge & Memory ────────────────────────────────
+├── knowledge/              # Reference documents the agent can consult
+├── memory/                 # Persistent cross-session memory
+│   └── runtime/            # Live agent state (dailylog.md, context.md)
+│
+│   # ── Lifecycle & Ops ───────────────────────────────────
+├── hooks/                  # Lifecycle event handlers (bootstrap.md, teardown.md)
+├── config/                 # Environment-specific overrides
+├── compliance/             # Regulatory compliance artifacts
+│
+│   # ── Composition ───────────────────────────────────────
+├── agents/                 # Sub-agent definitions (recursive structure)
+│   └── fact-checker/
+│       ├── agent.yaml
+│       └── SOUL.md
+├── examples/               # Calibration interactions (few-shot)
+│
+│   # ── Runtime ───────────────────────────────────────────
+└── .gitagent/              # Runtime state (gitignored)
 ```
 
-Only two files are required: **`agent.yaml`** (the manifest) and **`SOUL.md`** (the identity). Everything else is optional and additive.
+Only two files are required: **`agent.yaml`** (the manifest) and **`SOUL.md`** (the identity). Everything else is optional — add what you need, ignore the rest.
 
 ## Patterns
 
