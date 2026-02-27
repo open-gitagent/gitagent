@@ -23,7 +23,7 @@ Every AI framework has its own structure. There's no universal, portable way to 
 
 ## The Standard
 
-A gitagent is a git repo with a specific file structure. This **is** the standard — everything else (CLI, adapters, patterns) builds on top of it.
+Your repository becomes your agent. Drop these files into any git repo and it becomes a portable, framework-agnostic agent definition — everything else (CLI, adapters, patterns) builds on top of it.
 
 ```
 my-agent/
