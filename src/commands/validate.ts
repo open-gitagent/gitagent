@@ -236,6 +236,140 @@ function validateCompliance(dir: string): ValidationResult {
     }
   }
 
+  // Segregation of Duties validation
+  const sod = c.segregation_of_duties;
+  if (sod) {
+    const roleIds = sod.roles?.map(r => r.id) ?? [];
+
+    // Must define at least 2 roles
+    if (!sod.roles || sod.roles.length < 2) {
+      result.valid = false;
+      result.errors.push('[SOD] segregation_of_duties.roles must define at least 2 roles');
+    }
+
+    // Role IDs must be unique
+    if (roleIds.length !== new Set(roleIds).size) {
+      result.valid = false;
+      result.errors.push('[SOD] segregation_of_duties.roles contains duplicate role IDs');
+    }
+
+    // Conflict pairs must reference defined roles
+    if (sod.conflicts) {
+      for (const pair of sod.conflicts) {
+        for (const roleId of pair) {
+          if (!roleIds.includes(roleId)) {
+            result.valid = false;
+            result.errors.push(
+              `[SOD] Conflict references undefined role "${roleId}". Defined roles: ${roleIds.join(', ')}`
+            );
+          }
+        }
+        if (pair[0] === pair[1]) {
+          result.valid = false;
+          result.errors.push(`[SOD] Role "${pair[0]}" cannot conflict with itself`);
+        }
+      }
+    }
+
+    // Assignments must reference defined roles and check for conflicts
+    if (sod.assignments) {
+      for (const [agentName, assignedRoles] of Object.entries(sod.assignments)) {
+        for (const roleId of assignedRoles) {
+          if (!roleIds.includes(roleId)) {
+            result.valid = false;
+            result.errors.push(`[SOD] Agent "${agentName}" assigned undefined role "${roleId}"`);
+          }
+        }
+
+        // Core SOD check: no agent holds conflicting roles
+        if (sod.conflicts) {
+          for (const [roleA, roleB] of sod.conflicts) {
+            if (assignedRoles.includes(roleA) && assignedRoles.includes(roleB)) {
+              const msg = `[SOD] Agent "${agentName}" holds conflicting roles: "${roleA}" and "${roleB}"`;
+              if (sod.enforcement === 'advisory') {
+                result.warnings.push(msg);
+              } else {
+                result.valid = false;
+                result.errors.push(msg);
+              }
+            }
+          }
+        }
+
+        // Assigned agents should exist in manifest.agents
+        if (manifest.agents && !manifest.agents[agentName]) {
+          result.warnings.push(`[SOD] Agent "${agentName}" in assignments not found in agents section`);
+        }
+      }
+    }
+
+    // Handoff required_roles must reference defined roles
+    if (sod.handoffs) {
+      for (const handoff of sod.handoffs) {
+        for (const roleId of handoff.required_roles) {
+          if (!roleIds.includes(roleId)) {
+            result.valid = false;
+            result.errors.push(
+              `[SOD] Handoff for "${handoff.action}" references undefined role "${roleId}"`
+            );
+          }
+        }
+        const uniqueRoles = new Set(handoff.required_roles);
+        if (uniqueRoles.size < 2) {
+          result.valid = false;
+          result.errors.push(
+            `[SOD] Handoff for "${handoff.action}" must require at least 2 distinct roles`
+          );
+        }
+      }
+    }
+
+    // High/critical risk tier recommendations
+    if (c.risk_tier === 'high' || c.risk_tier === 'critical') {
+      if (sod.enforcement === 'advisory') {
+        result.warnings.push(
+          `[SOD] Risk tier "${c.risk_tier}" recommends enforcement: "strict", got "advisory"`
+        );
+      }
+      if (!sod.isolation || sod.isolation.state !== 'full') {
+        result.warnings.push(
+          `[SOD] Risk tier "${c.risk_tier}" recommends isolation.state: "full" for full state segregation`
+        );
+      }
+      if (!sod.isolation || sod.isolation.credentials !== 'separate') {
+        result.warnings.push(
+          `[SOD] Risk tier "${c.risk_tier}" recommends isolation.credentials: "separate"`
+        );
+      }
+    }
+
+    // SOD without conflicts is meaningless
+    if (!sod.conflicts || sod.conflicts.length === 0) {
+      result.warnings.push(
+        '[SOD] No conflicts defined — segregation_of_duties without conflict rules has no enforcement value'
+      );
+    }
+
+    // Every role should be assigned to at least one agent
+    if (sod.assignments && sod.roles) {
+      const assignedRoleIds = new Set(Object.values(sod.assignments).flat());
+      for (const role of sod.roles) {
+        if (!assignedRoleIds.has(role.id)) {
+          result.warnings.push(`[SOD] Role "${role.id}" is defined but not assigned to any agent`);
+        }
+      }
+    }
+  }
+
+  // Recommend SOD for multi-agent high/critical risk setups
+  if (!sod && manifest.agents && Object.keys(manifest.agents).length >= 2) {
+    if (c.risk_tier === 'high' || c.risk_tier === 'critical') {
+      result.warnings.push(
+        '[SOD] Multi-agent system with high/critical risk tier — consider configuring segregation_of_duties'
+      );
+    }
+  }
+
   return result;
 }
 
