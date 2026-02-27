@@ -2,7 +2,7 @@
   <img src="banner.png" alt="gitagent banner" width="700" />
 </p>
 
-# gitagent
+# gitagent | your repository becomes your agent
 
 [![npm version](https://img.shields.io/npm/v/@shreyaskapale/gitagent)](https://www.npmjs.com/package/@shreyaskapale/gitagent)
 [![CI](https://github.com/open-gitagent/gitagent/actions/workflows/ci.yml/badge.svg)](https://github.com/open-gitagent/gitagent/actions/workflows/ci.yml)
