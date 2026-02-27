@@ -21,6 +21,31 @@ Every AI framework has its own structure. There's no universal, portable way to 
 - **Compliance-ready** — First-class support for FINRA, Federal Reserve, and SEC regulatory requirements
 - **Composable** — Agents can extend, depend on, and delegate to other agents
 
+## The Standard
+
+A gitagent is a git repo with a specific file structure. This **is** the standard — everything else (CLI, adapters, patterns) builds on top of it.
+
+```
+my-agent/
+├── agent.yaml          # [REQUIRED] Manifest — name, version, model, skills, tools, compliance
+├── SOUL.md             # [REQUIRED] Identity, personality, communication style, values
+├── RULES.md            # Hard constraints, must-always/must-never, safety boundaries
+├── AGENTS.md           # Framework-agnostic fallback instructions
+├── skills/             # Reusable capability modules (SKILL.md + scripts)
+├── tools/              # MCP-compatible tool definitions (YAML schemas)
+├── knowledge/          # Reference documents the agent can consult
+├── memory/             # Persistent cross-session memory
+├── workflows/          # Multi-step procedures/playbooks
+├── hooks/              # Lifecycle event handlers (audit logging, compliance checks)
+├── examples/           # Calibration interactions (few-shot)
+├── agents/             # Sub-agent definitions (recursive structure)
+├── compliance/         # Regulatory compliance artifacts
+├── config/             # Environment-specific overrides
+└── .gitagent/          # Runtime state (gitignored)
+```
+
+Only two files are required: **`agent.yaml`** (the manifest) and **`SOUL.md`** (the identity). Everything else is optional and additive.
+
 ## Patterns
 
 These are the architectural patterns that emerge when you define agents as git-native file systems.
@@ -102,27 +127,6 @@ gitagent info
 
 # Export to system prompt
 gitagent export --format system-prompt
-```
-
-## Directory Structure
-
-```
-my-agent/
-├── agent.yaml          # [REQUIRED] Manifest — name, version, model, skills, tools, compliance
-├── SOUL.md             # [REQUIRED] Identity, personality, communication style, values
-├── RULES.md            # Hard constraints, must-always/must-never, safety boundaries
-├── AGENTS.md           # Framework-agnostic fallback instructions
-├── skills/             # Reusable capability modules (SKILL.md + scripts)
-├── tools/              # MCP-compatible tool definitions (YAML schemas)
-├── knowledge/          # Reference documents the agent can consult
-├── memory/             # Persistent cross-session memory
-├── workflows/          # Multi-step procedures/playbooks
-├── hooks/              # Lifecycle event handlers (audit logging, compliance checks)
-├── examples/           # Calibration interactions (few-shot)
-├── agents/             # Sub-agent definitions (recursive structure)
-├── compliance/         # Regulatory compliance artifacts
-├── config/             # Environment-specific overrides
-└── .gitagent/          # Runtime state (gitignored)
 ```
 
 ## agent.yaml
