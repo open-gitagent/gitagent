@@ -25,6 +25,12 @@ export function exportToSystemPrompt(dir: string): string {
     parts.push(rules);
   }
 
+  // DUTIES.md
+  const duty = loadFileIfExists(join(agentDir, 'DUTIES.md'));
+  if (duty) {
+    parts.push(duty);
+  }
+
   // Skills — loaded via skill-loader
   const skillsDir = join(agentDir, 'skills');
   const skills = loadAllSkills(skillsDir);
@@ -80,6 +86,37 @@ export function exportToSystemPrompt(dir: string): string {
     }
     if (c.data_governance?.pii_handling === 'prohibit') {
       constraints.push('- Do not process any personally identifiable information');
+    }
+
+    if (c.segregation_of_duties) {
+      const sod = c.segregation_of_duties;
+      constraints.push('- Segregation of duties is enforced:');
+      if (sod.assignments) {
+        for (const [agentName, roles] of Object.entries(sod.assignments)) {
+          constraints.push(`  - Agent "${agentName}" has role(s): ${roles.join(', ')}`);
+        }
+      }
+      if (sod.conflicts) {
+        constraints.push('- Duty separation rules (no single agent may hold both):');
+        for (const [a, b] of sod.conflicts) {
+          constraints.push(`  - ${a} and ${b}`);
+        }
+      }
+      if (sod.handoffs) {
+        constraints.push('- The following actions require multi-agent handoff:');
+        for (const h of sod.handoffs) {
+          constraints.push(`  - ${h.action}: must pass through roles ${h.required_roles.join(' → ')}${h.approval_required !== false ? ' (approval required)' : ''}`);
+        }
+      }
+      if (sod.isolation?.state === 'full') {
+        constraints.push('- Agent state/memory is fully isolated per role — do not access another agent\'s state');
+      }
+      if (sod.isolation?.credentials === 'separate') {
+        constraints.push('- Credentials are segregated per role — use only credentials assigned to your role');
+      }
+      if (sod.enforcement === 'strict') {
+        constraints.push('- SOD enforcement is STRICT — violations will block execution');
+      }
     }
 
     if (constraints.length > 0) {

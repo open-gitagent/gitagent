@@ -26,6 +26,12 @@ export function exportToClaudeCode(dir: string): string {
     parts.push(rules);
   }
 
+  // DUTIES.md → segregation of duties policy
+  const duty = loadFileIfExists(join(agentDir, 'DUTIES.md'));
+  if (duty) {
+    parts.push(duty);
+  }
+
   // Skills — loaded via skill-loader
   const skillsDir = join(agentDir, 'skills');
   const skills = loadAllSkills(skillsDir);
@@ -75,6 +81,36 @@ export function exportToClaudeCode(dir: string): string {
     }
     if (c.recordkeeping?.audit_logging) {
       complianceParts.push('- All actions are audit-logged');
+    }
+
+    if (c.segregation_of_duties) {
+      const sod = c.segregation_of_duties;
+      complianceParts.push('\n### Segregation of Duties');
+      complianceParts.push(`Enforcement: ${sod.enforcement ?? 'strict'}`);
+      if (sod.assignments) {
+        complianceParts.push('\nRole assignments:');
+        for (const [agent, roles] of Object.entries(sod.assignments)) {
+          complianceParts.push(`- ${agent}: ${roles.join(', ')}`);
+        }
+      }
+      if (sod.conflicts) {
+        complianceParts.push('\nConflict rules (must not be same agent):');
+        for (const [a, b] of sod.conflicts) {
+          complianceParts.push(`- ${a} <-> ${b}`);
+        }
+      }
+      if (sod.handoffs) {
+        complianceParts.push('\nRequired handoffs:');
+        for (const h of sod.handoffs) {
+          complianceParts.push(`- ${h.action}: ${h.required_roles.join(' → ')}`);
+        }
+      }
+      if (sod.isolation?.state === 'full') {
+        complianceParts.push('- Agent state is fully isolated per role');
+      }
+      if (sod.isolation?.credentials === 'separate') {
+        complianceParts.push('- Credentials are segregated per role');
+      }
     }
 
     parts.push(complianceParts.join('\n'));
