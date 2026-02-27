@@ -1,5 +1,11 @@
 # gitagent
 
+[![npm version](https://img.shields.io/npm/v/@shreyaskapale/gitagent)](https://www.npmjs.com/package/@shreyaskapale/gitagent)
+[![CI](https://github.com/open-gitagent/gitagent/actions/workflows/ci.yml/badge.svg)](https://github.com/open-gitagent/gitagent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Spec: v0.1.0](https://img.shields.io/badge/spec-v0.1.0-blue)](https://github.com/open-gitagent/gitagent/blob/main/spec/SPECIFICATION.md)
+[![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org)
+
 A framework-agnostic, git-native standard for defining AI agents. Clone a repo, get an agent.
 
 ## Why
@@ -190,6 +196,14 @@ See the `examples/` directory:
 Full specification at [`spec/SPECIFICATION.md`](spec/SPECIFICATION.md).
 
 JSON Schemas for validation at `spec/schemas/`.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=open-gitagent/gitagent&type=Date)](https://star-history.com/#open-gitagent/gitagent&Date)
+
+## Built with gitagent?
+
+If you've built an agent using gitagent, we'd love to hear about it! [Open a discussion](https://github.com/open-gitagent/gitagent/discussions) or add a `gitagent` topic to your repo.
 
 ## License
 

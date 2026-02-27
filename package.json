@@ -20,7 +20,17 @@
     "mcp",
     "a2a",
     "finra",
-    "compliance"
+    "compliance",
+    "claude-code",
+    "openai",
+    "crewai",
+    "langchain",
+    "agent-framework",
+    "agent-standard",
+    "ai-agent",
+    "llm",
+    "agent-definition",
+    "version-control"
   ],
   "author": "shreyaskapale",
   "license": "MIT",
