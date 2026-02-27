@@ -34,7 +34,7 @@ my-agent/
 │
 │   # ── Behavior & Rules ──────────────────────────────────
 ├── RULES.md                # Hard constraints, must-always/must-never, safety boundaries
-├── DUTIES.md                 # Segregation of duties policy and role boundaries
+├── DUTIES.md               # Segregation of duties policy and role boundaries
 ├── AGENTS.md               # Framework-agnostic fallback instructions
 │
 │   # ── Capabilities ──────────────────────────────────────
@@ -60,7 +60,7 @@ my-agent/
 │   └── fact-checker/
 │       ├── agent.yaml
 │       ├── SOUL.md
-│       └── DUTIES.md         # This agent's role, permissions, boundaries
+│       └── DUTIES.md       # This agent's role, permissions, boundaries
 ├── examples/               # Calibration interactions (few-shot)
 │
 │   # ── Runtime ───────────────────────────────────────────
