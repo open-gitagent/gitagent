@@ -262,6 +262,36 @@ metadata:
 Describe the skill instructions here.
 `;
 
+const FULL_DUTIES_MD = `# Duties
+
+System-wide segregation of duties policy.
+
+## Roles
+
+| Role | Agent | Permissions | Description |
+|------|-------|-------------|-------------|
+| (define roles) | (assign agents) | (list permissions) | (describe duty) |
+
+## Conflict Matrix
+
+No single agent may hold both roles in any pair:
+
+- (define role conflicts)
+
+## Handoff Workflows
+
+(Define critical actions that require multi-role handoff)
+
+## Isolation Policy
+
+- **State isolation:** (full | shared | none)
+- **Credential segregation:** (separate | shared)
+
+## Enforcement
+
+(strict | advisory)
+`;
+
 const REGULATORY_MAP = `mappings: []
 `;
 
@@ -346,6 +376,7 @@ export const initCommand = new Command('init')
       createFile(join(dir, 'SOUL.md'), STANDARD_SOUL_MD);
       createFile(join(dir, 'RULES.md'), FULL_RULES_MD);
       createFile(join(dir, 'AGENTS.md'), AGENTS_MD);
+      createFile(join(dir, 'DUTIES.md'), FULL_DUTIES_MD);
 
       createDir(join(dir, 'skills', 'example-skill'));
       createFile(join(dir, 'skills', 'example-skill', 'SKILL.md'), SKILL_MD);
@@ -392,6 +423,7 @@ export const initCommand = new Command('init')
       success('Created SOUL.md');
       success('Created RULES.md');
       success('Created AGENTS.md');
+      success('Created DUTIES.md');
       success('Created skills/example-skill/SKILL.md');
       success('Created knowledge/index.yaml');
       success('Created memory/MEMORY.md + memory.yaml');

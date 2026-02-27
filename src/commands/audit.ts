@@ -162,8 +162,65 @@ export const auditCommand = new Command('audit')
       info('  No vendor dependencies — vendor management not required');
     }
 
+    // Segregation of Duties
+    heading('8. Segregation of Duties');
+    if (c.segregation_of_duties) {
+      const sod = c.segregation_of_duties;
+      auditCheck('Roles defined (≥2)', !!(sod.roles && sod.roles.length >= 2));
+      auditCheck('Conflict matrix defined', !!(sod.conflicts && sod.conflicts.length > 0));
+      auditCheck('Role assignments configured', !!(sod.assignments && Object.keys(sod.assignments).length > 0));
+      auditCheck('State isolation configured', !!sod.isolation?.state);
+      auditCheck('State isolation is full', sod.isolation?.state === 'full');
+      auditCheck('Credential segregation configured', !!sod.isolation?.credentials);
+      auditCheck('Credentials are separate', sod.isolation?.credentials === 'separate');
+      auditCheck('Handoff workflows defined', !!(sod.handoffs && sod.handoffs.length > 0));
+      auditCheck('Enforcement is strict', sod.enforcement === 'strict');
+
+      if (sod.assignments) {
+        info('  Role assignments:');
+        for (const [agent, roles] of Object.entries(sod.assignments)) {
+          label('    ' + agent, roles.join(', '));
+        }
+      }
+
+      if (sod.conflicts) {
+        info('  Conflict rules:');
+        for (const [a, b] of sod.conflicts) {
+          info(`    ${a} <-> ${b}`);
+        }
+      }
+
+      // Check for SOD violations in assignments
+      if (sod.assignments && sod.conflicts) {
+        let violationFound = false;
+        for (const [agentName, assignedRoles] of Object.entries(sod.assignments)) {
+          for (const [roleA, roleB] of sod.conflicts) {
+            if (assignedRoles.includes(roleA) && assignedRoles.includes(roleB)) {
+              error(`  VIOLATION: Agent "${agentName}" holds conflicting roles "${roleA}" and "${roleB}"`);
+              violationFound = true;
+            }
+          }
+        }
+        if (!violationFound) {
+          success('  No SOD violations detected in role assignments');
+        }
+      }
+
+      if (sod.handoffs) {
+        info('  Handoff requirements:');
+        for (const h of sod.handoffs) {
+          label('    ' + h.action, `${h.required_roles.join(' → ')} (approval: ${h.approval_required !== false ? 'yes' : 'no'})`);
+        }
+      }
+    } else if (manifest.agents && Object.keys(manifest.agents).length >= 2) {
+      warn('  Segregation of duties not configured for multi-agent system');
+      warn('  Consider adding segregation_of_duties for duty separation controls');
+    } else {
+      info('  Single-agent system — segregation of duties not applicable');
+    }
+
     // Compliance artifacts
-    heading('8. Compliance Artifacts');
+    heading('9. Compliance Artifacts');
     auditCheck('compliance/ directory exists', existsSync(join(dir, 'compliance')));
     auditCheck('regulatory-map.yaml exists', existsSync(join(dir, 'compliance', 'regulatory-map.yaml')));
     auditCheck('validation-schedule.yaml exists', existsSync(join(dir, 'compliance', 'validation-schedule.yaml')));
@@ -171,7 +228,7 @@ export const auditCommand = new Command('audit')
     auditCheck('RULES.md exists', existsSync(join(dir, 'RULES.md')));
 
     // Hooks for audit trail
-    heading('9. Audit Hooks');
+    heading('10. Audit Hooks');
     const hooksExist = existsSync(join(dir, 'hooks', 'hooks.yaml'));
     auditCheck('hooks/hooks.yaml exists', hooksExist);
     if (hooksExist) {
