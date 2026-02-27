@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="gitagent.png" alt="gitagent logo" width="120" />
+</p>
+
 # gitagent
 
 [![npm version](https://img.shields.io/npm/v/@shreyaskapale/gitagent)](https://www.npmjs.com/package/@shreyaskapale/gitagent)
