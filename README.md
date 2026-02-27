@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="gitagent.png" alt="gitagent logo" width="120" />
+  <img src="banner.png" alt="gitagent banner" width="700" />
 </p>
 
 # gitagent
