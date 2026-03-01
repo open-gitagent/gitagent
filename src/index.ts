@@ -11,6 +11,7 @@ import { auditCommand } from './commands/audit.js';
 import { skillsCommand } from './commands/skills.js';
 import { runCommand } from './commands/run.js';
 import { lyzrCommand } from './commands/lyzr.js';
+import { registryCommand } from './commands/registry.js';
 
 const program = new Command();
 
@@ -29,5 +30,6 @@ program.addCommand(auditCommand);
 program.addCommand(skillsCommand);
 program.addCommand(runCommand);
 program.addCommand(lyzrCommand);
+program.addCommand(registryCommand);
 
 program.parse();
