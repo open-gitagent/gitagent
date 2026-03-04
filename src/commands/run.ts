@@ -114,7 +114,7 @@ export const runCommand = new Command('run')
           await runWithGitHub(agentDir, manifest, { prompt: options.prompt });
           break;
         case 'langchain':
-          runWithLangChain(agentDir, manifest);
+          runWithLangChain(agentDir, manifest, { prompt: options.prompt });
           break;
         case 'git':
           if (!options.repo) {
