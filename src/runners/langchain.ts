@@ -39,6 +39,15 @@ export function runWithLangChain(agentDir: string, _manifest: AgentManifest, opt
   const model = _manifest.model?.preferred ?? 'gpt-4o';
   const providerInfo = detectProvider(model);
 
+  // Unsupported model — tell the user clearly
+  if (!providerInfo) {
+    error(`Model "${model}" is not supported by the LangChain adapter.`);
+    info('gitagent with LangChain currently supports:');
+    info('  • OpenAI  — gpt-4o, gpt-4, o1-mini, o3-mini, …');
+    info('  • Anthropic — claude-3-5-sonnet, claude-3-opus, …');
+    process.exit(1);
+  }
+
   // Check the appropriate API key env var
   if (!process.env[providerInfo.envVar]) {
     error(`${providerInfo.envVar} environment variable is not set`);

@@ -13,16 +13,15 @@ interface ProviderInfo {
   envVar: string;
 }
 
-function detectProvider(model: string): ProviderInfo {
+/** Supported providers. Returns null for any unsupported model. */
+function detectProvider(model: string): ProviderInfo | null {
   const m = model.toLowerCase();
-  if (m.startsWith('claude'))    return { provider: 'anthropic',   pipPackage: 'langchain-anthropic',      envVar: 'ANTHROPIC_API_KEY' };
-  if (m.startsWith('gemini'))    return { provider: 'google_genai', pipPackage: 'langchain-google-genai',   envVar: 'GOOGLE_API_KEY' };
-  if (m.startsWith('grok'))      return { provider: 'xai',          pipPackage: 'langchain-xai',            envVar: 'XAI_API_KEY' };
-  if (m.startsWith('mistral'))   return { provider: 'mistralai',    pipPackage: 'langchain-mistralai',      envVar: 'MISTRAL_API_KEY' };
-  if (m.startsWith('deepseek'))  return { provider: 'deepseek',     pipPackage: 'langchain-deepseek',       envVar: 'DEEPSEEK_API_KEY' };
-  if (m.startsWith('command'))   return { provider: 'cohere',       pipPackage: 'langchain-cohere',         envVar: 'COHERE_API_KEY' };
-  // Default: OpenAI (covers gpt-*, o1-*, o3-*, etc.)
-  return { provider: 'openai', pipPackage: 'langchain-openai', envVar: 'OPENAI_API_KEY' };
+  // Anthropic — claude-*
+  if (m.startsWith('claude'))  return { provider: 'anthropic', pipPackage: 'langchain-anthropic', envVar: 'ANTHROPIC_API_KEY' };
+  // OpenAI — gpt-*, o1-*, o2-*, o3-*, o4-*
+  if (m.startsWith('gpt') || /^o\d/.test(m)) return { provider: 'openai', pipPackage: 'langchain-openai', envVar: 'OPENAI_API_KEY' };
+  // Unsupported model
+  return null;
 }
 
 // Make detectProvider available for tests
@@ -52,11 +51,23 @@ export function exportToLangChain(dir: string): string {
 
   // Collect all providers needed (main + sub-agents)
   const mainProvider = detectProvider(model);
+  if (!mainProvider) {
+    throw new Error(
+      `Model "${model}" is not supported by the LangChain adapter.\n` +
+      'gitagent with LangChain currently supports OpenAI (gpt-*, o1-*, o3-*, …) and Anthropic (claude-*) only.'
+    );
+  }
   const allPipPackages = new Set<string>([mainProvider.pipPackage]);
   const allEnvVars = new Set<string>([mainProvider.envVar]);
 
   for (const sub of subAgents) {
     const subProv = detectProvider(sub.model ?? model);
+    if (!subProv) {
+      throw new Error(
+        `Sub-agent model "${sub.model ?? model}" is not supported by the LangChain adapter.\n` +
+        'gitagent with LangChain currently supports OpenAI (gpt-*, o1-*, o3-*, …) and Anthropic (claude-*) only.'
+      );
+    }
     allPipPackages.add(subProv.pipPackage);
     allEnvVars.add(subProv.envVar);
   }
