@@ -14,8 +14,9 @@ import type { HooksConfig } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
 import { AuditLogger, isAuditEnabled } from "./audit.js";
 import { formatComplianceWarnings } from "./compliance.js";
-import { readFile } from "fs/promises";
-import { join } from "path";
+import { readFile, mkdir, writeFile, stat, access } from "fs/promises";
+import { join, resolve } from "path";
+import { execSync } from "child_process";
 
 // ANSI helpers
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -122,8 +123,131 @@ function summarizeArgs(args: any): string {
 		.join(", ");
 }
 
+function askQuestion(question: string): Promise<string> {
+	const rl = createInterface({ input: process.stdin, output: process.stdout });
+	return new Promise((res) => {
+		rl.question(question, (answer) => {
+			rl.close();
+			res(answer.trim());
+		});
+	});
+}
+
+function isGitRepo(dir: string): boolean {
+	try {
+		execSync("git rev-parse --is-inside-work-tree", { cwd: dir, stdio: "pipe" });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function fileExists(path: string): Promise<boolean> {
+	try {
+		await access(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function ensureRepo(dir: string, model?: string): Promise<string> {
+	const absDir = resolve(dir);
+
+	// Create directory if it doesn't exist
+	if (!(await fileExists(absDir))) {
+		console.log(dim(`Creating directory: ${absDir}`));
+		await mkdir(absDir, { recursive: true });
+	}
+
+	// Git init if not a repo
+	if (!isGitRepo(absDir)) {
+		console.log(dim("Initializing git repository..."));
+		execSync("git init", { cwd: absDir, stdio: "pipe" });
+
+		// Create .gitignore
+		const gitignorePath = join(absDir, ".gitignore");
+		if (!(await fileExists(gitignorePath))) {
+			await writeFile(gitignorePath, "node_modules/\ndist/\n.gitagent/\n", "utf-8");
+		}
+
+		// Initial commit so memory saves work
+		execSync("git add -A && git commit -m 'Initial commit' --allow-empty", {
+			cwd: absDir,
+			stdio: "pipe",
+		});
+	}
+
+	// Scaffold agent.yaml if missing
+	const agentYamlPath = join(absDir, "agent.yaml");
+	if (!(await fileExists(agentYamlPath))) {
+		const defaultModel = model || "openai:gpt-4o-mini";
+		const agentName = absDir.split("/").pop() || "my-agent";
+		const yaml = [
+			'spec_version: "0.1.0"',
+			`name: ${agentName}`,
+			"version: 0.1.0",
+			`description: Gitclaw agent for ${agentName}`,
+			"model:",
+			`  preferred: "${defaultModel}"`,
+			"  fallback: []",
+			"tools: [cli, read, write, memory]",
+			"runtime:",
+			"  max_turns: 50",
+			"",
+		].join("\n");
+		await writeFile(agentYamlPath, yaml, "utf-8");
+		console.log(dim(`Created agent.yaml (model: ${defaultModel})`));
+	}
+
+	// Scaffold memory if missing
+	const memoryDir = join(absDir, "memory");
+	const memoryFile = join(memoryDir, "MEMORY.md");
+	if (!(await fileExists(memoryFile))) {
+		await mkdir(memoryDir, { recursive: true });
+		await writeFile(memoryFile, "# Memory\n", "utf-8");
+	}
+
+	// Scaffold SOUL.md if missing
+	const soulPath = join(absDir, "SOUL.md");
+	if (!(await fileExists(soulPath))) {
+		await writeFile(soulPath, [
+			"# Identity",
+			"",
+			"You are a helpful AI agent. You live inside a git repository.",
+			"You can run commands, read and write files, and remember things.",
+			"Be concise and action-oriented.",
+			"",
+		].join("\n"), "utf-8");
+	}
+
+	// Stage new scaffolded files
+	try {
+		execSync("git add -A && git diff --cached --quiet || git commit -m 'Scaffold gitclaw agent'", {
+			cwd: absDir,
+			stdio: "pipe",
+		});
+	} catch {
+		// ok if nothing to commit
+	}
+
+	return absDir;
+}
+
 async function main(): Promise<void> {
-	const { model, dir, prompt, env } = parseArgs(process.argv);
+	const { model, dir: rawDir, prompt, env } = parseArgs(process.argv);
+
+	// If no --dir given interactively, ask for it
+	let dir = rawDir;
+	if (dir === process.cwd() && !prompt) {
+		const answer = await askQuestion(green("? ") + bold("Repository path") + dim(" (. for current dir)") + green(": "));
+		if (answer) {
+			dir = resolve(answer === "." ? process.cwd() : answer);
+		}
+	}
+
+	// Ensure the target is a valid gitclaw repo
+	dir = await ensureRepo(dir, model);
 
 	let loaded;
 	try {
