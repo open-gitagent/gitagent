@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./GitClaw.png" alt="GitClaw Logo" width="200" />
+  <img src="./gitclaw-logo.png" alt="GitClaw Logo" width="200" />
 </p>
 
 <p align="center">
