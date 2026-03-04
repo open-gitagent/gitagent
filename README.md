@@ -48,25 +48,36 @@ npm install -g gitclaw
 export OPENAI_API_KEY="sk-..."
 # or: export ANTHROPIC_API_KEY="sk-ant-..."
 
-# Create a minimal agent
-mkdir my-agent && cd my-agent
-git init
+# Point gitclaw at any directory — it handles everything
+gitclaw --dir ~/my-project
+```
 
-cat > agent.yaml << 'EOF'
-spec_version: "0.1.0"
-name: my-agent
-version: 0.1.0
-description: My first gitclaw agent
-model:
-  preferred: "openai:gpt-4o-mini"
-  fallback: []
-tools: [cli, read, write, memory]
-runtime:
-  max_turns: 50
-EOF
+That's it. Gitclaw auto-scaffolds everything on first run:
+- `git init` if not already a repo
+- Creates `agent.yaml`, `SOUL.md`, `memory/MEMORY.md`
+- Commits the scaffold
+- Drops you into the REPL
 
-# Run it
+```
+? Repository path (. for current dir): ~/my-project
+Initializing git repository...
+Created agent.yaml (model: openai:gpt-4o-mini)
+my-project v0.1.0
+Model: openai:gpt-4o-mini
+Tools: cli, read, write, memory
+→ List all files and explain the project
+```
+
+Or run without `--dir` and it will ask you interactively:
+
+```bash
 gitclaw
+```
+
+Single-shot mode:
+
+```bash
+gitclaw --dir ~/my-project -p "Create a hello world script"
 ```
 
 ### SDK
