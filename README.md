@@ -284,6 +284,7 @@ Adapters are used by both `export` and `run`. Available adapters:
 | `git` | Git-native execution (run only) |
 | `openclaw` | OpenClaw format |
 | `nanobot` | Nanobot format |
+| `langchain` | LangChain agent Python code |
 
 ```bash
 # Export to system prompt
