@@ -4,6 +4,7 @@ import { createCliTool } from "./cli.js";
 import { createReadTool } from "./read.js";
 import { createWriteTool } from "./write.js";
 import { createMemoryTool } from "./memory.js";
+import { createGitcronTool } from "./gitcron.js";
 import { createSandboxCliTool } from "./sandbox-cli.js";
 import { createSandboxReadTool } from "./sandbox-read.js";
 import { createSandboxWriteTool } from "./sandbox-write.js";
@@ -16,9 +17,11 @@ export interface BuiltinToolsConfig {
 }
 
 /**
- * Create the four built-in tools (cli, read, write, memory).
+ * Create the built-in tools (cli, read, write, memory, gitcron).
  * If a SandboxContext is provided, returns sandbox-backed tools;
  * otherwise returns the standard local tools.
+ * The gitcron tool is always included — it gracefully fails if
+ * gitcron CLI is not installed.
  */
 export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[] {
 	if (config.sandbox) {
@@ -35,5 +38,6 @@ export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[]
 		createReadTool(config.dir),
 		createWriteTool(config.dir),
 		createMemoryTool(config.dir),
+		createGitcronTool(config.dir),
 	];
 }

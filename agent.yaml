@@ -10,5 +10,10 @@ tools:
   - read
   - write
   - memory
+  - gitcron
+skills:
+  - scheduling
+  - task-management
+  - reminders
 runtime:
   max_turns: 50
