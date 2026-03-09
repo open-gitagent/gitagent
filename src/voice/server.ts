@@ -93,7 +93,13 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 						"When in doubt, use run_agent. Speak concisely — summarize the tool result in 1-2 sentences.",
 					voice: voiceName,
 					modalities: ["text", "audio"],
-					turn_detection: { type: "server_vad" },
+					turn_detection: {
+						type: "server_vad",
+						threshold: 0.6,
+						prefix_padding_ms: 400,
+						silence_duration_ms: 800,
+						create_response: true,
+					},
 					input_audio_transcription: { model: "whisper-1" },
 					tools: [
 						{
