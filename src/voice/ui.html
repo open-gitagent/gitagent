@@ -396,21 +396,24 @@ textInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey
 
 // INTEGRATIONS
 var toolkitConnections={};
+function showGridMessage(msg){
+  var grid=document.getElementById('integrationsGrid');
+  grid.innerHTML='<div class="integrations-empty">'+escHtml(msg)+'</div>';
+}
 async function loadToolkits(){
   var grid=document.getElementById('integrationsGrid');
-  var empty=document.getElementById('integrationsEmpty');
-  grid.innerHTML='';grid.appendChild(empty);empty.textContent='Loading...';
+  showGridMessage('Loading...');
   try{
     var tr=await fetch('/api/composio/toolkits');
-    if(tr.status===501){empty.textContent='Composio not configured. Set COMPOSIO_API_KEY to enable integrations.';return;}
+    if(tr.status===501){showGridMessage('Composio not configured. Set COMPOSIO_API_KEY to enable integrations.');return;}
     var toolkits=await tr.json();
-    if(toolkits.error){empty.textContent=toolkits.error;return;}
+    if(toolkits.error){showGridMessage(toolkits.error);return;}
     // Also fetch connections for status
     var cr=await fetch('/api/composio/connections');
     var conns=cr.ok?await cr.json():[];
     toolkitConnections={};
     if(Array.isArray(conns))conns.forEach(function(c){toolkitConnections[c.toolkitSlug]=c.id;});
-    if(!Array.isArray(toolkits)||toolkits.length===0){empty.textContent='No toolkits available.';return;}
+    if(!Array.isArray(toolkits)||toolkits.length===0){showGridMessage('No toolkits available.');return;}
     grid.innerHTML='';
     toolkits.forEach(function(tk){
       var isConn=tk.connected||!!toolkitConnections[tk.slug];
@@ -422,7 +425,7 @@ async function loadToolkits(){
       card.innerHTML='<div class="tk-top">'+logoHtml+'<span class="tk-name">'+escHtml(tk.name)+'</span></div><div class="tk-desc">'+escHtml(tk.description)+'</div><div class="tk-actions"><button class="'+btnClass+'" data-slug="'+escHtml(tk.slug)+'" data-conn="'+escHtml(connId)+'" onclick="toggleToolkit(this)">'+btnLabel+'</button></div>';
       grid.appendChild(card);
     });
-  }catch(e){empty.textContent='Failed to load integrations.';}
+  }catch(e){showGridMessage('Failed to load integrations.');}
 }
 
 async function toggleToolkit(btn){
@@ -437,7 +440,7 @@ async function toggleToolkit(btn){
     // Connect via OAuth
     btn.textContent='Connecting...';btn.disabled=true;
     try{
-      var r=await fetch('/api/composio/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({toolkit:slug,redirectUrl:window.location.origin+'/'})});
+      var r=await fetch('/api/composio/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({toolkit:slug,redirectUrl:window.location.origin+'/api/composio/callback'})});
       var d=await r.json();
       if(d.redirectUrl){window.open(d.redirectUrl,'composio_auth','width=600,height=700');}
       else{loadToolkits();}

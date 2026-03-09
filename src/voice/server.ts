@@ -226,6 +226,16 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 				jsonReply(res, 500, { error: err.message });
 			}
 
+		// ── Composio OAuth callback ─────────────────────────────────────
+		} else if (url.pathname === "/api/composio/callback") {
+			// OAuth popup lands here after Composio processes the auth code.
+			// Send a message to the opener window and close the popup.
+			res.writeHead(200, { "Content-Type": "text/html" });
+			res.end(`<!DOCTYPE html><html><body><script>
+				if(window.opener){window.opener.postMessage({type:'composio_auth_complete'},'*');}
+				window.close();
+				</script><p>Authentication complete. You can close this window.</p></body></html>`);
+
 		// ── Composio API routes ─────────────────────────────────────────
 		} else if (url.pathname === "/api/composio/toolkits" && req.method === "GET") {
 			if (!composioAdapter) return jsonReply(res, 501, { error: "Composio not configured" });

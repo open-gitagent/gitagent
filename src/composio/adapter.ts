@@ -74,13 +74,13 @@ export class ComposioAdapter {
 	// ── Private ────────────────────────────────────────────────────────
 
 	private toGCTool(t: ComposioTool): GCToolDefinition {
-		const safeName = `composio_${t.toolkitSlug}_${t.name}`.replace(/[^a-zA-Z0-9_]/g, "_");
+		const safeName = `composio_${t.toolkitSlug}_${t.slug}`.replace(/[^a-zA-Z0-9_]/g, "_");
 		return {
 			name: safeName,
 			description: `[Composio/${t.toolkitSlug}] ${t.description}`,
 			inputSchema: t.parameters,
 			handler: async (args: any) => {
-				const result = await this.client.executeTool(t.name, this.userId, args);
+				const result = await this.client.executeTool(t.slug, this.userId, args);
 				return typeof result === "string" ? result : JSON.stringify(result);
 			},
 		};
