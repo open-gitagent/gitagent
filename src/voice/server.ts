@@ -49,19 +49,34 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	function createToolHandler(sendToBrowser: (msg: ServerMessage) => void) {
 		return async (prompt: string): Promise<string> => {
 			let composioTools: GCToolDefinition[] = [];
+			let connectedSlugs: string[] = [];
 			if (composioAdapter) {
 				try {
-					// Try semantic search first, fall back to all connected tools
-					composioTools = await composioAdapter.getToolsForQuery(prompt);
-					if (composioTools.length === 0) {
-						composioTools = await composioAdapter.getTools();
+					connectedSlugs = await composioAdapter.getConnectedToolkitSlugs();
+					if (connectedSlugs.length > 0) {
+						// Try semantic search first, fall back to all connected tools
+						composioTools = await composioAdapter.getToolsForQuery(prompt);
+						if (composioTools.length === 0) {
+							composioTools = await composioAdapter.getTools();
+						}
+						console.log(dim(`[voice] Composio: ${composioTools.length} tools injected: ${composioTools.map(t => t.name).join(", ")}`));
 					}
-					console.log(dim(`[voice] Composio: ${composioTools.length} tools injected: ${composioTools.map(t => t.name).join(", ")}`));
 				} catch (err: any) {
 					console.error(dim(`[voice] Composio tool fetch failed: ${err.message}`));
 				}
-			} else {
-				console.log(dim("[voice] Composio adapter not initialized"));
+			}
+
+			// Build system prompt suffix: always tell the agent about connected services
+			let systemPromptSuffix: string | undefined;
+			if (connectedSlugs.length > 0) {
+				const services = connectedSlugs.map((s) => s.replace(/_/g, " ")).join(", ");
+				systemPromptSuffix = [
+					`You are connected to the following external services via Composio: ${services}.`,
+					`You CAN perform real actions on these services — read emails, send emails, check calendars, create events, manage files, etc.`,
+					`Never tell the user you "can't access" or "don't have access to" these services. You have full access. Use the available tools (prefixed "composio_") to fulfill the user's request.`,
+					`When the user asks to send an email, use the SEND_EMAIL action directly — do NOT create a draft unless they explicitly ask for a draft.`,
+					`Prefer direct actions over multi-step workflows.`,
+				].join(" ");
 			}
 
 			const result = query({
@@ -69,10 +84,8 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 				dir: opts.agentDir,
 				model: opts.model,
 				env: opts.env,
-				...(composioTools.length ? {
-					tools: composioTools,
-					systemPromptSuffix: `You have access to external service tools via Composio (prefixed "composio_"). When the user asks to send an email, use the SEND_EMAIL action directly — do NOT create a draft unless the user explicitly asks for a draft. Prefer direct actions over multi-step workflows.`,
-				} : {}),
+				...(composioTools.length ? { tools: composioTools } : {}),
+				...(systemPromptSuffix ? { systemPromptSuffix } : {}),
 			});
 
 			let text = "";

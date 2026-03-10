@@ -58,6 +58,12 @@ export class ComposioAdapter {
 		return tools.map((t) => this.toGCTool(t));
 	}
 
+	// Returns deduplicated slugs of all connected toolkits
+	async getConnectedToolkitSlugs(): Promise<string[]> {
+		const connections = await this.client.listConnections(this.userId);
+		return [...new Set(connections.map((c) => c.toolkitSlug))];
+	}
+
 	// Management endpoints — proxied for server routes
 
 	async getToolkits(): Promise<ComposioToolkit[]> {
