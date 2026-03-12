@@ -6,3 +6,4 @@ pi-mono/
 *.tgz
 snake-game.html
 examples/debug-events.ts
+.env

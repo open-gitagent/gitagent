@@ -55,6 +55,15 @@ export class ComposioAdapter {
 
 		const slugs = [...new Set(connections.map((c) => c.toolkitSlug))];
 		const tools = await this.client.searchTools(query, slugs, limit);
+
+		// Sort: direct-action tools first (SEND, CREATE, LIST), drafts last
+		tools.sort((a, b) => {
+			const aIsDraft = a.slug.includes("DRAFT");
+			const bIsDraft = b.slug.includes("DRAFT");
+			if (aIsDraft !== bIsDraft) return aIsDraft ? 1 : -1;
+			return 0;
+		});
+
 		return tools.map((t) => this.toGCTool(t));
 	}
 

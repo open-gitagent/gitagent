@@ -1,0 +1,396 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "gitclaw-architecture",
+  "appState": {
+    "theme": "light",
+    "viewBackgroundColor": "#ffffff"
+  },
+  "elements": [
+
+    {"type":"text","id":"title","x":380,"y":30,"width":500,"height":45,"text":"GitClaw Architecture","fontSize":36,"fontFamily":1,"textAlign":"center","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"subtitle","x":380,"y":78,"width":500,"height":20,"text":"v0.3.1 — git-native AI agent runtime","fontSize":14,"fontFamily":1,"textAlign":"center","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+
+
+
+    {"type":"rectangle","id":"spec","x":60,"y":130,"width":1140,"height":130,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"spec-t","x":80,"y":140,"width":400,"height":24,"text":"GitAgent Spec (v0.1.0)","fontSize":20,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"spec-sub","x":80,"y":166,"width":700,"height":16,"text":"Convention-over-configuration: any git repo with an agent.yaml becomes a GitAgent","fontSize":12,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+
+    {"type":"rectangle","id":"f1","x":80,"y":192,"width":90,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f1t","x":82,"y":196,"width":86,"height":16,"text":"agent.yaml","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f2","x":178,"y":192,"width":80,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f2t","x":180,"y":196,"width":76,"height":16,"text":"SOUL.md","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f3","x":266,"y":192,"width":80,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f3t","x":268,"y":196,"width":76,"height":16,"text":"RULES.md","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f4","x":354,"y":192,"width":86,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f4t","x":356,"y":196,"width":82,"height":16,"text":"DUTIES.md","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f5","x":448,"y":192,"width":60,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f5t","x":450,"y":196,"width":56,"height":16,"text":"skills/","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f6","x":516,"y":192,"width":56,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f6t","x":518,"y":196,"width":52,"height":16,"text":"tools/","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f7","x":580,"y":192,"width":72,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f7t","x":582,"y":196,"width":68,"height":16,"text":"memory/","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f8","x":660,"y":192,"width":86,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f8t","x":662,"y":196,"width":82,"height":16,"text":"knowledge/","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f9","x":754,"y":192,"width":58,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f9t","x":756,"y":196,"width":54,"height":16,"text":"hooks/","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f10","x":820,"y":192,"width":82,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f10t","x":822,"y":196,"width":78,"height":16,"text":"workflows/","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f11","x":910,"y":192,"width":66,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f11t","x":912,"y":196,"width":62,"height":16,"text":"agents/","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f12","x":984,"y":192,"width":76,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f12t","x":986,"y":196,"width":72,"height":16,"text":"examples/","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"f13","x":1068,"y":192,"width":60,"height":26,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"f13t","x":1070,"y":196,"width":56,"height":16,"text":"config/","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"text","id":"spec-notes","x":80,"y":228,"width":700,"height":14,"text":"Inheritance: extends → clone parent → deep-merge manifests     Dependencies: clone into .gitagent/deps/ via git tags","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+
+
+
+    {"type":"arrow","id":"a-spec-down","x":630,"y":260,"width":0,"height":50,"strokeColor":"#495057","points":[[0,0],[0,50]],"strokeWidth":1,"roughness":0},
+    {"type":"text","id":"a-spec-lbl","x":640,"y":274,"width":80,"height":14,"text":"loaded by","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+
+
+
+    {"type":"rectangle","id":"cli","x":60,"y":340,"width":320,"height":100,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"cli-t","x":80,"y":350,"width":200,"height":22,"text":"CLI","fontSize":18,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"cli-f","x":80,"y":374,"width":200,"height":14,"text":"src/index.ts","fontSize":10,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+    {"type":"text","id":"cli-d","x":80,"y":394,"width":280,"height":36,"text":"REPL mode (interactive) · single-shot (--prompt)\n--voice openai|gemini · --sandbox\n--repo <url> · --model provider:modelId","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"voice","x":470,"y":340,"width":320,"height":100,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"voice-t","x":490,"y":350,"width":200,"height":22,"text":"Voice Server","fontSize":18,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"voice-f","x":490,"y":374,"width":200,"height":14,"text":"src/voice/server.ts","fontSize":10,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+    {"type":"text","id":"voice-d","x":490,"y":394,"width":280,"height":36,"text":"HTTP :3333 + WebSocket upgrade\nBrowser UI (ui.html) — Chat / Files / Integrations\naudio · video_frame · text messages","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"sdk","x":880,"y":340,"width":320,"height":100,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"sdk-t","x":900,"y":350,"width":200,"height":22,"text":"SDK API","fontSize":18,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"sdk-f","x":900,"y":374,"width":200,"height":14,"text":"src/exports.ts","fontSize":10,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+    {"type":"text","id":"sdk-d","x":900,"y":394,"width":280,"height":36,"text":"query() · tool() · loadAgent()\nstartVoiceServer() · createSandboxContext()\ninitLocalSession()","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+
+
+    {"type":"arrow","id":"a-cli-q","x":220,"y":440,"width":280,"height":80,"strokeColor":"#495057","points":[[0,0],[280,80]],"strokeWidth":1,"roughness":0},
+    {"type":"arrow","id":"a-voice-q","x":630,"y":440,"width":0,"height":80,"strokeColor":"#495057","points":[[0,0],[0,80]],"strokeWidth":1,"roughness":0},
+    {"type":"arrow","id":"a-sdk-q","x":1040,"y":440,"width":-280,"height":80,"strokeColor":"#495057","points":[[0,0],[-280,80]],"strokeWidth":1,"roughness":0},
+
+
+
+    {"type":"rectangle","id":"query","x":280,"y":540,"width":700,"height":100,"strokeColor":"#1e1e1e","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":2},
+    {"type":"text","id":"query-t","x":320,"y":552,"width":620,"height":26,"text":"query(options: QueryOptions): Query","fontSize":22,"fontFamily":3,"textAlign":"center","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"query-f","x":320,"y":580,"width":620,"height":14,"text":"src/sdk.ts — the single entry point for all interactions","fontSize":10,"fontFamily":1,"textAlign":"center","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+    {"type":"text","id":"query-d","x":320,"y":600,"width":620,"height":30,"text":"Returns AsyncGenerator<GCMessage> + abort() · steer() · sessionId() · manifest() · messages()\nChannel<T> for backpressure: push() / pull() / finish()  ·  QueryOptions: prompt, dir, model, tools, hooks, sandbox","fontSize":10,"fontFamily":1,"textAlign":"center","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"msg-box","x":1020,"y":540,"width":180,"height":100,"strokeColor":"#495057","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"msg-t","x":1030,"y":548,"width":160,"height":16,"text":"GCMessage","fontSize":13,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"msg-d","x":1030,"y":568,"width":160,"height":64,"text":"assistant (content,\n  thinking, usage, cost)\nuser · tool_use · tool_result\nsystem (start/end/error)\ndelta (text | thinking)","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+
+
+    {"type":"arrow","id":"a-q-loader","x":460,"y":640,"width":-200,"height":80,"strokeColor":"#495057","points":[[0,0],[-200,80]],"strokeWidth":1.5,"roughness":0},
+    {"type":"text","id":"a-ql-lbl","x":280,"y":672,"width":80,"height":14,"text":"loads agent","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+
+    {"type":"arrow","id":"a-q-engine","x":800,"y":640,"width":200,"height":80,"strokeColor":"#495057","points":[[0,0],[200,80]],"strokeWidth":1.5,"roughness":0},
+    {"type":"text","id":"a-qe-lbl","x":920,"y":672,"width":100,"height":14,"text":"creates engine","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+
+
+
+    {"type":"rectangle","id":"loader","x":60,"y":740,"width":520,"height":300,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"loader-t","x":80,"y":752,"width":300,"height":24,"text":"Agent Loader","fontSize":20,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"loader-f","x":80,"y":778,"width":200,"height":14,"text":"src/loader.ts → LoadedAgent","fontSize":10,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+
+    {"type":"text","id":"pipe-hdr","x":80,"y":802,"width":400,"height":16,"text":"System Prompt Assembly Pipeline:","fontSize":13,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"rectangle","id":"p1","x":80,"y":826,"width":60,"height":24,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"p1t","x":82,"y":830,"width":56,"height":14,"text":"SOUL","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"pa1","x":140,"y":838,"width":10,"height":0,"strokeColor":"#868e96","points":[[0,0],[10,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"p2","x":150,"y":826,"width":66,"height":24,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"p2t","x":152,"y":830,"width":62,"height":14,"text":"RULES","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"pa2","x":216,"y":838,"width":10,"height":0,"strokeColor":"#868e96","points":[[0,0],[10,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"p3","x":226,"y":826,"width":72,"height":24,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"p3t","x":228,"y":830,"width":68,"height":14,"text":"DUTIES","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"pa3","x":298,"y":838,"width":10,"height":0,"strokeColor":"#868e96","points":[[0,0],[10,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"p4","x":308,"y":826,"width":70,"height":24,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"p4t","x":310,"y":830,"width":66,"height":14,"text":"memory","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"pa4","x":378,"y":838,"width":10,"height":0,"strokeColor":"#868e96","points":[[0,0],[10,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"p5","x":388,"y":826,"width":86,"height":24,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"p5t","x":390,"y":830,"width":82,"height":14,"text":"knowledge","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"pa5","x":474,"y":838,"width":10,"height":0,"strokeColor":"#868e96","points":[[0,0],[10,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"p6","x":484,"y":826,"width":60,"height":24,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"p6t","x":486,"y":830,"width":56,"height":14,"text":"skills","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"rectangle","id":"p7","x":80,"y":858,"width":80,"height":24,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"p7t","x":82,"y":862,"width":76,"height":14,"text":"workflows","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"pa7","x":160,"y":870,"width":10,"height":0,"strokeColor":"#868e96","points":[[0,0],[10,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"p8","x":170,"y":858,"width":64,"height":24,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"p8t","x":172,"y":862,"width":60,"height":14,"text":"agents","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"pa8","x":234,"y":870,"width":10,"height":0,"strokeColor":"#868e96","points":[[0,0],[10,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"p9","x":244,"y":858,"width":76,"height":24,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"p9t","x":246,"y":862,"width":72,"height":14,"text":"examples","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"pa9","x":320,"y":870,"width":10,"height":0,"strokeColor":"#868e96","points":[[0,0],[10,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"p10","x":330,"y":858,"width":84,"height":24,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"p10t","x":332,"y":862,"width":80,"height":14,"text":"compliance","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"pa10","x":414,"y":870,"width":20,"height":0,"strokeColor":"#495057","points":[[0,0],[20,0]],"strokeWidth":1.5,"roughness":0},
+    {"type":"rectangle","id":"pout","x":434,"y":854,"width":130,"height":32,"strokeColor":"#1e1e1e","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"poutt","x":440,"y":862,"width":118,"height":14,"text":"→ systemPrompt","fontSize":11,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"text","id":"model-res","x":80,"y":896,"width":480,"height":14,"text":"Model resolution: config.model_override → --model → manifest.model.preferred → error","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+    {"type":"text","id":"model-fmt","x":80,"y":914,"width":400,"height":14,"text":"Format: \"provider:modelId\" e.g. \"anthropic:claude-sonnet-4-5-20250929\"","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+
+    {"type":"rectangle","id":"inherit","x":80,"y":938,"width":480,"height":50,"strokeColor":"#495057","backgroundColor":"transparent","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1,"strokeStyle":"dashed"},
+    {"type":"text","id":"inherit-t","x":90,"y":944,"width":300,"height":14,"text":"Inheritance & Dependencies","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"inherit-d","x":90,"y":962,"width":460,"height":22,"text":"extends: → clone parent → deep-merge manifests → union tools/skills\ndependencies: → clone into .gitagent/deps/ via git tags","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+
+
+    {"type":"rectangle","id":"engine","x":680,"y":740,"width":520,"height":300,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"engine-t","x":700,"y":752,"width":300,"height":24,"text":"Agent Engine","fontSize":20,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"rectangle","id":"aclass","x":700,"y":790,"width":240,"height":110,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"ac-t","x":710,"y":796,"width":200,"height":16,"text":"Agent Class","fontSize":13,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"ac-d","x":710,"y":816,"width":220,"height":76,"text":"State: systemPrompt · model\n  tools[] · messages[]\n  isStreaming · thinkingLevel\nMethods: prompt() · subscribe()\n  steer() · followUp() · abort()","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"events","x":960,"y":790,"width":220,"height":110,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"ev-t","x":970,"y":796,"width":200,"height":16,"text":"Events → GCMessage","fontSize":13,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"ev-d","x":970,"y":816,"width":200,"height":76,"text":"agent_start → session_start\ntext_delta → delta(text)\nthinking_delta → delta(thinking)\nmessage_end → assistant msg\ntool_exec → tool_use/result\nagent_end → session_end","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"aloop","x":700,"y":916,"width":480,"height":110,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"al-t","x":710,"y":922,"width":200,"height":16,"text":"Agent Loop","fontSize":14,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"rectangle","id":"al-outer","x":710,"y":942,"width":460,"height":74,"strokeColor":"#868e96","backgroundColor":"transparent","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"al-ol","x":720,"y":944,"width":200,"height":12,"text":"outer: follow-ups + steering","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+
+    {"type":"rectangle","id":"al-inner","x":720,"y":960,"width":440,"height":48,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"al-il","x":730,"y":962,"width":300,"height":12,"text":"inner: tool calls loop","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"ls1","x":730,"y":978,"width":80,"height":24,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"ls1t","x":732,"y":982,"width":76,"height":14,"text":"steer?","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"la1","x":810,"y":990,"width":16,"height":0,"strokeColor":"#495057","points":[[0,0],[16,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"ls2","x":826,"y":978,"width":100,"height":24,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"ls2t","x":828,"y":982,"width":96,"height":14,"text":"LLM stream","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"la2","x":926,"y":990,"width":16,"height":0,"strokeColor":"#495057","points":[[0,0],[16,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"ls3","x":942,"y":978,"width":100,"height":24,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"ls3t","x":944,"y":982,"width":96,"height":14,"text":"tool execute","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"la3","x":1042,"y":990,"width":16,"height":0,"strokeColor":"#495057","points":[[0,0],[16,0]],"strokeWidth":1,"roughness":0},
+    {"type":"diamond","id":"ls4","x":1058,"y":976,"width":60,"height":28,"strokeColor":"#1e1e1e","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":null},
+    {"type":"text","id":"ls4t","x":1068,"y":982,"width":40,"height":14,"text":"more?","fontSize":8,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"loopback","x":1088,"y":1004,"width":-358,"height":20,"strokeColor":"#495057","points":[[0,0],[0,10],[-358,10],[-358,-4]],"strokeWidth":1,"roughness":0},
+
+
+
+    {"type":"arrow","id":"a-engine-model","x":630,"y":1060,"width":0,"height":60,"strokeColor":"#495057","points":[[0,0],[0,60]],"strokeWidth":1.5,"roughness":0},
+    {"type":"text","id":"a-em-lbl","x":640,"y":1080,"width":80,"height":14,"text":"calls LLM","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+
+
+
+    {"type":"rectangle","id":"model","x":60,"y":1140,"width":1140,"height":140,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"mod-t","x":80,"y":1150,"width":400,"height":24,"text":"Model & Provider Layer","fontSize":20,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"rectangle","id":"mod-iface","x":80,"y":1182,"width":340,"height":80,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"mi-t","x":90,"y":1188,"width":200,"height":16,"text":"Model<TApi> Interface","fontSize":12,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"mi-d","x":90,"y":1208,"width":320,"height":48,"text":"id · name · api · provider · baseUrl\nreasoning · input: (text | image)[]\ncost: { input, output, cacheRead, cacheWrite } per 1M\ncontextWindow · maxTokens","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"mod-stream","x":440,"y":1182,"width":300,"height":80,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"ms-t","x":450,"y":1188,"width":200,"height":16,"text":"Streaming Pipeline","fontSize":12,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"ms-d","x":450,"y":1208,"width":280,"height":48,"text":"messages[]\n → transformContext() (prune to fit window)\n → convertToLlm() (filter unsupported)\n → provider.stream() (HTTP/SSE)\n → AssistantMessage + usage + cost","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"prov-box","x":760,"y":1182,"width":420,"height":80,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"pb-t","x":770,"y":1188,"width":200,"height":16,"text":"Providers","fontSize":12,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"pv1","x":770,"y":1210,"width":80,"height":22,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"pv1t","x":772,"y":1214,"width":76,"height":14,"text":"Anthropic","fontSize":9,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"pv2","x":858,"y":1210,"width":70,"height":22,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"pv2t","x":860,"y":1214,"width":66,"height":14,"text":"OpenAI","fontSize":9,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"pv3","x":936,"y":1210,"width":66,"height":22,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"pv3t","x":938,"y":1214,"width":62,"height":14,"text":"Google","fontSize":9,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"pv4","x":1010,"y":1210,"width":70,"height":22,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"pv4t","x":1012,"y":1214,"width":66,"height":14,"text":"Bedrock","fontSize":9,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"pv5","x":1088,"y":1210,"width":56,"height":22,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"pv5t","x":1090,"y":1214,"width":52,"height":14,"text":"Azure","fontSize":9,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"pv6","x":770,"y":1238,"width":60,"height":22,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"pv6t","x":772,"y":1242,"width":56,"height":14,"text":"Vertex","fontSize":9,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"rectangle","id":"pv7","x":838,"y":1238,"width":110,"height":22,"strokeColor":"#868e96","backgroundColor":"#f1f3f5","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"pv7t","x":840,"y":1242,"width":106,"height":14,"text":"+ OAI-compatible","fontSize":8,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#868e96","roughness":0},
+
+
+
+    {"type":"arrow","id":"a-model-tools","x":630,"y":1280,"width":0,"height":50,"strokeColor":"#495057","points":[[0,0],[0,50]],"strokeWidth":1,"roughness":0},
+
+
+
+    {"type":"rectangle","id":"tools","x":60,"y":1350,"width":1140,"height":120,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"tools-t","x":80,"y":1360,"width":200,"height":24,"text":"Tool System","fontSize":20,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"tools-f","x":80,"y":1386,"width":400,"height":14,"text":"src/tools/ · src/tool-loader.ts — Registration pipeline:","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+
+    {"type":"rectangle","id":"t1","x":80,"y":1410,"width":140,"height":44,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"t1t","x":90,"y":1414,"width":120,"height":14,"text":"1. Built-in","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"t1d","x":90,"y":1430,"width":120,"height":14,"text":"cli · read · write · memory","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+    {"type":"arrow","id":"ta1","x":220,"y":1432,"width":16,"height":0,"strokeColor":"#495057","points":[[0,0],[16,0]],"strokeWidth":1,"roughness":0},
+
+    {"type":"rectangle","id":"t2","x":236,"y":1410,"width":150,"height":44,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"t2t","x":246,"y":1414,"width":130,"height":14,"text":"2. Declarative YAML","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"t2d","x":246,"y":1430,"width":130,"height":14,"text":"tools/*.yaml · sh scripts","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+    {"type":"arrow","id":"ta2","x":386,"y":1432,"width":16,"height":0,"strokeColor":"#495057","points":[[0,0],[16,0]],"strokeWidth":1,"roughness":0},
+
+    {"type":"rectangle","id":"t3","x":402,"y":1410,"width":140,"height":44,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"t3t","x":412,"y":1414,"width":120,"height":14,"text":"3. SDK-injected","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"t3d","x":412,"y":1430,"width":120,"height":14,"text":"options.tools · tool()","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+    {"type":"arrow","id":"ta3","x":542,"y":1432,"width":16,"height":0,"strokeColor":"#495057","points":[[0,0],[16,0]],"strokeWidth":1,"roughness":0},
+
+    {"type":"rectangle","id":"t4","x":558,"y":1410,"width":110,"height":44,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"t4t","x":568,"y":1414,"width":90,"height":14,"text":"4. Filter","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"t4d","x":568,"y":1430,"width":90,"height":14,"text":"allow/disallow lists","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+    {"type":"arrow","id":"ta4","x":668,"y":1432,"width":16,"height":0,"strokeColor":"#495057","points":[[0,0],[16,0]],"strokeWidth":1,"roughness":0},
+
+    {"type":"rectangle","id":"t5","x":684,"y":1410,"width":150,"height":44,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"t5t","x":694,"y":1414,"width":130,"height":14,"text":"5. Hook-wrapped","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"t5d","x":694,"y":1430,"width":130,"height":14,"text":"allow | block | modify","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+    {"type":"arrow","id":"ta5","x":834,"y":1432,"width":16,"height":0,"strokeColor":"#495057","points":[[0,0],[16,0]],"strokeWidth":1,"roughness":0},
+
+    {"type":"rectangle","id":"t6","x":850,"y":1410,"width":160,"height":44,"strokeColor":"#1e1e1e","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"t6t","x":860,"y":1414,"width":140,"height":14,"text":"→ Agent.tools[]","fontSize":11,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"t6d","x":860,"y":1430,"width":140,"height":14,"text":"final tool set for Agent","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"text","id":"tools-note","x":80,"y":1460,"width":700,"height":12,"text":"Sandbox mode swaps: cli → sandbox-cli · read → sandbox-read · write → sandbox-write  (→ machine.execute / readFile / writeFile)","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+
+
+
+    {"type":"arrow","id":"a-tools-bottom","x":630,"y":1470,"width":0,"height":50,"strokeColor":"#495057","points":[[0,0],[0,50]],"strokeWidth":1,"roughness":0},
+
+
+
+    {"type":"rectangle","id":"hooks","x":60,"y":1540,"width":340,"height":150,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"hk-t","x":80,"y":1550,"width":200,"height":22,"text":"Hooks & Lifecycle","fontSize":18,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"hk-f","x":80,"y":1574,"width":300,"height":14,"text":"src/hooks.ts · src/sdk-hooks.ts","fontSize":10,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+    {"type":"text","id":"hk-d","x":80,"y":1594,"width":300,"height":80,"text":"Script-based: hooks/hooks.yaml\n  spawn(\"sh\", [script]) · JSON stdin/stdout · 10s timeout\nProgrammatic: GCHooks interface (callbacks)\n\nEvents: on_session_start · pre_tool_use\n  post_response · on_error\nActions: allow · block (+ reason) · modify (args)","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"voice-sys","x":440,"y":1540,"width":340,"height":150,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"vs-t","x":460,"y":1550,"width":300,"height":22,"text":"Voice & Multimodal","fontSize":18,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"vs-f","x":460,"y":1574,"width":200,"height":14,"text":"src/voice/","fontSize":10,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+    {"type":"text","id":"vs-d","x":460,"y":1594,"width":300,"height":80,"text":"MultimodalAdapter interface\nOpenAI Realtime: gpt-4o · VAD 800ms · frame injection\nGemini Live: 2.5 Flash · 24↔16kHz resample · video\n\nClient → Server: audio · video_frame · text\nServer → Client: audio_delta · transcript\n  tool_call · tool_result · agent_working/done","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"composio","x":820,"y":1540,"width":380,"height":150,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"cp-t","x":840,"y":1550,"width":300,"height":22,"text":"Composio Integration","fontSize":18,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"cp-f","x":840,"y":1574,"width":340,"height":14,"text":"src/composio/ — native fetch, no SDK dependency","fontSize":10,"fontFamily":3,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+    {"type":"text","id":"cp-d","x":840,"y":1594,"width":340,"height":80,"text":"ComposioClient: REST v3 wrapper\n  listToolkits · searchTools · executeTool · initiateConnection\nComposioAdapter: Composio → GCToolDefinition[] · 30s cache\n  naming: composio_{toolkit}_{slug}\n  SEND → use directly · DRAFT → only when asked\nOAuth: authConfig → initiate → popup → callback\nTools injected via searchTools() semantic matching","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+
+
+    {"type":"arrow","id":"a-bottom-supp","x":630,"y":1690,"width":0,"height":50,"strokeColor":"#495057","points":[[0,0],[0,50]],"strokeWidth":1,"roughness":0},
+
+
+
+    {"type":"rectangle","id":"supp","x":60,"y":1760,"width":1140,"height":140,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"supp-t","x":80,"y":1770,"width":300,"height":22,"text":"Supporting Systems","fontSize":18,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"supp-sub","x":80,"y":1794,"width":600,"height":14,"text":"All loaded by Agent Loader → injected into system prompt or available at runtime","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#adb5bd","roughness":0},
+
+    {"type":"rectangle","id":"s1","x":80,"y":1818,"width":140,"height":36,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"s1t","x":90,"y":1822,"width":120,"height":12,"text":"Memory","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"s1d","x":90,"y":1836,"width":120,"height":12,"text":"MEMORY.md · git-tracked","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"s2","x":230,"y":1818,"width":140,"height":36,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"s2t","x":240,"y":1822,"width":120,"height":12,"text":"Skills","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"s2d","x":240,"y":1836,"width":120,"height":12,"text":"SKILL.md · /skill:name","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"s3","x":380,"y":1818,"width":140,"height":36,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"s3t","x":390,"y":1822,"width":120,"height":12,"text":"Knowledge","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"s3d","x":390,"y":1836,"width":120,"height":12,"text":"always_load / on-demand","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"s4","x":530,"y":1818,"width":140,"height":36,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"s4t","x":540,"y":1822,"width":120,"height":12,"text":"Workflows","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"s4d","x":540,"y":1836,"width":120,"height":12,"text":"*.yaml / *.md steps","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"s5","x":680,"y":1818,"width":140,"height":36,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"s5t","x":690,"y":1822,"width":120,"height":12,"text":"Sub-Agents","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"s5d","x":690,"y":1836,"width":120,"height":12,"text":"dir or file · delegation","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"s6","x":80,"y":1862,"width":140,"height":36,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"s6t","x":90,"y":1866,"width":120,"height":12,"text":"Sessions","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"s6d","x":90,"y":1880,"width":120,"height":12,"text":"branches · push · PR","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"s7","x":230,"y":1862,"width":140,"height":36,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"s7t","x":240,"y":1866,"width":120,"height":12,"text":"Compliance","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"s7d","x":240,"y":1880,"width":120,"height":12,"text":"FINRA · SEC · SOD · HITL","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"s8","x":380,"y":1862,"width":140,"height":36,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"s8t","x":390,"y":1866,"width":120,"height":12,"text":"Audit","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"s8d","x":390,"y":1880,"width":120,"height":12,"text":"JSONL · .gitagent/audit/","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"s9","x":530,"y":1862,"width":140,"height":36,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"s9t","x":540,"y":1866,"width":120,"height":12,"text":"Config","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"s9d","x":540,"y":1880,"width":120,"height":12,"text":"{env}.yaml · deep-merge","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"rectangle","id":"s10","x":680,"y":1862,"width":140,"height":36,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"s10t","x":690,"y":1866,"width":120,"height":12,"text":"Examples","fontSize":11,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"s10d","x":690,"y":1880,"width":120,"height":12,"text":"*.md · in-context calibration","fontSize":8,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+
+
+    {"type":"arrow","id":"a-supp-gm","x":630,"y":1900,"width":0,"height":60,"strokeColor":"#495057","points":[[0,0],[0,60]],"strokeWidth":1.5,"roughness":0,"strokeStyle":"dashed"},
+    {"type":"text","id":"a-gm-lbl","x":644,"y":1920,"width":120,"height":14,"text":"optionally uses","fontSize":10,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+
+
+
+    {"type":"rectangle","id":"gm","x":60,"y":1980,"width":1140,"height":360,"strokeColor":"#1e1e1e","backgroundColor":"#f8f9fa","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":2,"strokeStyle":"dashed"},
+    {"type":"text","id":"gm-t","x":80,"y":1992,"width":700,"height":26,"text":"GitMachine — Stateless Sandboxed Execution","fontSize":22,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"gm-sub","x":80,"y":2020,"width":800,"height":16,"text":"Optional peer dependency · Turns any GitAgent into a stateless VM that can run anywhere","fontSize":12,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+
+
+    {"type":"rectangle","id":"gm-triad","x":80,"y":2050,"width":1100,"height":130,"strokeColor":"#495057","backgroundColor":"transparent","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"gm-triad-t","x":100,"y":2056,"width":400,"height":16,"text":"The Stateless VM Triad","fontSize":14,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"rectangle","id":"gm-gc","x":100,"y":2080,"width":300,"height":80,"strokeColor":"#1e1e1e","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"gm-gc-t","x":120,"y":2086,"width":260,"height":16,"text":"GitClaw (Runtime)","fontSize":13,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"gm-gc-d","x":120,"y":2106,"width":260,"height":44,"text":"Agent logic · tools · model calls\nSystem prompt · hooks · compliance\nDrives the agent loop inside the VM\nNo state held — reads from git","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"text","id":"gm-plus1","x":410,"y":2110,"width":20,"height":20,"text":"+","fontSize":20,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"rectangle","id":"gm-auth","x":440,"y":2080,"width":300,"height":80,"strokeColor":"#1e1e1e","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"gm-auth-t","x":460,"y":2086,"width":260,"height":16,"text":"Auth & Credential Service","fontSize":13,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"gm-auth-d","x":460,"y":2106,"width":260,"height":44,"text":"Git credentials (clone/push access)\nAPI keys injected at VM start\nComposio OAuth tokens\nNo secrets baked into the image","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+    {"type":"text","id":"gm-plus2","x":750,"y":2110,"width":20,"height":20,"text":"+","fontSize":20,"fontFamily":1,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"rectangle","id":"gm-e2b","x":780,"y":2080,"width":380,"height":80,"strokeColor":"#1e1e1e","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"gm-e2b-t","x":800,"y":2086,"width":340,"height":16,"text":"GitMachine (E2B Sandbox)","fontSize":13,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"gm-e2b-d","x":800,"y":2106,"width":340,"height":44,"text":"Ephemeral VM · Machine (abstract) → E2BMachine\nexecute() · readFile() · writeFile()\nSandbox boots → clone repo → checkout branch\nVM is disposable — all state lives in git","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+
+    {"type":"rectangle","id":"gm-lifecycle","x":80,"y":2200,"width":540,"height":120,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"gm-lc-t","x":100,"y":2208,"width":300,"height":16,"text":"Stateless VM Lifecycle","fontSize":13,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"rectangle","id":"lc1","x":100,"y":2232,"width":66,"height":24,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"lc1t","x":102,"y":2236,"width":62,"height":14,"text":"boot VM","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"lca1","x":166,"y":2244,"width":12,"height":0,"strokeColor":"#495057","points":[[0,0],[12,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"lc2","x":178,"y":2232,"width":80,"height":24,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"lc2t","x":180,"y":2236,"width":76,"height":14,"text":"inject creds","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"lca2","x":258,"y":2244,"width":12,"height":0,"strokeColor":"#495057","points":[[0,0],[12,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"lc3","x":270,"y":2232,"width":56,"height":24,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"lc3t","x":272,"y":2236,"width":52,"height":14,"text":"clone","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"lca3","x":326,"y":2244,"width":12,"height":0,"strokeColor":"#495057","points":[[0,0],[12,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"lc4","x":338,"y":2232,"width":76,"height":24,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"lc4t","x":340,"y":2236,"width":72,"height":14,"text":"checkout br","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"lca4","x":414,"y":2244,"width":12,"height":0,"strokeColor":"#495057","points":[[0,0],[12,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"lc5","x":426,"y":2232,"width":80,"height":24,"strokeColor":"#1e1e1e","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1.5},
+    {"type":"text","id":"lc5t","x":428,"y":2236,"width":76,"height":14,"text":"agent work","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"lca5","x":506,"y":2244,"width":12,"height":0,"strokeColor":"#495057","points":[[0,0],[12,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"lc6","x":518,"y":2232,"width":82,"height":24,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"lc6t","x":520,"y":2236,"width":78,"height":14,"text":"auto-commit","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"rectangle","id":"lc7","x":100,"y":2264,"width":56,"height":24,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"lc7t","x":102,"y":2268,"width":52,"height":14,"text":"push","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"arrow","id":"lca7","x":156,"y":2276,"width":12,"height":0,"strokeColor":"#495057","points":[[0,0],[12,0]],"strokeWidth":1,"roughness":0},
+    {"type":"rectangle","id":"lc8","x":168,"y":2264,"width":72,"height":24,"strokeColor":"#495057","backgroundColor":"#dee2e6","fillStyle":"solid","roughness":0,"roundness":{"type":3}},
+    {"type":"text","id":"lc8t","x":170,"y":2268,"width":68,"height":14,"text":"destroy VM","fontSize":9,"fontFamily":3,"textAlign":"center","verticalAlign":"middle","strokeColor":"#1e1e1e","roughness":0},
+
+    {"type":"text","id":"lc-note","x":100,"y":2296,"width":500,"height":12,"text":"VM is fully disposable — git is the only persistence layer. Any new VM can resume from the branch.","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#868e96","roughness":0},
+
+
+    {"type":"rectangle","id":"gm-sessions","x":640,"y":2200,"width":540,"height":120,"strokeColor":"#495057","backgroundColor":"#e9ecef","fillStyle":"solid","roughness":0,"roundness":{"type":3},"strokeWidth":1},
+    {"type":"text","id":"gm-ss-t","x":660,"y":2208,"width":300,"height":16,"text":"Sessions = Branches","fontSize":13,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#1e1e1e","roughness":0},
+    {"type":"text","id":"gm-ss-d","x":660,"y":2232,"width":500,"height":76,"text":"Each agent session = a git branch\nNatural isolation — no shared filesystem state\nFull history — every action is a commit\nMerge results via pull request\nReconnect: GitMachine.connect(sandboxId)\nwhileRunning() — transparent pause/resume across VMs\n\nRun anywhere: any E2B-compatible host, any cloud, any region","fontSize":9,"fontFamily":1,"textAlign":"left","verticalAlign":"top","strokeColor":"#495057","roughness":0},
+
+
+
+    {"type":"text","id":"footer","x":380,"y":2370,"width":500,"height":16,"text":"GitClaw v0.3.1 · github.com/open-gitagent/gitclaw","fontSize":11,"fontFamily":1,"textAlign":"center","verticalAlign":"top","strokeColor":"#ced4da","roughness":0}
+  ]
+}

@@ -3,15 +3,42 @@ import { WebSocketServer, WebSocket as WS } from "ws";
 import { query } from "../sdk.js";
 import type { VoiceServerOptions, ClientMessage, ServerMessage, MultimodalAdapter } from "./adapter.js";
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from "fs";
+import { execSync } from "child_process";
 import { join, dirname, resolve, relative } from "path";
 import { fileURLToPath } from "url";
 import { OpenAIRealtimeAdapter } from "./openai-realtime.js";
 import { GeminiLiveAdapter } from "./gemini-live.js";
 import { ComposioAdapter } from "../composio/index.js";
 import type { GCToolDefinition } from "../sdk-types.js";
+import { appendMessage, loadHistory, deleteHistory } from "./chat-history.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
+
+/** Load .env file into process.env (won't overwrite existing vars) */
+function loadEnvFile(dir: string) {
+	const envPath = join(dir, ".env");
+	try {
+		const content = readFileSync(envPath, "utf-8");
+		for (const line of content.split("\n")) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith("#")) continue;
+			const eq = trimmed.indexOf("=");
+			if (eq < 1) continue;
+			const key = trimmed.slice(0, eq).trim();
+			let val = trimmed.slice(eq + 1).trim();
+			// Strip surrounding quotes
+			if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+				val = val.slice(1, -1);
+			}
+			if (!process.env[key]) {
+				process.env[key] = val;
+			}
+		}
+	} catch {
+		// No .env file — that's fine
+	}
+}
 
 function createAdapter(opts: VoiceServerOptions): MultimodalAdapter {
 	switch (opts.adapter) {
@@ -42,6 +69,9 @@ function loadUIHtml(): string {
 }
 
 export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => Promise<void>> {
+	// Load .env from agent directory (won't overwrite existing env vars)
+	loadEnvFile(resolve(opts.agentDir));
+
 	const port = opts.port || 3333;
 	const uiHtml = loadUIHtml();
 
@@ -73,17 +103,22 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 				console.error(`[voice] composioAdapter is NULL — COMPOSIO_API_KEY not set?`);
 			}
 
-			// Build system prompt suffix: always tell the agent about connected services
+			// Build system prompt suffix: always tell the agent about Composio capabilities
 			let systemPromptSuffix: string | undefined;
-			if (connectedSlugs.length > 0) {
-				const services = connectedSlugs.map((s) => s.replace(/_/g, " ")).join(", ");
-				systemPromptSuffix = [
-					`You are connected to the following external services via Composio: ${services}.`,
-					`You CAN perform real actions on these services — read emails, send emails, check calendars, create events, manage files, etc.`,
-					`Never tell the user you "can't access" or "don't have access to" these services. You have full access. Use the available tools (prefixed "composio_") to fulfill the user's request.`,
-					`When the user asks to send an email, use the SEND_EMAIL action directly — do NOT create a draft unless they explicitly ask for a draft.`,
-					`Prefer direct actions over multi-step workflows.`,
-				].join(" ");
+			if (composioAdapter) {
+				const parts = [
+					`You have access to external services via Composio integration (Gmail, Google Calendar, GitHub, Slack, and many more).`,
+					`You CAN perform real actions — send emails, read emails, check calendars, create events, manage repos, etc.`,
+					`NEVER tell the user you "can't access" or "don't have access to" external services. Always attempt to use the available Composio tools (prefixed "composio_") first.`,
+					`When the user asks to send an email, use the composio SEND_EMAIL tool directly — do NOT create a draft unless they explicitly ask for a draft.`,
+					`When the user asks about their calendar, use the composio calendar tools to fetch real events.`,
+					`Prefer Composio tools over CLI commands for any external service interaction.`,
+				];
+				if (connectedSlugs.length > 0) {
+					const services = connectedSlugs.map((s) => s.replace(/_/g, " ")).join(", ");
+					parts.unshift(`Currently connected services: ${services}.`);
+				}
+				systemPromptSuffix = parts.join(" ");
 			}
 
 			const result = query({
@@ -127,6 +162,7 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	// ── File API helpers ────────────────────────────────────────────────
 	const HIDDEN_DIRS = new Set([".git", "node_modules", ".gitagent", "dist", ".next", "__pycache__", ".venv"]);
 	const agentRoot = resolve(opts.agentDir);
+	let activeBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: agentRoot, encoding: "utf-8" }).trim();
 
 	// ── Composio integration (optional) ────────────────────────────────
 	let composioAdapter: ComposioAdapter | null = null;
@@ -276,6 +312,94 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 				window.close();
 				</script><p>Authentication complete. You can close this window.</p></body></html>`);
 
+		// ── Chat branch API routes ──────────────────────────────────────
+		} else if (url.pathname === "/api/chat/list" && req.method === "GET") {
+			try {
+				const git = (cmd: string) => execSync(cmd, { cwd: agentRoot, encoding: "utf-8" }).trim();
+				const current = git("git rev-parse --abbrev-ref HEAD");
+				// List branches matching chat/* pattern, plus the current branch
+				let branches: string[];
+				try {
+					branches = git("git branch --list 'chat/*' --sort=-committerdate --format='%(refname:short)|%(committerdate:relative)'")
+						.split("\n").filter(Boolean);
+				} catch {
+					branches = [];
+				}
+				const chats = branches.map((line) => {
+					const [branch, time] = line.split("|");
+					const name = branch.replace("chat/", "");
+					return { branch, name, time: time || "" };
+				});
+				// If current branch is not a chat/* branch, add it at the top
+				if (!current.startsWith("chat/")) {
+					chats.unshift({ branch: current, name: current, time: "current" });
+				}
+				jsonReply(res, 200, { current, chats });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/chat/new" && req.method === "POST") {
+			try {
+				const git = (cmd: string) => execSync(cmd, { cwd: agentRoot, encoding: "utf-8" }).trim();
+				// Generate branch name: chat/YYYY-MM-DD-HHMMSS
+				const now = new Date();
+				const pad = (n: number) => String(n).padStart(2, "0");
+				const branch = `chat/${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+				// Stage and commit any pending changes on current branch
+				try {
+					git("git add -A");
+					git('git commit -m "auto-save before new chat" --allow-empty');
+				} catch {
+					// No changes to commit, that's fine
+				}
+				// Create and switch to new branch
+				git(`git checkout -b ${branch}`);
+				activeBranch = branch;
+				jsonReply(res, 200, { branch });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/chat/switch" && req.method === "POST") {
+			try {
+				const body = await readBody(req);
+				const { branch } = JSON.parse(body);
+				if (!branch) return jsonReply(res, 400, { error: "Missing branch" });
+				const git = (cmd: string) => execSync(cmd, { cwd: agentRoot, encoding: "utf-8" }).trim();
+				// Auto-save current branch
+				try {
+					git("git add -A");
+					git('git commit -m "auto-save before switching chat" --allow-empty');
+				} catch {}
+				git(`git checkout ${branch}`);
+				activeBranch = branch;
+				jsonReply(res, 200, { branch });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/chat/delete" && req.method === "POST") {
+			try {
+				const body = await readBody(req);
+				const { branch } = JSON.parse(body);
+				if (!branch) return jsonReply(res, 400, { error: "Missing branch" });
+				const git = (cmd: string) => execSync(cmd, { cwd: agentRoot, encoding: "utf-8" }).trim();
+				const current = git("git rev-parse --abbrev-ref HEAD");
+				if (branch === current) return jsonReply(res, 400, { error: "Cannot delete the active branch" });
+				git(`git branch -D ${branch}`);
+				deleteHistory(opts.agentDir, branch);
+				jsonReply(res, 200, { ok: true });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+	} else if (url.pathname === "/api/chat/history" && req.method === "GET") {
+			const branch = url.searchParams.get("branch");
+			if (!branch) return jsonReply(res, 400, { error: "Missing branch param" });
+			const messages = loadHistory(opts.agentDir, branch);
+			jsonReply(res, 200, { branch, messages });
+
 		// ── Composio API routes ─────────────────────────────────────────
 		} else if (url.pathname === "/api/composio/toolkits" && req.method === "GET") {
 			if (!composioAdapter) return jsonReply(res, 501, { error: "Composio not configured" });
@@ -330,8 +454,23 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	wss.on("connection", async (browserWs: WS) => {
 		console.log(dim("[voice] Browser connected"));
 
-		const adapter = createAdapter(opts);
-		const sendToBrowser = (msg: ServerMessage) => safeSend(browserWs, JSON.stringify(msg));
+		// Inject Composio awareness into adapter instructions so the voice LLM
+		// never tells the user "I can't access" external services
+		const adapterOpts = composioAdapter ? {
+			...opts,
+			adapterConfig: {
+				...opts.adapterConfig,
+				instructions: (opts.adapterConfig.instructions || "") +
+					" The agent has FULL access to external services via Composio — Gmail, Google Calendar, GitHub, Slack, and more. " +
+					"When the user asks to send emails, check calendars, or interact with any external service, ALWAYS use run_agent to handle it. " +
+					"NEVER say you can't access these services or that you don't have these tools. The agent has them. Just call run_agent.",
+			},
+		} : opts;
+		const adapter = createAdapter(adapterOpts);
+		const sendToBrowser = (msg: ServerMessage) => {
+			safeSend(browserWs, JSON.stringify(msg));
+			appendMessage(opts.agentDir, activeBranch, msg);
+		};
 
 		try {
 			await adapter.connect({
@@ -350,6 +489,9 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 		browserWs.on("message", (data) => {
 			try {
 				const msg = JSON.parse(data.toString()) as ClientMessage;
+				if (msg.type === "text") {
+					appendMessage(opts.agentDir, activeBranch, { type: "transcript", role: "user", text: msg.text });
+				}
 				adapter.send(msg);
 			} catch {
 				// Ignore unparseable messages

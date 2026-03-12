@@ -36,6 +36,49 @@
   .view-tab.active { border-color: #58a6ff; color: #58a6ff; background: rgba(88,166,255,0.08); }
   .main { display: flex; flex: 1; overflow: hidden; min-height: 0; }
 
+  /* CHAT SIDEBAR */
+  .chat-sidebar {
+    width: 220px; min-width: 220px; background: #0a0d12; border-right: 1px solid #21262d;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .chat-sidebar-header {
+    padding: 10px 12px; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid #21262d;
+  }
+  .chat-sidebar-header span {
+    font-size: 11px; color: #8b949e; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .new-chat-btn {
+    background: #238636; border: none; border-radius: 4px; color: #fff;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600;
+    padding: 4px 10px; cursor: pointer; transition: background 0.15s;
+  }
+  .new-chat-btn:hover { background: #2ea043; }
+  .chat-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+  .chat-item {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 12px;
+    font-family: 'IBM Plex Mono', monospace; color: #8b949e; cursor: pointer;
+    transition: background 0.1s; border-left: 2px solid transparent;
+  }
+  .chat-item:hover { background: #161b22; color: #b1bac4; }
+  .chat-item.active { background: rgba(88,166,255,0.08); color: #e6edf3; border-left-color: #58a6ff; }
+  .chat-item .chat-icon { width: 14px; height: 14px; flex-shrink: 0; opacity: 0.5; }
+  .chat-item .chat-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-item .chat-time { font-size: 10px; color: #484f58; flex-shrink: 0; }
+  .chat-item .chat-delete {
+    width: 18px; height: 18px; border: none; background: transparent; color: #484f58;
+    cursor: pointer; border-radius: 3px; display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.1s; font-size: 13px;
+  }
+  .chat-item:hover .chat-delete { opacity: 1; }
+  .chat-item .chat-delete:hover { background: #21262d; color: #f85149; }
+  .branch-indicator {
+    padding: 8px 12px; border-top: 1px solid #21262d; font-size: 10px;
+    font-family: 'IBM Plex Mono', monospace; color: #484f58; display: flex; align-items: center; gap: 6px;
+  }
+  .branch-indicator svg { width: 12px; height: 12px; }
+  .branch-indicator .branch-name { color: #8b949e; }
+
   /* CHAT VIEW */
   .chat-view { display: flex; flex: 1; overflow: hidden; min-height: 0; }
   .chat-view.hidden { display: none; }
@@ -96,7 +139,7 @@
   }
   .input-bar button:hover { background: #2ea043; }
 
-  /* FILES VIEW */
+  /* FILES VIEW (disabled)
   .files-view { display: flex; flex: 1; overflow: hidden; }
   .files-view.hidden { display: none; }
   .activity-bar {
@@ -192,6 +235,7 @@
     font-family: 'IBM Plex Mono', monospace;
   }
   .status-bar .sb-right { margin-left: auto; display: flex; gap: 16px; }
+  FILES VIEW (disabled) */
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: rgba(139,148,158,0.2); border-radius: 4px; }
@@ -264,7 +308,7 @@
     <h1>Git<span>Claw</span></h1>
     <div class="view-tabs">
       <button class="view-tab active" id="tabChat" onclick="switchView('chat')">Chat</button>
-      <button class="view-tab" id="tabFiles" onclick="switchView('files')">Files</button>
+      <!-- <button class="view-tab" id="tabFiles" onclick="switchView('files')">Files</button> -->
       <button class="view-tab" id="tabIntegrations" onclick="switchView('integrations')">Integrations</button>
     </div>
   </div>
@@ -274,6 +318,17 @@
   </div>
 </div>
 <div class="main">
+  <div class="chat-sidebar" id="chatSidebar">
+    <div class="chat-sidebar-header">
+      <span>Chats</span>
+      <button class="new-chat-btn" onclick="newChat()">+ New</button>
+    </div>
+    <div class="chat-list" id="chatList"></div>
+    <div class="branch-indicator" id="branchIndicator">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      <span class="branch-name" id="branchName">main</span>
+    </div>
+  </div>
   <div class="chat-view" id="chatView">
     <div class="panel-cam">
       <div class="camera-container">
@@ -300,6 +355,7 @@
       </div>
     </div>
   </div>
+  <!-- FILES VIEW (disabled)
   <div class="files-view hidden" id="filesView">
     <div class="activity-bar">
       <button class="activity-btn active" title="Explorer">
@@ -328,6 +384,7 @@
       </div>
     </div>
   </div>
+  -->
   <div class="integrations-view hidden" id="integrationsView">
     <div class="integrations-header">
       <h2>Integrations</h2>
@@ -338,11 +395,12 @@
     </div>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+<!-- <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script> -->
 <script>
 let currentView='chat',filesLoaded=false,integrationsLoaded=false;
-function switchView(v){currentView=v;document.getElementById('chatView').classList.toggle('hidden',v!=='chat');document.getElementById('filesView').classList.toggle('hidden',v!=='files');document.getElementById('integrationsView').classList.toggle('hidden',v!=='integrations');document.getElementById('tabChat').classList.toggle('active',v==='chat');document.getElementById('tabFiles').classList.toggle('active',v==='files');document.getElementById('tabIntegrations').classList.toggle('active',v==='integrations');if(v==='files'&&!filesLoaded){loadFileTree();filesLoaded=true;}if(v==='files'&&monacoEditor)monacoEditor.layout();if(v==='integrations'&&!integrationsLoaded){loadToolkits();integrationsLoaded=true;}}
+function switchView(v){currentView=v;document.getElementById('chatView').classList.toggle('hidden',v!=='chat');/* document.getElementById('filesView').classList.toggle('hidden',v!=='files'); */document.getElementById('integrationsView').classList.toggle('hidden',v!=='integrations');document.getElementById('tabChat').classList.toggle('active',v==='chat');/* document.getElementById('tabFiles').classList.toggle('active',v==='files'); */document.getElementById('tabIntegrations').classList.toggle('active',v==='integrations');/* if(v==='files'&&!filesLoaded){loadFileTree();filesLoaded=true;}if(v==='files'&&monacoEditor)monacoEditor.layout(); */if(v==='integrations'&&!integrationsLoaded){loadToolkits();integrationsLoaded=true;}}
 
+/* FILES/MONACO DISABLED
 let monacoEditor=null,monacoReady=false;
 require.config({paths:{vs:'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs'}});
 require(['vs/editor/editor.main'],function(){monacoReady=true;monaco.editor.defineTheme('gitclaw-dark',{base:'vs-dark',inherit:true,rules:[],colors:{'editor.background':'#0d1117','editor.lineHighlightBackground':'#161b2280','editorLineNumber.foreground':'#484f58','editorLineNumber.activeForeground':'#8b949e','editor.selectionBackground':'#58a6ff30','editorCursor.foreground':'#58a6ff','editorWidget.background':'#161b22','editorWidget.border':'#21262d','minimap.background':'#0d1117'}});});
@@ -373,6 +431,7 @@ async function openFile(fp,fn){if(openTabs[fp]){switchTab(fp);return;}ensureMona
 async function saveCurrentFile(){if(!activeTabPath||!openTabs[activeTabPath])return;if(monacoEditor)openTabs[activeTabPath].content=monacoEditor.getValue();try{var r=await fetch('/api/file',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:activeTabPath,content:openTabs[activeTabPath].content})});var d=await r.json();if(d.ok){openTabs[activeTabPath].modified=false;renderTabs();}}catch(e){}}
 
 document.addEventListener('keydown',function(e){if(currentView!=='files')return;if((e.ctrlKey||e.metaKey)&&e.key==='s'){e.preventDefault();saveCurrentFile();}if((e.ctrlKey||e.metaKey)&&e.key==='w'){e.preventDefault();if(activeTabPath)closeTab(activeTabPath);}});
+FILES/MONACO DISABLED */
 
 // CHAT / VOICE
 var ws=null,audioCtx=null,micStream=null,micProcessor=null,micActive=false,cameraStream=null,cameraActive=false,cameraInterval=null;
@@ -432,6 +491,86 @@ function stopCamera(){cameraActive=false;cameraBtn.classList.remove('active');if
 
 function sendText(){var t=textInput.value.trim();if(!t)return;connectWS();appendConv('<span class="label">You: </span>'+escHtml(t),'user');sendMsg({type:'text',text:t});textInput.value='';}
 textInput.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendText();}});
+
+// CHAT BRANCHES
+var currentBranch='',chatBranches=[];
+
+async function loadChatBranches(){
+  try{
+    var r=await fetch('/api/chat/list');
+    var d=await r.json();
+    if(d.error)return;
+    chatBranches=d.chats||[];
+    currentBranch=d.current||'';
+    renderChatList();
+    document.getElementById('branchName').textContent=currentBranch||'main';
+  }catch(e){}
+}
+
+function renderChatList(){
+  var list=document.getElementById('chatList');
+  list.innerHTML='';
+  chatBranches.forEach(function(chat){
+    var item=document.createElement('div');
+    item.className='chat-item'+(chat.branch===currentBranch?' active':'');
+    var icon='<svg class="chat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    var name=chat.name||chat.branch.replace('chat/','');
+    var time=chat.time?'<span class="chat-time">'+escHtml(chat.time)+'</span>':'';
+    var del='<button class="chat-delete" onclick="event.stopPropagation();deleteChat(\''+escHtml(chat.branch)+'\')" title="Delete">&times;</button>';
+    item.innerHTML=icon+'<span class="chat-name">'+escHtml(name)+'</span>'+time+del;
+    (function(branch){item.onclick=function(){switchChat(branch);};})(chat.branch);
+    list.appendChild(item);
+  });
+}
+
+async function newChat(){
+  try{
+    var r=await fetch('/api/chat/new',{method:'POST'});
+    var d=await r.json();
+    if(d.error){appendConv('Error: '+escHtml(d.error),'system');return;}
+    // Clear conversation
+    conv.innerHTML='';
+    assistantText='';thinkingEl=null;
+    // Reconnect WS for fresh session
+    if(ws){ws.close();ws=null;}
+    setTimeout(function(){connectWS();loadChatBranches();},300);
+  }catch(e){appendConv('Failed to create new chat','system');}
+}
+
+async function restoreChatHistory(branch){
+  try{
+    var r=await fetch('/api/chat/history?branch='+encodeURIComponent(branch));
+    var d=await r.json();
+    if(d.messages)d.messages.forEach(function(m){handleServerMessage(m);});
+  }catch(e){}
+}
+
+async function switchChat(branch){
+  if(branch===currentBranch)return;
+  try{
+    var r=await fetch('/api/chat/switch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:branch})});
+    var d=await r.json();
+    if(d.error){appendConv('Error: '+escHtml(d.error),'system');return;}
+    conv.innerHTML='';
+    assistantText='';thinkingEl=null;
+    await restoreChatHistory(branch);
+    if(ws){ws.close();ws=null;}
+    setTimeout(function(){connectWS();loadChatBranches();},300);
+  }catch(e){appendConv('Failed to switch chat','system');}
+}
+
+async function deleteChat(branch){
+  if(branch===currentBranch){appendConv('Cannot delete the active chat','system');return;}
+  try{
+    await fetch('/api/chat/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:branch})});
+    loadChatBranches();
+  }catch(e){}
+}
+
+// Load chat list on startup and restore history for current branch
+loadChatBranches().then(function(){
+  if(currentBranch)restoreChatHistory(currentBranch);
+});
 
 // INTEGRATIONS
 var toolkitConnections={};
