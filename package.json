@@ -1,6 +1,6 @@
 {
   "name": "gitclaw",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "A universal git-native agent powered by pi-agent-core",
   "author": "shreyaskapale",
   "license": "MIT",
