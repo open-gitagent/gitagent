@@ -132,7 +132,7 @@
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #484f58; font-size: 12px;
   }
   .camera-container canvas { display: none; }
-  .controls { display: flex; gap: 8px; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
   .ctrl-btn {
     flex: 1; padding: 10px; border-radius: 6px; background: #161b22; border: 1px solid #21262d;
     color: #8b949e; font-family: 'IBM Plex Mono', monospace; font-size: 11px;
@@ -713,6 +713,125 @@
   /* Skills Marketplace view */
   .skills-view.hidden { display: none !important; }
 
+  /* SkillFlows view */
+  .flows-view { display: flex; flex: 1; overflow: hidden; }
+  .flows-view.hidden { display: none !important; }
+  .flows-skills-panel {
+    width: 220px; min-width: 220px; border-right: 1px solid #21262d;
+    padding: 12px; overflow-y: auto; background: #010409;
+  }
+  .flows-skill-tree { padding: 4px 0; }
+  .flows-skill-dir { border: none; margin: 0; padding: 0; }
+  .flows-skill-dir > summary {
+    display: flex; align-items: center; gap: 4px; padding: 2px 4px;
+    font-family: 'JetBrains Mono','IBM Plex Mono','Fira Code',monospace;
+    font-size: 13px; color: #b1bac4; user-select: none; cursor: pointer;
+    list-style: none;
+  }
+  .flows-skill-dir > summary::-webkit-details-marker { display: none; }
+  .flows-skill-dir > summary::marker { display: none; content: ''; }
+  .flows-skill-dir > summary:hover { background: #161b22; }
+  .flows-skill-dir[open] > summary .ft-chevron { transform: rotate(90deg); }
+  .flows-skill-dir > summary .ft-chevron { transition: transform 0.15s; }
+  .flows-skill-item {
+    display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 24px;
+    font-family: 'JetBrains Mono','IBM Plex Mono','Fira Code',monospace;
+    font-size: 13px; color: #c9d1d9; cursor: default;
+  }
+  .flows-skill-item:hover { background: #161b22; }
+  .flows-skill-item .skill-add {
+    display: none; margin-left: auto; width: 20px; height: 20px;
+    border: none; border-radius: 50%; background: transparent;
+    color: #3fb950; font-size: 14px; cursor: pointer;
+    line-height: 20px; text-align: center; padding: 0; flex-shrink: 0;
+  }
+  .flows-skill-item:hover .skill-add { display: flex; align-items: center; justify-content: center; }
+  .flows-skill-item .skill-add:hover { background: #238636; color: #fff; }
+  .flows-step-card {
+    min-width: 220px; max-width: 220px; background: #161b22;
+    border: 1px solid #30363d; border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
+  }
+  .flows-step-card .step-header {
+    display: flex; justify-content: space-between; align-items: center; cursor: grab;
+  }
+  .flows-step-card .step-skill {
+    font-size: 12px; font-weight: 600; color: #58a6ff;
+  }
+  .flows-step-card .step-num {
+    font-size: 10px; color: #484f58;
+  }
+  .flows-step-card .step-remove {
+    background: none; border: none; color: #f85149; cursor: pointer;
+    font-size: 14px; padding: 0 4px; line-height: 1;
+  }
+  .flows-step-card textarea {
+    width: 100%; min-height: 80px; background: #0d1117; border: 1px solid #21262d;
+    border-radius: 4px; color: #c9d1d9; font-size: 12px; padding: 6px;
+    resize: vertical; outline: none; font-family: inherit;
+  }
+  .flows-step-card textarea:focus { border-color: #58a6ff; }
+  .flows-gate-card {
+    min-width: 220px; max-width: 220px; background: #161b22;
+    border: 1px solid #f0883e; border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
+  }
+  .flows-gate-card .gate-header {
+    display: flex; justify-content: space-between; align-items: center; cursor: grab;
+  }
+  .flows-gate-card .gate-label {
+    display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #f0883e;
+  }
+  .flows-gate-card .gate-label svg { width: 14px; height: 14px; }
+  .flows-gate-card .gate-remove {
+    background: none; border: none; color: #f85149; cursor: pointer;
+    font-size: 14px; padding: 0 4px; line-height: 1;
+  }
+  .flows-gate-card .gate-info {
+    font-size: 11px; color: #8b949e; line-height: 1.4;
+  }
+  .flows-gate-card .gate-channels {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .flows-gate-card .gate-channel {
+    font-size: 10px; padding: 2px 8px; border-radius: 10px; font-weight: 500;
+  }
+  .flows-gate-card .gate-channel.tg { background: rgba(42,171,238,0.12); color: #2AABEE; }
+  .flows-gate-card .gate-channel.wa { background: rgba(37,211,102,0.12); color: #25D366; }
+  .flows-gate-card select {
+    width: 100%; padding: 4px 6px; background: #0d1117; border: 1px solid #21262d;
+    border-radius: 4px; color: #c9d1d9; font-size: 11px; outline: none;
+  }
+  .flows-skill-item.gate-item { color: #f0883e; }
+  .flows-arrow {
+    display: flex; align-items: center; color: #484f58; font-size: 20px;
+    padding: 0 4px; flex-shrink: 0;
+  }
+  .flows-step-card.dragging, .flows-gate-card.dragging { opacity: 0.35; border-style: dashed; }
+  .flows-drop-indicator {
+    width: 3px; align-self: stretch; min-height: 80px; margin: 0 2px;
+    background: #58a6ff; border-radius: 2px; flex-shrink: 0; position: relative;
+  }
+  .flows-drop-indicator::after {
+    content: '\2295'; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: #58a6ff; font-size: 16px; background: #0d1117; border-radius: 50%;
+    width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  }
+  .flows-saved-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; background: #161b22; border: 1px solid #21262d;
+    border-radius: 6px; cursor: pointer; transition: border-color 0.15s;
+  }
+  .flows-saved-item:hover { border-color: #58a6ff; }
+  .flows-saved-item .flow-name { color: #c9d1d9; font-size: 13px; font-weight: 500; }
+  .flows-saved-item .flow-trigger { color: #58a6ff; font-size: 11px; font-family: monospace; }
+  .flows-saved-item .flow-desc { color: #8b949e; font-size: 11px; }
+  .flows-saved-item .flow-delete {
+    background: none; border: none; color: #f85149; cursor: pointer;
+    font-size: 13px; padding: 2px 6px; opacity: 0.6;
+  }
+  .flows-saved-item .flow-delete:hover { opacity: 1; }
+
   /* Communication view */
   .comms-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
   .comms-view.hidden { display: none; }
@@ -830,6 +949,7 @@
       <button class="view-tab" id="tabSkills" onclick="switchView('skills')">Skills</button>
       <button class="view-tab" id="tabIntegrations" onclick="switchView('integrations')">Integrations</button>
       <button class="view-tab" id="tabComms" onclick="switchView('comms')">Communication</button>
+      <button class="view-tab" id="tabFlows" onclick="switchView('flows')">SkillFlows</button>
     </div>
   </div>
   <div class="header-right">
@@ -878,6 +998,10 @@
         <button class="ctrl-btn" id="micBtn" onclick="toggleMic()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
           Mic
+        </button>
+        <button class="ctrl-btn active" id="muteBtn" onclick="toggleMute()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+          Speaker
         </button>
       </div>
       <div class="agent-vitals" id="agentVitals">
@@ -1087,6 +1211,38 @@
       </div>
     </div>
   </div>
+  <div class="flows-view hidden" id="flowsView">
+    <div class="flows-skills-panel">
+      <input id="flowSkillsSearch" type="text" placeholder="Search skills..." oninput="filterFlowSkills()" style="width:100%;padding:6px 8px;margin-bottom:8px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:12px;outline:none;box-sizing:border-box;">
+      <div id="flowSkillsList" class="flows-skill-tree"></div>
+    </div>
+    <div style="flex:1;display:flex;flex-direction:column;overflow-y:auto;padding:16px;">
+      <div style="display:flex;gap:12px;margin-bottom:16px;align-items:flex-end;flex-shrink:0;">
+        <div style="flex:1;">
+          <label style="display:block;font-size:11px;color:#8b949e;margin-bottom:4px;">Flow Name (kebab-case)</label>
+          <input id="flowNameInput" type="text" placeholder="my-flow-name" pattern="[a-z0-9]+(-[a-z0-9]+)*" style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:14px;outline:none;">
+        </div>
+        <div style="flex:2;">
+          <label style="display:block;font-size:11px;color:#8b949e;margin-bottom:4px;">Description</label>
+          <input id="flowDescInput" type="text" placeholder="What this flow does..." style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:14px;outline:none;">
+        </div>
+        <button onclick="saveFlow()" style="padding:8px 16px;background:#238636;border:1px solid #2ea043;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;white-space:nowrap;">Save Flow</button>
+        <button onclick="clearFlow()" style="padding:8px 16px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;cursor:pointer;font-size:13px;white-space:nowrap;">Clear</button>
+      </div>
+      <div style="flex-shrink:0;overflow-x:auto;overflow-y:hidden;margin-bottom:16px;">
+        <div id="flowStepsContainer" style="display:flex;align-items:flex-start;gap:0;min-height:160px;padding:8px 0;">
+          <div style="display:flex;align-items:center;justify-content:center;width:100%;color:#484f58;font-size:14px;font-style:italic;" id="flowEmptyMsg">Click a skill from the panel to add steps</div>
+        </div>
+      </div>
+      <div style="flex-shrink:0;border-top:1px solid #21262d;padding-top:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <h3 style="margin:0;color:#8b949e;font-size:12px;text-transform:uppercase;letter-spacing:1px;">Saved Flows</h3>
+          <button onclick="clearFlow();document.getElementById('flowNameInput').focus();" style="padding:4px 12px;background:#238636;border:1px solid #2ea043;border-radius:6px;color:#fff;cursor:pointer;font-size:12px;white-space:nowrap;">+ New Workflow</button>
+        </div>
+        <div id="savedFlowsList" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;"></div>
+      </div>
+    </div>
+  </div>
   <div class="skills-view hidden" id="skillsView" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
     <iframe id="skillsFrame" src="" style="flex:1;border:none;background:#0d1117;width:100%;"></iframe>
   </div>
@@ -1097,20 +1253,23 @@
 <script>
 var hasComposio={{HAS_COMPOSIO}};
 if(!hasComposio){document.getElementById('tabIntegrations').style.display='none';}
-let currentView='chat',filesLoaded=false,integrationsLoaded=false,commsLoaded=false,skillsLoaded=false;
+let currentView='chat',filesLoaded=false,integrationsLoaded=false,commsLoaded=false,skillsLoaded=false,flowsLoaded=false;
 function switchView(v){
   currentView=v;
   document.getElementById('chatView').classList.toggle('hidden',v!=='chat');
   document.getElementById('integrationsView').classList.toggle('hidden',v!=='integrations');
   document.getElementById('commsView').classList.toggle('hidden',v!=='comms');
   document.getElementById('skillsView').classList.toggle('hidden',v!=='skills');
+  document.getElementById('flowsView').classList.toggle('hidden',v!=='flows');
   document.getElementById('tabChat').classList.toggle('active',v==='chat');
   document.getElementById('tabIntegrations').classList.toggle('active',v==='integrations');
   document.getElementById('tabComms').classList.toggle('active',v==='comms');
   document.getElementById('tabSkills').classList.toggle('active',v==='skills');
+  document.getElementById('tabFlows').classList.toggle('active',v==='flows');
   if(v==='integrations'&&!integrationsLoaded){loadToolkits();integrationsLoaded=true;}
   if(v==='comms'&&!commsLoaded){loadTelegramStatus();loadWhatsAppStatus();loadPhoneWebhookUrl();commsLoaded=true;}
   if(v==='skills'&&!skillsLoaded){document.getElementById('skillsFrame').src='/api/skills-mp/proxy?path=/';skillsLoaded=true;}
+  if(v==='flows'&&!flowsLoaded){loadFlowSkills();loadSavedFlows();flowsLoaded=true;}
 }
 // Skills MP install handler
 window.addEventListener('message',function(e){
@@ -1131,6 +1290,309 @@ window.addEventListener('message',function(e){
     })
     .catch(function(err){alert('Install failed: '+err.message);});
 });
+
+// ── SkillFlows builder ─────────────────────────────────────────────
+var flowSteps = [];
+var flowSkillsCache = [];
+var flowCommsStatus = { telegram: false, whatsapp: false };
+
+function refreshFlowCommsStatus() {
+  Promise.all([
+    fetch('/api/telegram/status').then(function(r){return r.json();}).catch(function(){return {};}),
+    fetch('/api/whatsapp/status').then(function(r){return r.json();}).catch(function(){return {};})
+  ]).then(function(results) {
+    flowCommsStatus.telegram = !!(results[0] && results[0].connected);
+    flowCommsStatus.whatsapp = !!(results[1] && results[1].connected);
+    updateGateVisibility();
+  });
+}
+
+function updateGateVisibility() {
+  var gateEl = document.getElementById('flowGateItem');
+  if (gateEl) gateEl.style.display = (flowCommsStatus.telegram || flowCommsStatus.whatsapp) ? 'flex' : 'none';
+}
+
+function loadFlowSkills() {
+  fetch('/api/skills/list').then(function(r){return r.json();}).then(function(d){
+    flowSkillsCache = d.skills || [];
+    document.getElementById('flowSkillsSearch').value = '';
+    renderFlowSkillsList(flowSkillsCache);
+  }).catch(function(){});
+  refreshFlowCommsStatus();
+}
+
+function filterFlowSkills() {
+  var query = (document.getElementById('flowSkillsSearch').value || '').toLowerCase();
+  if (!query) { renderFlowSkillsList(flowSkillsCache); return; }
+  var filtered = flowSkillsCache.filter(function(s){
+    return s.name.toLowerCase().indexOf(query) !== -1 ||
+           (s.description || '').toLowerCase().indexOf(query) !== -1;
+  });
+  renderFlowSkillsList(filtered);
+}
+
+function renderFlowSkillsList(skills) {
+  var el = document.getElementById('flowSkillsList');
+  el.innerHTML = '';
+  // Root folder row (collapsible)
+  var details = document.createElement('details');
+  details.className = 'flows-skill-dir';
+  details.open = true;
+  var summary = document.createElement('summary');
+  summary.innerHTML = '<span class="ft-chevron">' + ICONS.chevronRight + '</span>' +
+    '<span class="ft-icon folder">' + ICONS.folder + '</span>' +
+    '<span class="ft-name">skills</span>';
+  details.appendChild(summary);
+  // Children container
+  var children = document.createElement('div');
+  if (skills.length === 0) {
+    children.innerHTML = '<div style="color:#484f58;font-size:12px;font-style:italic;padding-left:24px;">' +
+      (flowSkillsCache.length === 0 ? 'No skills installed' : 'No matching skills') + '</div>';
+  } else {
+    skills.forEach(function(s){
+      var row = document.createElement('div');
+      row.className = 'flows-skill-item';
+      row.title = s.description || s.name;
+      row.innerHTML = '<span class="ft-icon" style="color:#58a6ff;">' + ICONS.fileCode + '</span>' +
+        '<span class="ft-name">' + escHtml(s.name) + '</span>' +
+        '<button class="skill-add" onclick="event.stopPropagation();addFlowStep(\'' + escHtml(s.name).replace(/'/g, "\\'") + '\')">+</button>';
+      children.appendChild(row);
+    });
+  }
+  details.appendChild(children);
+  // Approval Gate item (only visible when comms are connected)
+  var gateRow = document.createElement('div');
+  gateRow.className = 'flows-skill-item gate-item';
+  gateRow.id = 'flowGateItem';
+  gateRow.title = 'Pause flow and ask for user approval via Telegram or WhatsApp';
+  gateRow.style.display = (flowCommsStatus.telegram || flowCommsStatus.whatsapp) ? 'flex' : 'none';
+  gateRow.innerHTML = '<span class="ft-icon" style="color:#f0883e;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></span>' +
+    '<span class="ft-name">approval gate</span>' +
+    '<button class="skill-add" onclick="event.stopPropagation();addApprovalGate()">+</button>';
+  details.appendChild(gateRow);
+  el.appendChild(details);
+}
+
+function addFlowStep(skillName) {
+  flowSteps.push({ skill: skillName, prompt: '' });
+  renderFlowSteps();
+}
+
+function addApprovalGate() {
+  var channel = flowCommsStatus.telegram ? 'telegram' : 'whatsapp';
+  flowSteps.push({ skill: '__approval_gate__', prompt: '', channel: channel });
+  renderFlowSteps();
+}
+
+function removeFlowStep(index) {
+  flowSteps.splice(index, 1);
+  renderFlowSteps();
+}
+
+var flowDragIdx = null;
+
+function flowDragStart(e) {
+  flowDragIdx = parseInt(e.currentTarget.dataset.idx);
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function flowDragEnd(e) {
+  flowDragIdx = null;
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.flows-drop-indicator').forEach(function(el){ el.remove(); });
+}
+
+function flowDragOver(e) {
+  if (flowDragIdx === null) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  var container = document.getElementById('flowStepsContainer');
+  container.querySelectorAll('.flows-drop-indicator').forEach(function(el){ el.remove(); });
+  var card = e.target.closest('.flows-step-card, .flows-gate-card, .flows-arrow');
+  if (!card) return;
+  var rect = card.getBoundingClientRect();
+  var midX = rect.left + rect.width / 2;
+  var indicator = document.createElement('div');
+  indicator.className = 'flows-drop-indicator';
+  if (e.clientX < midX) {
+    card.parentNode.insertBefore(indicator, card);
+  } else {
+    card.parentNode.insertBefore(indicator, card.nextSibling);
+  }
+}
+
+function flowDrop(e) {
+  if (flowDragIdx === null) return;
+  e.preventDefault();
+  var container = document.getElementById('flowStepsContainer');
+  var indicator = container.querySelector('.flows-drop-indicator');
+  if (!indicator) return;
+  var allChildren = Array.from(container.children);
+  var idxInDom = allChildren.indexOf(indicator);
+  var cardsBefore = 0;
+  for (var j = 0; j < idxInDom; j++) {
+    if (allChildren[j].classList.contains('flows-step-card') || allChildren[j].classList.contains('flows-gate-card')) cardsBefore++;
+  }
+  var targetIdx = cardsBefore;
+  if (targetIdx !== flowDragIdx) {
+    var moved = flowSteps.splice(flowDragIdx, 1)[0];
+    var insertAt = targetIdx > flowDragIdx ? targetIdx - 1 : targetIdx;
+    flowSteps.splice(insertAt, 0, moved);
+  }
+  flowDragIdx = null;
+  container.querySelectorAll('.flows-drop-indicator').forEach(function(el){ el.remove(); });
+  renderFlowSteps();
+}
+
+function renderFlowSteps() {
+  var container = document.getElementById('flowStepsContainer');
+  var emptyMsg = document.getElementById('flowEmptyMsg');
+  if (flowSteps.length === 0) {
+    container.innerHTML = '';
+    var msg = document.createElement('div');
+    msg.id = 'flowEmptyMsg';
+    msg.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;color:#484f58;font-size:14px;font-style:italic;';
+    msg.textContent = 'Click a skill from the panel to add steps';
+    container.appendChild(msg);
+    return;
+  }
+  container.innerHTML = '';
+  flowSteps.forEach(function(step, i) {
+    if (i > 0) {
+      var arrow = document.createElement('div');
+      arrow.className = 'flows-arrow';
+      arrow.innerHTML = '&#8594;';
+      container.appendChild(arrow);
+    }
+    if (step.skill === '__approval_gate__') {
+      var gate = document.createElement('div');
+      gate.className = 'flows-gate-card';
+      var channels = [];
+      if (flowCommsStatus.telegram) channels.push('<span class="gate-channel tg">Telegram</span>');
+      if (flowCommsStatus.whatsapp) channels.push('<span class="gate-channel wa">WhatsApp</span>');
+      gate.innerHTML =
+        '<div class="gate-header">' +
+          '<span class="gate-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg> Approval Gate</span>' +
+          '<button class="gate-remove" data-idx="' + i + '" style="background:none;border:none;color:#f85149;cursor:pointer;font-size:14px;padding:0 4px;line-height:1;">&times;</button>' +
+        '</div>' +
+        '<div class="gate-info">Flow pauses here and asks for your approval via:</div>' +
+        '<div class="gate-channels">' + channels.join('') + '</div>' +
+        '<select data-idx="' + i + '" class="gate-channel-select">' +
+          (flowCommsStatus.telegram ? '<option value="telegram"' + (step.channel === 'telegram' ? ' selected' : '') + '>Telegram</option>' : '') +
+          (flowCommsStatus.whatsapp ? '<option value="whatsapp"' + (step.channel === 'whatsapp' ? ' selected' : '') + '>WhatsApp</option>' : '') +
+        '</select>' +
+        '<textarea placeholder="Custom approval message (optional)" data-idx="' + i + '" style="min-height:40px;">' +
+          (step.prompt || '') +
+        '</textarea>';
+      gate.draggable = true;
+      gate.dataset.idx = i;
+      gate.ondragstart = flowDragStart;
+      gate.ondragend = flowDragEnd;
+      container.appendChild(gate);
+    } else {
+      var card = document.createElement('div');
+      card.className = 'flows-step-card';
+      card.innerHTML =
+        '<div class="step-header">' +
+          '<span class="step-num">Step ' + (i+1) + '</span>' +
+          '<span class="step-skill">' + step.skill + '</span>' +
+          '<button class="step-remove" data-idx="' + i + '">&times;</button>' +
+        '</div>' +
+        '<textarea placeholder="Prompt for this step... Use {input} for user input" data-idx="' + i + '">' +
+          (step.prompt || '') +
+        '</textarea>';
+      card.draggable = true;
+      card.dataset.idx = i;
+      card.ondragstart = flowDragStart;
+      card.ondragend = flowDragEnd;
+      container.appendChild(card);
+    }
+  });
+  container.ondragover = flowDragOver;
+  container.ondrop = flowDrop;
+  // Wire up events
+  container.querySelectorAll('.step-remove, .gate-remove').forEach(function(btn){
+    btn.onclick = function(){ removeFlowStep(parseInt(this.dataset.idx)); };
+  });
+  container.querySelectorAll('textarea').forEach(function(ta){
+    ta.oninput = function(){ flowSteps[parseInt(this.dataset.idx)].prompt = this.value; };
+  });
+  container.querySelectorAll('.gate-channel-select').forEach(function(sel){
+    sel.onchange = function(){ flowSteps[parseInt(this.dataset.idx)].channel = this.value; };
+  });
+}
+
+function saveFlow() {
+  var name = document.getElementById('flowNameInput').value.trim();
+  var desc = document.getElementById('flowDescInput').value.trim();
+  if (!name) { alert('Please enter a flow name'); return; }
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)) { alert('Flow name must be kebab-case (e.g. my-flow)'); return; }
+  if (flowSteps.length === 0) { alert('Add at least one step'); return; }
+  for (var i = 0; i < flowSteps.length; i++) {
+    if (flowSteps[i].skill === '__approval_gate__') continue;
+    if (!flowSteps[i].prompt.trim()) { alert('Step ' + (i+1) + ' needs a prompt'); return; }
+  }
+  fetch('/api/flows/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name, description: desc, steps: flowSteps })
+  }).then(function(r){ return r.json(); }).then(function(d) {
+    if (d.ok) { loadSavedFlows(); clearFlow(); } else { alert('Save failed: ' + (d.error || 'Unknown error')); }
+  }).catch(function(err){ alert('Save failed: ' + err.message); });
+}
+
+function loadSavedFlows() {
+  fetch('/api/flows/list').then(function(r){return r.json();}).then(function(d){
+    var list = document.getElementById('savedFlowsList');
+    var flows = d.flows || [];
+    if (flows.length === 0) {
+      list.innerHTML = '<div style="color:#484f58;font-size:12px;font-style:italic;">No flows saved yet</div>';
+      return;
+    }
+    list.innerHTML = '';
+    flows.forEach(function(f) {
+      var item = document.createElement('div');
+      item.className = 'flows-saved-item';
+      item.innerHTML =
+        '<div style="flex:1;" onclick="loadFlowForEdit(\'' + f.name + '\')">' +
+          '<div class="flow-name">' + f.name + ' <span class="flow-trigger">@' + f.name + '</span></div>' +
+          '<div class="flow-desc">' + (f.description || '') + ' &middot; ' + (f.steps ? f.steps.length : 0) + ' steps</div>' +
+        '</div>' +
+        '<button class="flow-delete" data-name="' + f.name + '" title="Delete flow">&times;</button>';
+      list.appendChild(item);
+    });
+    list.querySelectorAll('.flow-delete').forEach(function(btn) {
+      btn.onclick = function(e) {
+        e.stopPropagation();
+        if (!confirm('Delete flow "' + this.dataset.name + '"?')) return;
+        fetch('/api/flows/delete', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: this.dataset.name })
+        }).then(function(){ loadSavedFlows(); });
+      };
+    });
+  }).catch(function(err){ console.error('loadSavedFlows error:', err); });
+}
+
+function loadFlowForEdit(name) {
+  fetch('/api/flows/list').then(function(r){return r.json();}).then(function(d) {
+    var flow = (d.flows || []).find(function(f){ return f.name === name; });
+    if (!flow) return;
+    document.getElementById('flowNameInput').value = flow.name;
+    document.getElementById('flowDescInput').value = flow.description || '';
+    flowSteps = (flow.steps || []).map(function(s){ var o = { skill: s.skill, prompt: s.prompt }; if (s.channel) o.channel = s.channel; return o; });
+    renderFlowSteps();
+  });
+}
+
+function clearFlow() {
+  document.getElementById('flowNameInput').value = '';
+  document.getElementById('flowDescInput').value = '';
+  flowSteps = [];
+  renderFlowSteps();
+}
 
 /* FILES/MONACO DISABLED
 let monacoEditor=null,monacoReady=false;
@@ -1562,10 +2024,12 @@ function friendlyToolResult(name,content,isError){
   }
 }
 
-var audioQueue=[],isPlaying=false,currentSource=null,nextPlayTime=0;
+var audioQueue=[],isPlaying=false,currentSource=null,nextPlayTime=0,audioGain=null,speakerMuted=false;
 function flushAudio(){if(currentSource){try{currentSource.stop();}catch(e){}}currentSource=null;audioQueue=[];nextPlayTime=0;isPlaying=false;}
 function playAudioDelta(b){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:24000});var bin=atob(b),bytes=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);var i16=new Int16Array(bytes.buffer),f32=new Float32Array(i16.length);for(var i=0;i<i16.length;i++)f32[i]=i16[i]/32768;var buf=audioCtx.createBuffer(1,f32.length,24000);buf.getChannelData(0).set(f32);audioQueue.push(buf);if(!isPlaying)playNext();}
-function playNext(){if(audioQueue.length===0){isPlaying=false;return;}isPlaying=true;var buf=audioQueue.shift(),src=audioCtx.createBufferSource();src.buffer=buf;src.connect(audioCtx.destination);var now=audioCtx.currentTime,st=Math.max(now,nextPlayTime);src.start(st);nextPlayTime=st+buf.duration;src.onended=function(){if(audioQueue.length>0)playNext();else isPlaying=false;};currentSource=src;}
+function ensureGainNode(){if(!audioGain&&audioCtx){audioGain=audioCtx.createGain();audioGain.gain.value=speakerMuted?0:1;audioGain.connect(audioCtx.destination);}}
+function playNext(){if(audioQueue.length===0){isPlaying=false;return;}isPlaying=true;var buf=audioQueue.shift(),src=audioCtx.createBufferSource();src.buffer=buf;ensureGainNode();src.connect(audioGain);var now=audioCtx.currentTime,st=Math.max(now,nextPlayTime);src.start(st);nextPlayTime=st+buf.duration;src.onended=function(){if(audioQueue.length>0)playNext();else isPlaying=false;};currentSource=src;}
+function toggleMute(){speakerMuted=!speakerMuted;var btn=document.getElementById('muteBtn');if(speakerMuted){btn.classList.remove('active');btn.querySelector('svg').innerHTML='<line x1="2" x2="22" y1="2" y2="22"/><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>';if(audioGain)audioGain.gain.value=0;flushAudio();}else{btn.classList.add('active');btn.querySelector('svg').innerHTML='<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>';if(audioGain)audioGain.gain.value=1;}}
 
 async function toggleMic(){if(micActive)stopMic();else await startMic();}
 async function startMic(){connectWS();try{micStream=await navigator.mediaDevices.getUserMedia({audio:true});}catch(e){appendConv('Microphone access denied','system');return;}if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)({sampleRate:24000});var src=audioCtx.createMediaStreamSource(micStream);micProcessor=audioCtx.createScriptProcessor(4096,1,1);src.connect(micProcessor);micProcessor.connect(audioCtx.destination);micProcessor.onaudioprocess=function(e){if(!micActive||!ws||ws.readyState!==WebSocket.OPEN)return;var inp=e.inputBuffer.getChannelData(0),i16=new Int16Array(inp.length);for(var i=0;i<inp.length;i++)i16[i]=Math.max(-32768,Math.min(32767,Math.floor(inp[i]*32768)));sendMsg({type:'audio',audio:btoa(String.fromCharCode.apply(null,new Uint8Array(i16.buffer)))});};micActive=true;micBtn.classList.add('active');}

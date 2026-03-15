@@ -13,6 +13,8 @@ import { ComposioAdapter } from "../composio/index.js";
 import type { GCToolDefinition } from "../sdk-types.js";
 import { appendMessage, loadHistory, deleteHistory, summarizeHistory } from "./chat-history.js";
 import { getVoiceContext, getAgentContext } from "../context.js";
+import { discoverSkills } from "../skills.js";
+import { discoverWorkflows, loadFlowDefinition, saveFlowDefinition, deleteFlowDefinition } from "../workflows.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -488,6 +490,123 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 		};
 	}
 
+	// ── SkillFlow execution ─────────────────────────────────────────────
+	// ── Approval gate state ────────────────────────────────────────────
+	let pendingApproval: { resolve: (approved: boolean) => void } | null = null;
+
+	function handleApprovalReply(text: string): boolean {
+		if (!pendingApproval) return false;
+		const lower = text.trim().toLowerCase();
+		if (["yes", "approve", "continue", "ok", "go", "y", "proceed"].includes(lower)) {
+			pendingApproval.resolve(true);
+			pendingApproval = null;
+			return true;
+		}
+		if (["no", "deny", "stop", "cancel", "abort", "n", "reject"].includes(lower)) {
+			pendingApproval.resolve(false);
+			pendingApproval = null;
+			return true;
+		}
+		return false;
+	}
+
+	async function sendApprovalRequest(channel: string, message: string): Promise<boolean> {
+		// Send message via the chosen channel
+		if (channel === "telegram" && telegramToken && lastTelegramChatId) {
+			await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ chat_id: lastTelegramChatId, text: message }),
+			});
+		} else if (channel === "whatsapp" && whatsappSock && whatsappConnected && lastWhatsAppJid) {
+			const sent = await whatsappSock.sendMessage(lastWhatsAppJid, { text: message });
+			if (sent?.key?.id) whatsappSentIds.add(sent.key.id);
+		} else {
+			return true; // No channel available — auto-approve
+		}
+
+		// Wait for reply (timeout after 5 minutes)
+		return new Promise<boolean>((resolve) => {
+			pendingApproval = { resolve };
+			const timeout = setTimeout(() => {
+				if (pendingApproval?.resolve === resolve) {
+					pendingApproval = null;
+					resolve(false); // Timeout = deny
+				}
+			}, 5 * 60 * 1000);
+			const origResolve = resolve;
+			pendingApproval.resolve = (val: boolean) => {
+				clearTimeout(timeout);
+				origResolve(val);
+			};
+		});
+	}
+
+	async function executeFlow(flowName: string, userContext: string, sendToBrowser: (msg: ServerMessage) => void) {
+		const flowPath = join(resolve(opts.agentDir), "workflows", flowName + ".yaml");
+		const flow = await loadFlowDefinition(flowPath);
+
+		sendToBrowser({ type: "transcript", role: "assistant",
+			text: `Running flow: ${flow.name} (${flow.steps.length} steps)` });
+
+		let runningContext = userContext;
+
+		for (let i = 0; i < flow.steps.length; i++) {
+			const step = flow.steps[i];
+
+			// ── Approval gate step ──
+			if (step.skill === "__approval_gate__") {
+				const channel = step.channel || "telegram";
+				const customMsg = step.prompt || "";
+				const approvalMsg = customMsg
+					? `⏸ Approval Required: ${customMsg}\n\nReply YES to continue or NO to cancel.`
+					: `⏸ Flow "${flow.name}" paused at step ${i + 1}/${flow.steps.length}.\n\nCompleted so far:\n${runningContext.slice(0, 500)}\n\nReply YES to continue or NO to cancel.`;
+
+				sendToBrowser({ type: "transcript", role: "assistant",
+					text: `⏸ Waiting for approval via ${channel}...` });
+
+				const approved = await sendApprovalRequest(channel, approvalMsg);
+
+				if (!approved) {
+					sendToBrowser({ type: "transcript", role: "assistant",
+						text: `Flow "${flow.name}" was denied at approval gate (step ${i + 1}).` });
+					return;
+				}
+				sendToBrowser({ type: "transcript", role: "assistant",
+					text: `✓ Approval received — continuing flow.` });
+				runningContext += `\n\n[Step ${i + 1}: approval gate]: Approved via ${channel}`;
+				continue;
+			}
+
+			sendToBrowser({ type: "agent_working" as any, query: `Step ${i + 1}/${flow.steps.length}: ${step.skill}` } as any);
+
+			const prompt = `Use the skill "${step.skill}" (load it with /skill:${step.skill}).
+${step.prompt.replace(/\{input\}/g, userContext)}
+
+Context from previous steps:
+${runningContext}`;
+
+			const result = query({
+				prompt,
+				dir: opts.agentDir,
+				model: opts.model,
+				env: opts.env,
+			});
+
+			let stepOutput = "";
+			for await (const msg of result) {
+				if (msg.type === "assistant" && msg.content) stepOutput += msg.content;
+				if (msg.type === "tool_use") sendToBrowser({ type: "tool_call", toolName: msg.toolName, args: msg.args } as any);
+				if (msg.type === "tool_result") sendToBrowser({ type: "tool_result", toolName: msg.toolName, content: msg.content, isError: msg.isError } as any);
+			}
+
+			runningContext += `\n\n[Step ${i + 1} result (${step.skill})]: ${stepOutput}`;
+			sendToBrowser({ type: "agent_done" as any, result: `Step ${i + 1} complete` } as any);
+		}
+
+		sendToBrowser({ type: "transcript", role: "assistant", text: `Flow "${flow.name}" completed.` });
+	}
+
 	// ── File API helpers ────────────────────────────────────────────────
 	const HIDDEN_DIRS = new Set([".git", "node_modules", ".gitagent", "dist", ".next", "__pycache__", ".venv"]);
 	const agentRoot = resolve(opts.agentDir);
@@ -517,6 +636,8 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 			.map(s => s.trim().toLowerCase().replace(/^@/, ""))
 			.filter(Boolean),
 	);
+
+	let lastTelegramChatId: number | null = null;
 
 	function stopTelegramPolling() {
 		telegramPolling = false;
@@ -670,6 +791,7 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 						if (!msg) continue;
 
 						const chatId = msg.chat.id;
+						lastTelegramChatId = chatId;
 						const fromName = msg.from?.first_name || "User";
 						const fromUsername = (msg.from?.username || "").toLowerCase();
 
@@ -706,6 +828,15 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 						}
 
 						if (!userText && !imageContext) continue;
+
+						// ── Approval gate reply check ──
+						if (userText && handleApprovalReply(userText)) {
+							console.log(dim(`[telegram] Approval reply from ${fromName}: ${userText}`));
+							const approvalMsg: ServerMessage = { type: "transcript", role: "user", text: `[Telegram] ${fromName}: ${userText}` };
+							appendMessage(serverOpts.agentDir, activeBranch, approvalMsg);
+							broadcastToBrowsers(approvalMsg);
+							continue;
+						}
 
 						const fullText = `${userText}${imageContext}`.trim();
 						console.log(dim(`[telegram] ${fromName}: ${fullText.slice(0, 100)}`));
@@ -878,6 +1009,7 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	}
 
 	// ── WhatsApp state ─────────────────────────────────────────────────
+	let lastWhatsAppJid: string | null = null;
 	let whatsappSock: any = null;
 	let whatsappConnected = false;
 	let whatsappPhoneNumber: string | null = null;
@@ -1223,7 +1355,17 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 				// ── Self-DM: full agent interaction ──
 				const text = incomingText;
 				const replyJid = senderJid;
+				lastWhatsAppJid = replyJid;
 				console.log(dim(`[whatsapp] Self-DM: ${text.slice(0, 100)}`));
+
+				// ── Approval gate reply check ──
+				if (handleApprovalReply(text)) {
+					console.log(dim(`[whatsapp] Approval reply: ${text}`));
+					const approvalMsg: ServerMessage = { type: "transcript", role: "user", text: `[WhatsApp]: ${text}` };
+					appendMessage(serverOpts.agentDir, activeBranch, approvalMsg);
+					broadcastToBrowsers(approvalMsg);
+					continue;
+				}
 
 				// Broadcast to browser UI
 				const userMsg: ServerMessage = { type: "transcript", role: "user", text: `[WhatsApp]: ${text}` };
@@ -1860,6 +2002,48 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 				jsonReply(res, 502, { error: err.message });
 			}
 
+		// ── SkillFlows API ────────────────────────────────────────────
+		} else if (url.pathname === "/api/skills/list" && req.method === "GET") {
+			try {
+				const skills = await discoverSkills(agentRoot);
+				jsonReply(res, 200, { skills });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/flows/list" && req.method === "GET") {
+			try {
+				const workflows = await discoverWorkflows(agentRoot);
+				const flows = workflows.filter((w) => w.type === "flow");
+				jsonReply(res, 200, { flows });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/flows/save" && req.method === "POST") {
+			const body = await readBody(req);
+			let parsed: { name: string; description: string; steps: { skill: string; prompt: string; channel?: string }[] };
+			try { parsed = JSON.parse(body); } catch { return jsonReply(res, 400, { error: "Invalid JSON" }); }
+			if (!parsed.name || !parsed.steps?.length) return jsonReply(res, 400, { error: "Missing name or steps" });
+			try {
+				await saveFlowDefinition(agentRoot, parsed);
+				jsonReply(res, 200, { ok: true });
+			} catch (err: any) {
+				jsonReply(res, 400, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/flows/delete" && req.method === "DELETE") {
+			const body = await readBody(req);
+			let parsed: { name: string };
+			try { parsed = JSON.parse(body); } catch { return jsonReply(res, 400, { error: "Invalid JSON" }); }
+			if (!parsed.name) return jsonReply(res, 400, { error: "Missing name" });
+			try {
+				await deleteFlowDefinition(agentRoot, parsed.name);
+				jsonReply(res, 200, { ok: true });
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
 		// ── Skills Marketplace proxy ────────────────────────────────────
 		} else if (url.pathname === "/api/skills-mp/proxy" && req.method === "GET") {
 			const proxyPath = url.searchParams.get("path") || "/";
@@ -2228,7 +2412,7 @@ a{color:#58a6ff;}</style></head>
 		}
 
 		// Parse browser messages into ClientMessage and forward to adapter
-		browserWs.on("message", (data) => {
+		browserWs.on("message", async (data) => {
 			try {
 				const msg = JSON.parse(data.toString()) as ClientMessage;
 
@@ -2258,6 +2442,25 @@ a{color:#58a6ff;}</style></head>
 
 				if (msg.type === "text") {
 					appendMessage(opts.agentDir, activeBranch, { type: "transcript", role: "user", text: msg.text });
+
+					// Detect @flow-name triggers
+					const flowMatch = msg.text.match(/@([a-z0-9]+(?:-[a-z0-9]+)*)/);
+					if (flowMatch) {
+						try {
+							const workflows = await discoverWorkflows(agentRoot);
+							const flow = workflows.find((f) => f.name === flowMatch[1] && f.type === "flow");
+							if (flow) {
+								const userContext = msg.text.replace(/@[a-z0-9-]+/, "").trim();
+								executeFlow(flow.name, userContext, sendToBrowser).catch((err) => {
+									sendToBrowser({ type: "transcript", role: "assistant", text: `Flow error: ${err.message}` });
+								});
+								return; // skip adapter.send()
+							}
+						} catch {
+							// Fall through to normal send if flow detection fails
+						}
+					}
+
 					// Detect personal info and save to memory in background
 					if (isMemoryWorthy(msg.text)) {
 						saveMemoryInBackground(msg.text, opts.agentDir, opts.model, opts.env, () => {
