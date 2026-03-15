@@ -135,53 +135,38 @@ if [ "$SETUP_MODE" = "1" ]; then
   echo ""
 
   # OpenAI key
-  EXISTING_OPENAI="${OPENAI_API_KEY:-}"
-  if [ -n "$EXISTING_OPENAI" ]; then
-    echo -e "  ${GREEN}✓${NC} OPENAI_API_KEY already set"
-  else
-    echo -e "  ${BOLD}OpenAI API Key${NC} ${DIM}(for voice — get one at platform.openai.com)${NC}"
-    read -rsp "  Key: " OPENAI_KEY
-    echo ""
-    if [ -z "$OPENAI_KEY" ]; then
-      echo -e "  ${RED}✗ OpenAI key is required for voice mode${NC}"
-      exit 1
-    fi
-    export OPENAI_API_KEY="$OPENAI_KEY"
-    echo -e "  ${GREEN}✓${NC} OPENAI_API_KEY saved"
+  echo -e "  ${BOLD}OpenAI API Key${NC} ${DIM}(for voice — get one at platform.openai.com)${NC}"
+  read -rsp "  Key: " OPENAI_KEY
+  echo ""
+  if [ -z "$OPENAI_KEY" ]; then
+    echo -e "  ${RED}✗ OpenAI key is required for voice mode${NC}"
+    exit 1
   fi
+  export OPENAI_API_KEY="$OPENAI_KEY"
+  echo -e "  ${GREEN}✓${NC} OPENAI_API_KEY saved"
 
   # Anthropic key
-  EXISTING_ANTHROPIC="${ANTHROPIC_API_KEY:-}"
-  if [ -n "$EXISTING_ANTHROPIC" ]; then
-    echo -e "  ${GREEN}✓${NC} ANTHROPIC_API_KEY already set"
-  else
-    echo ""
-    echo -e "  ${BOLD}Anthropic API Key${NC} ${DIM}(for agent brain — get one at console.anthropic.com)${NC}"
-    read -rsp "  Key: " ANTHROPIC_KEY
-    echo ""
-    if [ -z "$ANTHROPIC_KEY" ]; then
-      echo -e "  ${RED}✗ Anthropic key is required for the agent${NC}"
-      exit 1
-    fi
-    export ANTHROPIC_API_KEY="$ANTHROPIC_KEY"
-    echo -e "  ${GREEN}✓${NC} ANTHROPIC_API_KEY saved"
+  echo ""
+  echo -e "  ${BOLD}Anthropic API Key${NC} ${DIM}(for agent brain — get one at console.anthropic.com)${NC}"
+  read -rsp "  Key: " ANTHROPIC_KEY
+  echo ""
+  if [ -z "$ANTHROPIC_KEY" ]; then
+    echo -e "  ${RED}✗ Anthropic key is required for the agent${NC}"
+    exit 1
   fi
+  export ANTHROPIC_API_KEY="$ANTHROPIC_KEY"
+  echo -e "  ${GREEN}✓${NC} ANTHROPIC_API_KEY saved"
 
   # Composio key (optional)
   echo ""
-  EXISTING_COMPOSIO="${COMPOSIO_API_KEY:-}"
-  if [ -n "$EXISTING_COMPOSIO" ]; then
-    echo -e "  ${GREEN}✓${NC} COMPOSIO_API_KEY already set"
+  echo -e "  ${BOLD}Composio API Key${NC} ${DIM}(optional — enables Gmail, Calendar, Slack, GitHub)${NC}"
+  read -rsp "  Key (press Enter to skip): " COMPOSIO_KEY
+  echo ""
+  if [ -n "$COMPOSIO_KEY" ]; then
+    export COMPOSIO_API_KEY="$COMPOSIO_KEY"
+    echo -e "  ${GREEN}✓${NC} COMPOSIO_API_KEY"
   else
-    echo -e "  ${BOLD}Composio API Key${NC} ${DIM}(optional — enables Gmail, Calendar, Slack, GitHub)${NC}"
-    read -rsp "  Key (press Enter to skip): " COMPOSIO_KEY
-    echo ""
-    if [ -n "$COMPOSIO_KEY" ]; then
-      export COMPOSIO_API_KEY="$COMPOSIO_KEY"
-      echo -e "  ${GREEN}✓${NC} COMPOSIO_API_KEY"
-    else
-      echo -e "  ${DIM}  skipped${NC}"
-    fi
+    echo -e "  ${DIM}  skipped${NC}"
   fi
 
   ADAPTER="openai"
@@ -233,71 +218,50 @@ else
   echo ""
 
   # Voice key
-  EXISTING_KEY="${!KEY_ENV:-}"
-  if [ -n "$EXISTING_KEY" ]; then
-    echo -e "  ${GREEN}✓${NC} ${KEY_ENV} already set"
-  else
-    echo -e "  ${BOLD}${KEY_ENV}${NC} ${DIM}(required for voice)${NC}"
-    read -rsp "  Key: " VOICE_KEY
-    echo ""
-    if [ -z "$VOICE_KEY" ]; then
-      echo -e "  ${RED}✗ ${KEY_ENV} is required for voice mode${NC}"
-      exit 1
-    fi
-    export "$KEY_ENV=$VOICE_KEY"
-    echo -e "  ${GREEN}✓${NC} ${KEY_ENV}"
+  echo -e "  ${BOLD}${KEY_ENV}${NC} ${DIM}(required for voice)${NC}"
+  read -rsp "  Key: " VOICE_KEY
+  echo ""
+  if [ -z "$VOICE_KEY" ]; then
+    echo -e "  ${RED}✗ ${KEY_ENV} is required for voice mode${NC}"
+    exit 1
   fi
+  export "$KEY_ENV=$VOICE_KEY"
+  echo -e "  ${GREEN}✓${NC} ${KEY_ENV}"
 
   # Anthropic key
-  EXISTING_ANTHROPIC="${ANTHROPIC_API_KEY:-}"
-  if [ -n "$EXISTING_ANTHROPIC" ]; then
-    echo -e "  ${GREEN}✓${NC} ANTHROPIC_API_KEY already set"
-  else
-    echo ""
-    echo -e "  ${BOLD}ANTHROPIC_API_KEY${NC} ${DIM}(required for agent)${NC}"
-    read -rsp "  Key: " ANTHROPIC_KEY
-    echo ""
-    if [ -n "$ANTHROPIC_KEY" ]; then
-      export ANTHROPIC_API_KEY="$ANTHROPIC_KEY"
-      echo -e "  ${GREEN}✓${NC} ANTHROPIC_API_KEY"
-    else
-      echo -e "  ${RED}✗ Anthropic key is required for the agent${NC}"
-      exit 1
-    fi
+  echo ""
+  echo -e "  ${BOLD}ANTHROPIC_API_KEY${NC} ${DIM}(required for agent)${NC}"
+  read -rsp "  Key: " ANTHROPIC_KEY
+  echo ""
+  if [ -z "$ANTHROPIC_KEY" ]; then
+    echo -e "  ${RED}✗ Anthropic key is required for the agent${NC}"
+    exit 1
   fi
+  export ANTHROPIC_API_KEY="$ANTHROPIC_KEY"
+  echo -e "  ${GREEN}✓${NC} ANTHROPIC_API_KEY"
 
   # Composio key (optional)
   echo ""
-  EXISTING_COMPOSIO="${COMPOSIO_API_KEY:-}"
-  if [ -n "$EXISTING_COMPOSIO" ]; then
-    echo -e "  ${GREEN}✓${NC} COMPOSIO_API_KEY already set"
+  echo -e "  ${BOLD}COMPOSIO_API_KEY${NC} ${DIM}(optional — enables Gmail, Calendar, Slack, GitHub)${NC}"
+  read -rsp "  Key (press Enter to skip): " COMPOSIO_KEY
+  echo ""
+  if [ -n "$COMPOSIO_KEY" ]; then
+    export COMPOSIO_API_KEY="$COMPOSIO_KEY"
+    echo -e "  ${GREEN}✓${NC} COMPOSIO_API_KEY"
   else
-    echo -e "  ${BOLD}COMPOSIO_API_KEY${NC} ${DIM}(optional — enables Gmail, Calendar, Slack, GitHub)${NC}"
-    read -rsp "  Key (press Enter to skip): " COMPOSIO_KEY
-    echo ""
-    if [ -n "$COMPOSIO_KEY" ]; then
-      export COMPOSIO_API_KEY="$COMPOSIO_KEY"
-      echo -e "  ${GREEN}✓${NC} COMPOSIO_API_KEY"
-    else
-      echo -e "  ${DIM}  skipped${NC}"
-    fi
+    echo -e "  ${DIM}  skipped${NC}"
   fi
 
   # Telegram token (optional)
   echo ""
-  EXISTING_TELEGRAM="${TELEGRAM_BOT_TOKEN:-}"
-  if [ -n "$EXISTING_TELEGRAM" ]; then
-    echo -e "  ${GREEN}✓${NC} TELEGRAM_BOT_TOKEN already set"
+  echo -e "  ${BOLD}TELEGRAM_BOT_TOKEN${NC} ${DIM}(optional — enables Telegram messaging)${NC}"
+  read -rsp "  Token (press Enter to skip): " TELEGRAM_TOKEN
+  echo ""
+  if [ -n "$TELEGRAM_TOKEN" ]; then
+    export TELEGRAM_BOT_TOKEN="$TELEGRAM_TOKEN"
+    echo -e "  ${GREEN}✓${NC} TELEGRAM_BOT_TOKEN"
   else
-    echo -e "  ${BOLD}TELEGRAM_BOT_TOKEN${NC} ${DIM}(optional — enables Telegram messaging)${NC}"
-    read -rsp "  Token (press Enter to skip): " TELEGRAM_TOKEN
-    echo ""
-    if [ -n "$TELEGRAM_TOKEN" ]; then
-      export TELEGRAM_BOT_TOKEN="$TELEGRAM_TOKEN"
-      echo -e "  ${GREEN}✓${NC} TELEGRAM_BOT_TOKEN"
-    else
-      echo -e "  ${DIM}  skipped${NC}"
-    fi
+    echo -e "  ${DIM}  skipped${NC}"
   fi
   echo ""
 
