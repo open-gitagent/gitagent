@@ -1370,6 +1370,9 @@ ${runningContext}`;
 					continue; // Non-self messages are only processed for triggers
 				}
 
+				// Only process self-DMs for agent interaction
+				if (!isSelf) continue;
+
 				// ── Self-DM: full agent interaction ──
 				const text = incomingText;
 				const replyJid = senderJid;
@@ -2159,7 +2162,11 @@ ${runningContext}`;
 		// ── Skills Marketplace proxy ────────────────────────────────────
 		} else if (url.pathname === "/api/skills-mp/proxy" && req.method === "GET") {
 			const proxyPath = url.searchParams.get("path") || "/";
-			const targetUrl = `https://skills.sh${proxyPath.startsWith("/") ? proxyPath : "/" + proxyPath}`;
+			// Forward all query params except "path" to skills.sh
+			const forwardParams = new URLSearchParams(url.searchParams);
+			forwardParams.delete("path");
+			const qs = forwardParams.toString();
+			const targetUrl = `https://skills.sh${proxyPath.startsWith("/") ? proxyPath : "/" + proxyPath}${qs ? (proxyPath.includes("?") ? "&" : "?") + qs : ""}`;
 
 			try {
 				const proxyRes = await fetch(targetUrl, {
@@ -2178,6 +2185,7 @@ ${runningContext}`;
 					res.writeHead(proxyRes.status, {
 						"Content-Type": contentType,
 						"Cache-Control": proxyRes.headers.get("cache-control") || "public, max-age=3600",
+						"Access-Control-Allow-Origin": "*",
 					});
 					res.end(buffer);
 					return;
@@ -2215,11 +2223,11 @@ ${runningContext}`;
   window.fetch = function(url, opts) {
     if (typeof url === 'string') {
       if (url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/api/skills-mp/')) {
-        url = 'https://skills.sh' + url;
+        url = PROXY_BASE + url;
       } else if (url.startsWith(location.origin + '/')) {
         var path = url.slice(location.origin.length);
         if (!path.startsWith('/api/skills-mp/')) {
-          url = 'https://skills.sh' + path;
+          url = PROXY_BASE + path;
         }
       }
     } else if (url instanceof Request) {
@@ -2227,7 +2235,7 @@ ${runningContext}`;
       if (rUrl.startsWith(location.origin + '/')) {
         var rPath = rUrl.slice(location.origin.length);
         if (!rPath.startsWith('/api/skills-mp/')) {
-          url = new Request('https://skills.sh' + rPath, url);
+          url = new Request(PROXY_BASE + rPath, url);
         }
       }
     }
@@ -2240,11 +2248,11 @@ ${runningContext}`;
     var args = Array.prototype.slice.call(arguments, 2);
     if (typeof url === 'string') {
       if (url.startsWith('/') && !url.startsWith('//') && !url.startsWith('/api/skills-mp/')) {
-        url = 'https://skills.sh' + url;
+        url = PROXY_BASE + url;
       } else if (url.startsWith(location.origin + '/')) {
         var path = url.slice(location.origin.length);
         if (!path.startsWith('/api/skills-mp/')) {
-          url = 'https://skills.sh' + path;
+          url = PROXY_BASE + path;
         }
       }
     }
@@ -2367,7 +2375,7 @@ ${runningContext}`;
 
 				html = html.replace(/<\/body>/i, injectedScript + "</body>");
 
-				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Access-Control-Allow-Origin": "*" });
 				res.end(html);
 			} catch (err: any) {
 				// Fallback if skills.sh is unreachable
