@@ -1,5 +1,6 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { SandboxContext } from "../sandbox.js";
+import type { MemoryLayerDef } from "../plugin-types.js";
 import { createCliTool } from "./cli.js";
 import { createReadTool } from "./read.js";
 import { createWriteTool } from "./write.js";
@@ -17,6 +18,7 @@ export interface BuiltinToolsConfig {
 	timeout?: number;
 	sandbox?: SandboxContext;
 	gitagentDir?: string;
+	pluginMemoryLayers?: MemoryLayerDef[];
 }
 
 /**
@@ -38,7 +40,7 @@ export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[]
 		createCliTool(config.dir, config.timeout),
 		createReadTool(config.dir),
 		createWriteTool(config.dir),
-		createMemoryTool(config.dir),
+		createMemoryTool(config.dir, config.pluginMemoryLayers),
 		createCapturePhotoTool(config.dir),
 	];
 

@@ -8,8 +8,9 @@ import { createSandboxContext } from "./sandbox.js";
 import type { SandboxContext } from "./sandbox.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
-import { buildTypeboxSchema } from "./tool-loader.js";
+import { toAgentTool } from "./tool-utils.js";
 import { wrapToolWithProgrammaticHooks } from "./sdk-hooks.js";
+import { mergeHooksConfigs } from "./plugins.js";
 import { initLocalSession } from "./session.js";
 import type { LocalSession } from "./session.js";
 import type {
@@ -59,31 +60,6 @@ function createChannel<T>(): Channel<T> {
 				return Promise.resolve({ value: undefined as any, done: true });
 			}
 			return new Promise((r) => { resolve = r; });
-		},
-	};
-}
-
-// ── Convert GCToolDefinition → AgentTool ───────────────────────────────
-
-function toAgentTool(def: GCToolDefinition): AgentTool<any> {
-	const schema = buildTypeboxSchema(def.inputSchema);
-
-	return {
-		name: def.name,
-		label: def.name,
-		description: def.description,
-		parameters: schema,
-		execute: async (
-			_toolCallId: string,
-			params: any,
-			signal?: AbortSignal,
-		) => {
-			const result = await def.handler(params, signal);
-			const text = typeof result === "string" ? result : result.text;
-			const details = typeof result === "object" && "details" in result
-				? result.details
-				: undefined;
-			return { content: [{ type: "text" as const, text }], details };
 		},
 	};
 }
@@ -172,6 +148,9 @@ export function query(options: QueryOptions): Query {
 			await sandboxCtx.gitMachine.start();
 		}
 
+		// Collect plugin memory layers
+		const pluginMemoryLayers = loaded.plugins.flatMap((p) => p.memoryLayers);
+
 		let tools: AgentTool<any>[] = [];
 
 		if (!options.replaceBuiltinTools) {
@@ -180,12 +159,30 @@ export function query(options: QueryOptions): Query {
 				timeout: loaded.manifest.runtime.timeout,
 				sandbox: sandboxCtx,
 				gitagentDir: loaded.gitagentDir,
+				pluginMemoryLayers: pluginMemoryLayers.length > 0 ? pluginMemoryLayers : undefined,
 			});
 		}
 
 		// Declarative tools from tools/*.yaml
 		const declarativeTools = await loadDeclarativeTools(loaded.agentDir);
 		tools = [...tools, ...declarativeTools];
+
+		// Plugin tools (declarative + programmatic) — check for collisions with existing tools
+		const existingToolNames = new Set(tools.map((t) => t.name));
+		for (const plugin of loaded.plugins) {
+			const pluginTools = [
+				...plugin.tools,
+				...plugin.programmaticTools.map(toAgentTool),
+			];
+			for (const t of pluginTools) {
+				if (existingToolNames.has(t.name)) {
+					console.warn(`[plugin:${plugin.manifest.id}] Tool "${t.name}" collides with existing tool — skipping`);
+				} else {
+					tools.push(t);
+					existingToolNames.add(t.name);
+				}
+			}
+		}
 
 		// SDK-provided tools
 		if (options.tools) {
@@ -205,8 +202,9 @@ export function query(options: QueryOptions): Query {
 			tools = tools.filter((t) => !denied.has(t.name));
 		}
 
-		// 4. Wrap with script-based hooks
-		const hooksConfig = await loadHooksConfig(loaded.agentDir);
+		// 4. Wrap with script-based hooks (agent + plugin hooks merged)
+		const agentHooksConfig = await loadHooksConfig(loaded.agentDir);
+		const hooksConfig = mergeHooksConfigs(agentHooksConfig, loaded.plugins);
 		if (hooksConfig) {
 			tools = tools.map((t) =>
 				wrapToolWithHooks(t, hooksConfig, loaded.agentDir, _sessionId),

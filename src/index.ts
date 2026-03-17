@@ -11,6 +11,7 @@ import { expandSkillCommand, refreshSkills } from "./skills.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import type { HooksConfig } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
+import { toAgentTool } from "./tool-utils.js";
 import { AuditLogger, isAuditEnabled } from "./audit.js";
 import { formatComplianceWarnings } from "./compliance.js";
 import { readFile, mkdir, writeFile, stat, access } from "fs/promises";
@@ -19,6 +20,7 @@ import { execSync } from "child_process";
 import { initLocalSession } from "./session.js";
 import type { LocalSession } from "./session.js";
 import { startVoiceServer } from "./voice/server.js";
+import { handlePluginCommand } from "./plugin-cli.js";
 
 // ANSI helpers
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -293,6 +295,22 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
+	// Handle plugin subcommand: gitclaw plugin <install|list|remove|...>
+	if (process.argv[2] === "plugin") {
+		const allArgs = process.argv.slice(3);
+		let agentDir = process.cwd();
+		const pluginArgs: string[] = [];
+		for (let i = 0; i < allArgs.length; i++) {
+			if ((allArgs[i] === "--dir" || allArgs[i] === "-d") && allArgs[i + 1]) {
+				agentDir = allArgs[++i];
+			} else {
+				pluginArgs.push(allArgs[i]);
+			}
+		}
+		await handlePluginCommand(resolve(agentDir), pluginArgs);
+		return;
+	}
+
 	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch, voice } = parseArgs(process.argv);
 
 	// If --repo is given, derive a default dir from the repo URL (skip interactive prompt)
@@ -425,8 +443,10 @@ async function main(): Promise<void> {
 		await auditLogger.logSessionStart();
 	}
 
-	// Load hooks config
-	const hooksConfig = await loadHooksConfig(agentDir);
+	// Load hooks config (agent + plugin hooks merged)
+	const { mergeHooksConfigs } = await import("./plugins.js");
+	const agentHooksConfig = await loadHooksConfig(agentDir);
+	const hooksConfig = mergeHooksConfigs(agentHooksConfig, loaded.plugins);
 
 	// Run on_session_start hooks
 	if (hooksConfig?.hooks.on_session_start) {
@@ -463,17 +483,38 @@ async function main(): Promise<void> {
 		process.exit(1);
 	}
 
+	// Collect plugin memory layers
+	const pluginMemoryLayers = loaded.plugins.flatMap((p) => p.memoryLayers);
+
 	// Build tools — built-in + declarative
 	let tools: AgentTool<any>[] = createBuiltinTools({
 		dir,
 		timeout: manifest.runtime.timeout,
 		sandbox: sandboxCtx,
 		gitagentDir,
+		pluginMemoryLayers: pluginMemoryLayers.length > 0 ? pluginMemoryLayers : undefined,
 	});
 
 	// Load declarative tools from tools/*.yaml (Phase 2.2)
 	const declarativeTools = await loadDeclarativeTools(agentDir);
 	tools = [...tools, ...declarativeTools];
+
+	// Plugin tools (declarative + programmatic) — check for collisions with existing tools
+	const existingToolNames = new Set(tools.map((t) => t.name));
+	for (const plugin of loaded.plugins) {
+		const pluginTools = [
+			...plugin.tools,
+			...plugin.programmaticTools.map(toAgentTool),
+		];
+		for (const t of pluginTools) {
+			if (existingToolNames.has(t.name)) {
+				console.warn(`[plugin:${plugin.manifest.id}] Tool "${t.name}" collides with existing tool — skipping`);
+			} else {
+				tools.push(t);
+				existingToolNames.add(t.name);
+			}
+		}
+	}
 
 	// Wrap with hooks if configured
 	if (hooksConfig) {
@@ -515,7 +556,10 @@ async function main(): Promise<void> {
 	if (loaded.subAgents.length > 0) {
 		console.log(dim(`Agents: ${loaded.subAgents.map((a) => a.name).join(", ")}`));
 	}
-	console.log(dim('Type /skills, /tasks, /learned, /memory, /quit\n'));
+	if (loaded.plugins.length > 0) {
+		console.log(dim(`Plugins: ${loaded.plugins.map((p) => p.manifest.id).join(", ")}`));
+	}
+	console.log(dim('Type /skills to list skills, /plugins to list plugins, /memory to view memory, /quit to exit\n'));
 
 	// Single-shot mode
 	if (prompt) {
@@ -627,6 +671,26 @@ async function main(): Promise<void> {
 						const usage = s.usage_count ?? 0;
 						const ratio = `${s.success_count ?? 0}/${(s.success_count ?? 0) + (s.failure_count ?? 0)}`;
 						console.log(`  ${bold(s.name)} — confidence: ${s.confidence}, usage: ${usage}, success: ${ratio}`);
+					}
+				}
+				ask();
+				return;
+			}
+
+			if (trimmed === "/plugins") {
+				if (loaded.plugins.length === 0) {
+					console.log(dim("No plugins loaded."));
+				} else {
+					for (const p of loaded.plugins) {
+						const toolCount = p.tools.length + p.programmaticTools.length;
+						const info = [
+							toolCount > 0 ? `${toolCount} tools` : null,
+							p.skills.length > 0 ? `${p.skills.length} skills` : null,
+							p.hooks ? "hooks" : null,
+							p.promptAddition ? "prompt" : null,
+						].filter(Boolean).join(", ");
+						console.log(`  ${bold(p.manifest.id)} v${p.manifest.version} — ${dim(p.manifest.description)}`);
+						if (info) console.log(`    ${dim(`provides: ${info}`)}`);
 					}
 				}
 				ask();

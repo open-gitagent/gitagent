@@ -4,6 +4,7 @@ import { execSync } from "child_process";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { memorySchema, DEFAULT_MEMORY_PATH } from "./shared.js";
 import yaml from "js-yaml";
+import type { MemoryLayerDef } from "../plugin-types.js";
 
 interface MemoryLayer {
 	name: string;
@@ -17,15 +18,31 @@ interface MemoryConfig {
 	archive_policy?: { max_entries?: number; compress_after?: string };
 }
 
-async function loadMemoryConfig(cwd: string): Promise<MemoryConfig | null> {
+async function loadMemoryConfig(cwd: string, pluginLayers?: MemoryLayerDef[]): Promise<MemoryConfig | null> {
+	let config: MemoryConfig | null = null;
 	try {
 		const raw = await readFile(join(cwd, "memory", "memory.yaml"), "utf-8");
-		const config = yaml.load(raw) as MemoryConfig;
-		if (!config?.layers || !Array.isArray(config.layers)) return null;
-		return config;
+		const parsed = yaml.load(raw) as MemoryConfig;
+		if (parsed?.layers && Array.isArray(parsed.layers)) {
+			config = parsed;
+		}
 	} catch {
-		return null;
+		// No config file
 	}
+
+	// Merge plugin memory layers
+	if (pluginLayers && pluginLayers.length > 0) {
+		if (!config) config = { layers: [] };
+		for (const layer of pluginLayers) {
+			config.layers.push({
+				name: layer.name,
+				path: layer.path,
+				format: "markdown",
+			});
+		}
+	}
+
+	return config;
 }
 
 function getWorkingLayer(config: MemoryConfig | null): { path: string; maxLines?: number } {
@@ -78,7 +95,7 @@ async function archiveOverflow(
 	return kept;
 }
 
-export function createMemoryTool(cwd: string): AgentTool<typeof memorySchema> {
+export function createMemoryTool(cwd: string, pluginLayers?: MemoryLayerDef[]): AgentTool<typeof memorySchema> {
 	return {
 		name: "memory",
 		label: "memory",
@@ -92,7 +109,7 @@ export function createMemoryTool(cwd: string): AgentTool<typeof memorySchema> {
 		) => {
 			if (signal?.aborted) throw new Error("Operation aborted");
 
-			const config = await loadMemoryConfig(cwd);
+			const config = await loadMemoryConfig(cwd, pluginLayers);
 			const { path: memoryPath, maxLines } = getWorkingLayer(config);
 			const memoryFile = join(cwd, memoryPath);
 

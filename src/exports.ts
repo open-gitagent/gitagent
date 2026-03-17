@@ -41,5 +41,10 @@ export { initLocalSession } from "./session.js";
 export type { VoiceAdapter, VoiceAdapterConfig, VoiceServerOptions } from "./voice/adapter.js";
 export { startVoiceServer } from "./voice/server.js";
 
+// Plugin types
+export type { PluginManifest, PluginConfig, LoadedPlugin } from "./plugin-types.js";
+export type { GitclawPluginApi } from "./plugin-sdk.js";
+export { createPluginApi } from "./plugin-sdk.js";
+
 // Loader (escape hatch)
 export { loadAgent } from "./loader.js";

@@ -19,6 +19,9 @@ import { loadExamples, formatExamplesForPrompt } from "./examples.js";
 import type { ExampleEntry } from "./examples.js";
 import { validateCompliance, loadComplianceContext, formatComplianceWarnings } from "./compliance.js";
 import type { ComplianceWarning } from "./compliance.js";
+import { discoverAndLoadPlugins } from "./plugins.js";
+import type { LoadedPlugin } from "./plugin-types.js";
+import type { PluginConfig } from "./plugin-types.js";
 
 export interface AgentManifest {
 	spec_version: string;
@@ -51,6 +54,7 @@ export interface AgentManifest {
 	agents?: Record<string, any>;
 	delegation?: { mode: "auto" | "explicit" | "router"; router?: string };
 	compliance?: Record<string, any>;
+	plugins?: Record<string, PluginConfig>;
 }
 
 async function readFileOr(path: string, fallback: string): Promise<string> {
@@ -116,6 +120,7 @@ export interface LoadedAgent {
 	agentDir: string;
 	gitagentDir: string;
 	complianceWarnings: ComplianceWarning[];
+	plugins: LoadedPlugin[];
 }
 
 function deepMerge(base: Record<string, any>, override: Record<string, any>): Record<string, any> {
@@ -236,6 +241,9 @@ export async function loadAgent(
 	// Resolve dependencies (Phase 2.5)
 	await resolveDependencies(manifest, agentDir, gitagentDir);
 
+	// Discover and load plugins
+	const plugins = await discoverAndLoadPlugins(agentDir, gitagentDir, manifest.plugins);
+
 	// Validate compliance (Phase 3)
 	const complianceWarnings = validateCompliance(manifest);
 
@@ -271,6 +279,11 @@ export async function loadAgent(
 		const allowed = new Set(manifest.skills);
 		skills = skills.filter((s) => allowed.has(s.name));
 	}
+	// Plugin skills are merged without filtering — plugins are explicitly
+	// enabled in agent.yaml, so their skills are considered trusted.
+	for (const plugin of plugins) {
+		skills = [...skills, ...plugin.skills];
+	}
 	const skillsBlock = formatSkillsForPrompt(skills);
 	if (skillsBlock) parts.push(skillsBlock);
 
@@ -288,6 +301,13 @@ export async function loadAgent(
 	const examples = await loadExamples(agentDir);
 	const examplesBlock = formatExamplesForPrompt(examples);
 	if (examplesBlock) parts.push(examplesBlock);
+
+	// Append plugin prompt additions
+	for (const plugin of plugins) {
+		if (plugin.promptAddition) {
+			parts.push(`# Plugin: ${plugin.manifest.name}\n\n${plugin.promptAddition}`);
+		}
+	}
 
 	// Load compliance context (Phase 3)
 	const complianceBlock = await loadComplianceContext(agentDir);
@@ -356,5 +376,6 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 		agentDir,
 		gitagentDir,
 		complianceWarnings,
+		plugins,
 	};
 }
