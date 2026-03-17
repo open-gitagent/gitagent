@@ -8,7 +8,7 @@ import { createSandboxContext } from "./sandbox.js";
 import type { SandboxContext } from "./sandbox.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
-import { buildTypeboxSchema } from "./tool-loader.js";
+import { toAgentTool } from "./tool-utils.js";
 import { wrapToolWithProgrammaticHooks } from "./sdk-hooks.js";
 import { mergeHooksConfigs } from "./plugins.js";
 import { initLocalSession } from "./session.js";
@@ -60,31 +60,6 @@ function createChannel<T>(): Channel<T> {
 				return Promise.resolve({ value: undefined as any, done: true });
 			}
 			return new Promise((r) => { resolve = r; });
-		},
-	};
-}
-
-// ── Convert GCToolDefinition → AgentTool ───────────────────────────────
-
-function toAgentTool(def: GCToolDefinition): AgentTool<any> {
-	const schema = buildTypeboxSchema(def.inputSchema);
-
-	return {
-		name: def.name,
-		label: def.name,
-		description: def.description,
-		parameters: schema,
-		execute: async (
-			_toolCallId: string,
-			params: any,
-			signal?: AbortSignal,
-		) => {
-			const result = await def.handler(params, signal);
-			const text = typeof result === "string" ? result : result.text;
-			const details = typeof result === "object" && "details" in result
-				? result.details
-				: undefined;
-			return { content: [{ type: "text" as const, text }], details };
 		},
 	};
 }

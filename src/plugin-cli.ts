@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, rm, cp, stat } from "fs/promises";
 import { join, resolve } from "path";
 import { execSync } from "child_process";
 import yaml from "js-yaml";
+import { parseDocument } from "yaml";
 import { installPlugin, listAllPlugins } from "./plugins.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -238,14 +239,24 @@ async function addPluginToManifest(
 	const manifestPath = join(agentDir, "agent.yaml");
 	try {
 		const raw = await readFile(manifestPath, "utf-8");
-		const manifest = yaml.load(raw) as any;
+		const doc = parseDocument(raw);
 
-		if (!manifest.plugins) manifest.plugins = {};
-		manifest.plugins[name] = { ...(manifest.plugins[name] || {}), ...pluginConf };
+		if (!doc.has("plugins")) {
+			doc.set("plugins", {});
+		}
+		const pluginsNode = doc.get("plugins", true) as any;
 
-		await writeFile(manifestPath, yaml.dump(manifest, { lineWidth: -1 }), "utf-8");
-	} catch {
-		// Can't update manifest
+		const existing = pluginsNode?.get?.(name, true);
+		if (existing && typeof existing.toJSON === "function") {
+			const merged = { ...existing.toJSON(), ...pluginConf };
+			pluginsNode.set(name, merged);
+		} else {
+			pluginsNode.set(name, pluginConf);
+		}
+
+		await writeFile(manifestPath, doc.toString(), "utf-8");
+	} catch (err: any) {
+		console.error(`Failed to update agent.yaml: ${err.message}`);
 	}
 }
 
@@ -253,17 +264,19 @@ async function removePluginFromManifest(agentDir: string, name: string): Promise
 	const manifestPath = join(agentDir, "agent.yaml");
 	try {
 		const raw = await readFile(manifestPath, "utf-8");
-		const manifest = yaml.load(raw) as any;
+		const doc = parseDocument(raw);
 
-		if (manifest.plugins && manifest.plugins[name]) {
-			delete manifest.plugins[name];
-			if (Object.keys(manifest.plugins).length === 0) {
-				delete manifest.plugins;
+		const pluginsNode = doc.get("plugins", true) as any;
+		if (pluginsNode?.has?.(name)) {
+			pluginsNode.delete(name);
+			// Remove empty plugins key
+			if (pluginsNode.items?.length === 0) {
+				doc.delete("plugins");
 			}
-			await writeFile(manifestPath, yaml.dump(manifest, { lineWidth: -1 }), "utf-8");
+			await writeFile(manifestPath, doc.toString(), "utf-8");
 		}
-	} catch {
-		// Can't update manifest
+	} catch (err: any) {
+		console.error(`Failed to update agent.yaml: ${err.message}`);
 	}
 }
 

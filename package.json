@@ -53,7 +53,8 @@
     "baileys": "^7.0.0-rc.9",
     "js-yaml": "^4.1.0",
     "node-cron": "^3.0.3",
-    "ws": "^8.19.0"
+    "ws": "^8.19.0",
+    "yaml": "^2.8.2"
   },
   "peerDependencies": {
     "gitmachine": ">=0.1.0"

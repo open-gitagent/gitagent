@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { readFile } from "fs/promises";
-import { join } from "path";
+import { join, resolve } from "path";
 import yaml from "js-yaml";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
@@ -8,6 +8,7 @@ export interface HookDefinition {
 	script: string;
 	description?: string;
 	baseDir?: string; // plugin hooks run from their own directory
+	_handler?: (ctx: Record<string, any>) => Promise<HookResult> | HookResult;
 }
 
 export interface HooksConfig {
@@ -42,13 +43,32 @@ async function executeHook(
 	agentDir: string,
 	input: Record<string, any>,
 ): Promise<HookResult> {
-	return new Promise((resolve, reject) => {
+	// Programmatic hooks: call handler directly instead of spawning shell
+	if (typeof hook._handler === "function") {
+		try {
+			const result = await hook._handler(input);
+			return result ?? { action: "allow" };
+		} catch (err: any) {
+			throw new Error(`Programmatic hook "${hook.description || hook.script}" failed: ${err.message}`);
+		}
+	}
+
+	return new Promise((promiseResolve, reject) => {
 		// Plugin hooks use baseDir; agent hooks resolve relative to hooks/ dir
 		const baseDir = hook.baseDir || agentDir;
 		const scriptPath = hook.baseDir
 			? join(baseDir, hook.script)
 			: join(agentDir, "hooks", hook.script);
-		const child = spawn("sh", [scriptPath], {
+
+		// Path traversal guard: ensure script doesn't escape its base directory
+		const resolvedScript = resolve(scriptPath);
+		const allowedBase = resolve(baseDir);
+		if (!resolvedScript.startsWith(allowedBase + "/") && resolvedScript !== allowedBase) {
+			reject(new Error(`Hook "${hook.script}" escapes its base directory`));
+			return;
+		}
+
+		const child = spawn("sh", [resolvedScript], {
 			cwd: baseDir,
 			stdio: ["pipe", "pipe", "pipe"],
 			env: { ...process.env },
@@ -85,10 +105,10 @@ async function executeHook(
 			}
 			try {
 				const result = JSON.parse(stdout.trim()) as HookResult;
-				resolve(result);
+				promiseResolve(result);
 			} catch {
 				// If hook doesn't return JSON, treat as allow
-				resolve({ action: "allow" });
+				promiseResolve({ action: "allow" });
 			}
 		});
 	});

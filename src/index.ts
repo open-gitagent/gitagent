@@ -11,6 +11,7 @@ import { expandSkillCommand, refreshSkills } from "./skills.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import type { HooksConfig } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
+import { toAgentTool } from "./tool-utils.js";
 import { AuditLogger, isAuditEnabled } from "./audit.js";
 import { formatComplianceWarnings } from "./compliance.js";
 import { readFile, mkdir, writeFile, stat, access } from "fs/promises";
@@ -290,10 +291,17 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 async function main(): Promise<void> {
 	// Handle plugin subcommand: gitclaw plugin <install|list|remove|...>
 	if (process.argv[2] === "plugin") {
-		const agentDir = resolve(process.argv.includes("--dir") || process.argv.includes("-d")
-			? process.argv[process.argv.indexOf("--dir") + 1] || process.argv[process.argv.indexOf("-d") + 1] || process.cwd()
-			: process.cwd());
-		await handlePluginCommand(agentDir, process.argv.slice(3));
+		const allArgs = process.argv.slice(3);
+		let agentDir = process.cwd();
+		const pluginArgs: string[] = [];
+		for (let i = 0; i < allArgs.length; i++) {
+			if ((allArgs[i] === "--dir" || allArgs[i] === "-d") && allArgs[i + 1]) {
+				agentDir = allArgs[++i];
+			} else {
+				pluginArgs.push(allArgs[i]);
+			}
+		}
+		await handlePluginCommand(resolve(agentDir), pluginArgs);
 		return;
 	}
 
@@ -485,21 +493,7 @@ async function main(): Promise<void> {
 	for (const plugin of loaded.plugins) {
 		tools = [...tools, ...plugin.tools];
 		if (plugin.programmaticTools.length > 0) {
-			const { buildTypeboxSchema } = await import("./tool-loader.js");
-			for (const def of plugin.programmaticTools) {
-				const schema = buildTypeboxSchema(def.inputSchema);
-				tools.push({
-					name: def.name,
-					label: def.name,
-					description: def.description,
-					parameters: schema,
-					execute: async (_toolCallId: string, params: any, signal?: AbortSignal) => {
-						const result = await def.handler(params, signal);
-						const text = typeof result === "string" ? result : result.text;
-						return { content: [{ type: "text" as const, text }], details: undefined };
-					},
-				});
-			}
+			tools = [...tools, ...plugin.programmaticTools.map(toAgentTool)];
 		}
 	}
 

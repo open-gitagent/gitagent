@@ -1,6 +1,7 @@
-import { readFile, readdir, stat, mkdir } from "fs/promises";
+import { readFile, readdir, stat, mkdir, rm } from "fs/promises";
 import { join } from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
+import { createRequire } from "module";
 import { homedir } from "os";
 import yaml from "js-yaml";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
@@ -15,7 +16,24 @@ import { loadDeclarativeTools } from "./tool-loader.js";
 import { discoverSkills } from "./skills.js";
 import type { SkillMetadata } from "./skills.js";
 
+const require = createRequire(import.meta.url);
+const { version: GITCLAW_VERSION } = require("../package.json");
+
 const KEBAB_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+// ── Engine version check ────────────────────────────────────────────────
+
+function satisfiesEngine(range: string, current: string): boolean {
+	const match = range.match(/^>=\s*(\d+\.\d+\.\d+)/);
+	if (!match) return true; // Unknown format, allow
+	const required = match[1].split(".").map(Number);
+	const actual = current.split(".").map(Number);
+	for (let i = 0; i < 3; i++) {
+		if (actual[i] > required[i]) return true;
+		if (actual[i] < required[i]) return false;
+	}
+	return true; // Equal
+}
 
 // ── Validation ─────────────────────────────────────────────────────────
 
@@ -119,14 +137,21 @@ export async function installPlugin(
 	const pluginDir = join(targetDir, name);
 
 	if (await dirExists(pluginDir)) {
-		return pluginDir; // Already installed
+		// Verify it's a valid plugin directory
+		if (await fileExists(join(pluginDir, "plugin.yaml"))) {
+			return pluginDir; // Already installed and valid
+		}
+		// Stale directory: remove and re-clone
+		await rm(pluginDir, { recursive: true, force: true });
 	}
 
-	const branchArg = version ? `--branch "${version}"` : "";
+	const args = ["clone", "--depth", "1"];
+	if (version) {
+		args.push("--branch", version);
+	}
+	args.push(source, pluginDir);
 	try {
-		execSync(`git clone --depth 1 ${branchArg} "${source}" "${pluginDir}" 2>/dev/null`, {
-			stdio: "pipe",
-		});
+		execFileSync("git", args, { stdio: "pipe" });
 	} catch (err: any) {
 		throw new Error(`Failed to install plugin from "${source}": ${err.message}`);
 	}
@@ -152,6 +177,12 @@ async function loadPlugin(
 
 	const manifest = yaml.load(raw) as any;
 	if (!validatePluginManifest(manifest, pluginDir)) return null;
+
+	// Check engine compatibility
+	if (manifest.engine && !satisfiesEngine(manifest.engine, GITCLAW_VERSION)) {
+		console.warn(`Plugin "${manifest.id}": requires engine ${manifest.engine}, current is ${GITCLAW_VERSION}`);
+		return null;
+	}
 
 	// Resolve config
 	const config = resolvePluginConfig(manifest, userConfig?.config);
@@ -304,12 +335,18 @@ export async function discoverAndLoadPlugins(
 		const plugin = await loadPlugin(pluginDir, pluginConf);
 		if (!plugin) continue;
 
-		// Check for tool name collisions
-		for (const tool of plugin.tools) {
-			if (toolNames.has(tool.name)) {
-				console.warn(`Plugin "${pluginName}": tool "${tool.name}" collides with an existing tool`);
-			}
-			toolNames.add(tool.name);
+		// Check for tool name collisions (declarative + programmatic)
+		const allPluginToolNames = [
+			...plugin.tools.map((t) => t.name),
+			...plugin.programmaticTools.map((t) => t.name),
+		];
+		const collisions = allPluginToolNames.filter((name) => toolNames.has(name));
+		if (collisions.length > 0) {
+			console.error(`Plugin "${pluginName}": tool name collision(s): ${collisions.join(", ")}. Skipping plugin.`);
+			continue;
+		}
+		for (const name of allPluginToolNames) {
+			toolNames.add(name);
 		}
 
 		loaded.push(plugin);
