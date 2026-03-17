@@ -1,4 +1,5 @@
 import { readFile, mkdir, writeFile } from "fs/promises";
+import { readFileSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { execSync } from "child_process";
@@ -76,6 +77,58 @@ function parseModelString(modelStr: string): { provider: string; modelId: string
 		provider: modelStr.slice(0, colonIndex),
 		modelId: modelStr.slice(colonIndex + 1),
 	};
+}
+
+/**
+ * Auto-detect API keys from environment variables and return a default model.
+ * Checks common API key environment variables and maps them to default models.
+ */
+function autoDetectModelFromEnv(): string | undefined {
+	const envApiKeys: Record<string, string> = {
+		ANTHROPIC_API_KEY: "anthropic:claude-sonnet-4-5-20250505",
+		ANTHROPIC_API_KEYS: "anthropic:claude-sonnet-4-5-20250505",
+		OPENAI_API_KEY: "openai:gpt-4o-2024-11-20",
+		OPENAI_API_KEY_SESSIONS: "openai:gpt-4o-2024-11-20",
+		GOOGLE_API_KEY: "google:gemini-2.0-flash-001",
+		GOOGLE_GENAI_API_KEY: "google:gemini-2.0-flash-001",
+		AZURE_OPENAI_API_KEY: "azure:gpt-4o",
+		AWS_ACCESS_KEY_ID: "bedrock:anthropic.claude-3-sonnet-20240229-v1:0",
+		AWS_SECRET_ACCESS_KEY: "bedrock:anthropic.claude-3-sonnet-20240229-v1:0",
+		OLLAMA_HOST: "ollama:llama3",
+		LLM_API_KEY: "lmstudio:llama3",
+		GROQ_API_KEY: "groq:llama-3.3-70b-versatile",
+		MISTRAL_API_KEY: "mistral:mistral-large-latest",
+		ANYSACLE_API_KEY: "anyscale:meta-llama/Llama-3.3-70B-Instruct",
+		COHERE_API_KEY: "cohere:command-r-plus-08-2024",
+		DEEPSEEK_API_KEY: "deepseek:deepseek-chat",
+		XAI_API_KEY: "xai:grok-2-1212",
+	};
+
+	// Also check .env file in current directory
+	try {
+		const envFile = readFileSync(".env", "utf-8");
+		const envVars = envFile.split("\n").reduce((acc, line) => {
+			const match = line.match(/^([^=]+)=(.*)$/);
+			if (match) acc[match[1].trim()] = match[2].trim();
+			return acc;
+		}, {} as Record<string, string>);
+
+		for (const [key, defaultModel] of Object.entries(envApiKeys)) {
+			if (process.env[key] || envVars[key]) {
+				return defaultModel;
+			}
+		}
+	} catch {
+		// .env file doesn't exist, check env vars directly
+	}
+
+	for (const [key, defaultModel] of Object.entries(envApiKeys)) {
+		if (process.env[key]) {
+			return defaultModel;
+		}
+	}
+
+	return undefined;
 }
 
 async function ensureGitagentDir(agentDir: string): Promise<string> {
@@ -351,11 +404,11 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 
 	const systemPrompt = parts.join("\n\n");
 
-	// Resolve model — env config model_override > CLI flag > manifest preferred
-	const modelStr = envConfig.model_override || modelFlag || manifest.model.preferred;
+	// Resolve model — env config model_override > CLI flag > manifest preferred > auto-detect from env
+	const modelStr = envConfig.model_override || modelFlag || manifest.model.preferred || autoDetectModelFromEnv();
 	if (!modelStr) {
 		throw new Error(
-			'No model configured. Either:\n  - Set model.preferred in agent.yaml (e.g., "anthropic:claude-sonnet-4-5-20250929")\n  - Pass --model provider:model on the command line',
+			'No model configured. Either:\n  - Set model.preferred in agent.yaml (e.g., "anthropic:claude-sonnet-4-5-20250929")\n  - Pass --model provider:model on the command line\n  - Set an API key env var (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.) for auto-detection',
 		);
 	}
 
