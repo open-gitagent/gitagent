@@ -254,6 +254,12 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 		console.log(dim(`Created agent.yaml (model: ${defaultModel})`));
 	}
 
+	// Scaffold workspace directory
+	const workspaceDir = join(absDir, "workspace");
+	if (!(await fileExists(workspaceDir))) {
+		await mkdir(workspaceDir, { recursive: true });
+	}
+
 	// Scaffold memory if missing
 	const memoryDir = join(absDir, "memory");
 	const memoryFile = join(memoryDir, "MEMORY.md");

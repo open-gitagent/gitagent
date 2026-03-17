@@ -315,11 +315,12 @@ export async function loadAgent(
 	// Workspace directory — all generated files go here
 	parts.push(`# Workspace Directory
 
-ALL files you create (documents, PDFs, images, spreadsheets, code output, exports, assets, etc.) MUST be written to the \`workspace/\` directory.
-- Create the directory if it doesn't exist: \`workspace/\`
+Your working directory is \`${agentDir}\`.
+
+When creating files (documents, PDFs, images, spreadsheets, code output, exports, assets, etc.), write them to the \`workspace/\` directory by default.
 - Example: \`workspace/report.pdf\`, \`workspace/chart.png\`, \`workspace/data.csv\`
-- NEVER write generated files to the project root, home directory, desktop, or any other location
-- The \`workspace/\` directory is the designated output folder for all user-requested artifacts
+- The \`workspace/\` directory is the designated output folder for generated artifacts
+- If the user explicitly specifies a path (e.g. "create ~/notes/todo.md"), use the path they requested
 - This rule applies to ALL channels: voice, chat, Telegram, WhatsApp`);
 
 	// Task learning & skill discovery
