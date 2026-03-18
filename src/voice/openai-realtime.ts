@@ -83,10 +83,9 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 			let settled = false;
 
 			ws.on("open", () => {
-				settled = true;
-				this.ws = ws;
-				this.sendSessionUpdate();
-				resolve();
+				// Don't resolve yet — wait for first message to confirm auth succeeded.
+				// Send session.update so the server replies with session.created or error.
+				this.sendSessionUpdateOn(ws);
 			});
 
 			ws.on("error", (err) => {
@@ -110,9 +109,67 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 
 			ws.on("message", (data) => {
 				const event = JSON.parse(data.toString());
+
+				// Before we've confirmed auth, check for errors
+				if (!settled) {
+					if (event.type === "error") {
+						settled = true;
+						ws.close();
+						const errMsg = event.error?.message || "Unknown auth error";
+						reject(new Error(errMsg));
+						return;
+					}
+					// Any non-error message means auth succeeded
+					settled = true;
+					this.ws = ws;
+					resolve();
+				}
+
 				this.handleEvent(event);
 			});
 		});
+	}
+
+	/** Send session.update on a specific ws instance (before this.ws is set). */
+	private sendSessionUpdateOn(ws: WebSocket): void {
+		const instructions = this.config.instructions || DEFAULT_VOICE_INSTRUCTIONS;
+		const payload = {
+			type: "session.update",
+			session: {
+				instructions,
+				voice: this.config.voice || "ash",
+				modalities: ["text", "audio"],
+				turn_detection: {
+					type: "server_vad",
+					threshold: 0.6,
+					prefix_padding_ms: 400,
+					silence_duration_ms: 800,
+					create_response: true,
+				},
+				input_audio_transcription: { model: "whisper-1" },
+				tool_choice: "auto",
+				tools: [
+					{
+						type: "function",
+						name: "run_agent",
+						description: "Your ONLY way to take action. This agent runs on the user's Mac with full shell access. It can: run ANY shell command, open apps (open -a Spotify), play music (osascript, afplay, open URLs), browse the web, read/write files, git operations, send emails, manage calendars, install packages, control system settings, and save memories. You MUST call this tool whenever the user asks you to DO anything — play music, open something, check something, build something, send something. NEVER describe an action without calling this tool. If the user asks and you just talk without calling this — you failed.",
+						parameters: {
+							type: "object",
+							properties: {
+								query: {
+									type: "string",
+									description: "What to do. Be specific. Include file paths for uploaded files. Examples: 'Play relaxing music on YouTube using: open https://youtube.com/...', 'Open Spotify and play chill playlist using osascript', 'Save to memory: user likes rock music'",
+								},
+							},
+							required: ["query"],
+						},
+					},
+				],
+			},
+		};
+		if (ws.readyState === WebSocket.OPEN) {
+			ws.send(JSON.stringify(payload));
+		}
 	}
 
 	send(msg: ClientMessage): void {
@@ -227,42 +284,7 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 	}
 
 	private sendSessionUpdate(): void {
-		const instructions = this.config.instructions || DEFAULT_VOICE_INSTRUCTIONS;
-
-		this.sendRaw({
-			type: "session.update",
-			session: {
-				instructions,
-				voice: this.config.voice || "ash",
-				modalities: ["text", "audio"],
-				turn_detection: {
-					type: "server_vad",
-					threshold: 0.6,
-					prefix_padding_ms: 400,
-					silence_duration_ms: 800,
-					create_response: true,
-				},
-				input_audio_transcription: { model: "whisper-1" },
-				tool_choice: "auto",
-				tools: [
-					{
-						type: "function",
-						name: "run_agent",
-						description: "Your ONLY way to take action. This agent runs on the user's Mac with full shell access. It can: run ANY shell command, open apps (open -a Spotify), play music (osascript, afplay, open URLs), browse the web, read/write files, git operations, send emails, manage calendars, install packages, control system settings, and save memories. You MUST call this tool whenever the user asks you to DO anything — play music, open something, check something, build something, send something. NEVER describe an action without calling this tool. If the user asks and you just talk without calling this — you failed.",
-						parameters: {
-							type: "object",
-							properties: {
-								query: {
-									type: "string",
-									description: "What to do. Be specific. Include file paths for uploaded files. Examples: 'Play relaxing music on YouTube using: open https://youtube.com/...', 'Open Spotify and play chill playlist using osascript', 'Save to memory: user likes rock music'",
-								},
-							},
-							required: ["query"],
-						},
-					},
-				],
-			},
-		});
+		if (this.ws) this.sendSessionUpdateOn(this.ws);
 	}
 
 	private handleEvent(event: any): void {
