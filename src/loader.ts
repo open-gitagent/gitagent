@@ -1,7 +1,7 @@
 import { readFile, mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { getModel } from "@mariozechner/pi-ai";
 import type { Model } from "@mariozechner/pi-ai";
 import yaml from "js-yaml";
@@ -177,7 +177,7 @@ async function resolveInheritance(
 	const parentDir = join(depsDir, parentName);
 
 	try {
-		execSync(`git clone --depth 1 "${manifest.extends}" "${parentDir}" 2>/dev/null || true`, {
+		execFileSync("git", ["clone", "--depth", "1", manifest.extends, parentDir], {
 			cwd: agentDir,
 			stdio: "pipe",
 		});
@@ -223,8 +223,8 @@ async function resolveDependencies(
 	for (const dep of manifest.dependencies) {
 		const depDir = join(depsDir, dep.name);
 		try {
-			execSync(
-				`git clone --depth 1 --branch "${dep.version}" "${dep.source}" "${depDir}" 2>/dev/null || true`,
+			execFileSync(
+				"git", ["clone", "--depth", "1", "--branch", dep.version, dep.source, depDir],
 				{ cwd: agentDir, stdio: "pipe" },
 			);
 		} catch {

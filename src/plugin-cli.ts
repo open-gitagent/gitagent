@@ -1,6 +1,5 @@
 import { readFile, writeFile, mkdir, rm, cp, stat } from "fs/promises";
 import { join, resolve } from "path";
-import { execSync } from "child_process";
 import yaml from "js-yaml";
 // "yaml" (v2) is used here instead of js-yaml because parseDocument()
 // preserves comments and formatting when editing agent.yaml.

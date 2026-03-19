@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { readFile } from "fs/promises";
-import { join, resolve } from "path";
+import { join, resolve, sep } from "path";
 import yaml from "js-yaml";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
@@ -66,12 +66,15 @@ async function executeHook(
 		// Path traversal guard: ensure script doesn't escape its base directory
 		const resolvedScript = resolve(scriptPath);
 		const allowedBase = resolve(baseDir);
-		if (!resolvedScript.startsWith(allowedBase + "/") && resolvedScript !== allowedBase) {
+		if (!resolvedScript.startsWith(allowedBase + sep) && resolvedScript !== allowedBase) {
 			reject(new Error(`Hook "${hook.script}" escapes its base directory`));
 			return;
 		}
 
-		const child = spawn("sh", [resolvedScript], {
+		const isWin = process.platform === "win32";
+		const shell = isWin ? "cmd" : "sh";
+		const shellArgs = isWin ? ["/c", resolvedScript] : [resolvedScript];
+		const child = spawn(shell, shellArgs, {
 			cwd: baseDir,
 			stdio: ["pipe", "pipe", "pipe"],
 			env: { ...process.env },

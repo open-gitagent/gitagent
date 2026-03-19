@@ -68,7 +68,10 @@ function createDeclarativeTool(
 			if (signal?.aborted) throw new Error("Operation aborted");
 
 			return new Promise((resolve, reject) => {
-				const child = spawn(runtime, [scriptPath], {
+				const isWin = process.platform === "win32";
+				const shellCmd = isWin ? "cmd" : runtime;
+				const shellArgs = isWin ? ["/c", scriptPath] : [scriptPath];
+				const child = spawn(shellCmd, shellArgs, {
 					cwd: agentDir,
 					stdio: ["pipe", "pipe", "pipe"],
 					env: { ...process.env },

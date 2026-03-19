@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -31,8 +31,7 @@ export interface SandboxContext {
 
 function detectRepoUrl(dir: string): string | null {
 	try {
-		return execSync("git remote get-url origin", { cwd: dir, stdio: "pipe" })
-			.toString()
+		return execFileSync("git", ["remote", "get-url", "origin"], { cwd: dir, stdio: "pipe", encoding: "utf-8" })
 			.trim();
 	} catch {
 		return null;

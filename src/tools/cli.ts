@@ -24,7 +24,8 @@ export function createCliTool(cwd: string, defaultTimeout?: number): AgentTool<t
 					return;
 				}
 
-				const child = spawn("sh", ["-c", command], {
+				const isWin = process.platform === "win32";
+				const child = spawn(isWin ? "cmd" : "sh", isWin ? ["/c", command] : ["-c", command], {
 					cwd,
 					stdio: ["ignore", "pipe", "pipe"],
 					env: { ...process.env },

@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { join, dirname } from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { memorySchema, DEFAULT_MEMORY_PATH } from "./shared.js";
@@ -88,7 +88,7 @@ async function archiveOverflow(
 
 	// Try to git add the archive
 	try {
-		execSync(`git add "${archiveFile}"`, { cwd, stdio: "pipe" });
+		execFileSync("git", ["add", archiveFile], { cwd, stdio: "pipe" });
 	} catch {
 		// Not in git, that's fine
 	}
@@ -154,7 +154,8 @@ export function createMemoryTool(cwd: string, pluginLayers?: MemoryLayerDef[]): 
 			await writeFile(memoryFile, finalContent, "utf-8");
 
 			try {
-				execSync(`git add "${memoryPath}" && git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, {
+				execFileSync("git", ["add", memoryPath], { cwd, stdio: "pipe" });
+				execFileSync("git", ["commit", "-m", commitMsg], {
 					cwd,
 					stdio: "pipe",
 				});
