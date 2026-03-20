@@ -175,6 +175,12 @@ function handleEvent(
 			break;
 		}
 		case "agent_end":
+			if (event.messages && event.messages.length > 0) {
+				const last = event.messages[event.messages.length - 1];
+				if (last.role === "assistant" && last.errorMessage) {
+					process.stdout.write(red(`\nError: ${last.errorMessage}\n`));
+				}
+			}
 			break;
 	}
 }
