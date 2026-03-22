@@ -435,7 +435,7 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 			const { tools: composioTools, promptSuffix: composioPromptSuffix } = await getComposioContext(prompt);
 
 			let systemPromptSuffix = getCurrentDateTimeContext();
-			systemPromptSuffix += "\nWhen creating files (PDFs, images, documents, code output, etc.), write them to the workspace/ directory by default. If the user explicitly specifies a different path, use the path they requested.";
+			systemPromptSuffix += "\nWhen creating files (PDFs, images, documents, markdown files, code output, etc.), write them to the workspace/ directory by default. If the user explicitly specifies a different path, use the path they requested.";
 			if (whatsappSock && whatsappConnected) {
 				systemPromptSuffix += "\nYou can send WhatsApp messages using the send_whatsapp_message tool and set up auto-response triggers using create_trigger.";
 			} else {
@@ -905,7 +905,7 @@ ${runningContext}`;
 							const tgComposio = await getComposioContext(fullText);
 							let tgSystemPrompt = "You are an AI assistant responding to a Telegram user. " +
 								"Any files you create or modify will be AUTOMATICALLY sent back to the user on Telegram. " +
-								"When asked to create documents (PDF, Word, PPT, spreadsheets, images, text files, etc.), " +
+								"When asked to create documents (PDF, Word, PPT, spreadsheets, images, markdown files, text files, etc.), " +
 								"write them to the workspace/ directory. The files will be delivered to the user immediately after you finish. " +
 								"Keep text responses concise since they appear in a chat interface.";
 							if (whatsappSock && whatsappConnected) {
@@ -1411,7 +1411,7 @@ ${runningContext}`;
 					const waComposio = await getComposioContext(text);
 					let waSystemPrompt = "You are an AI assistant responding via WhatsApp. " +
 						"Any files you create or modify will be AUTOMATICALLY sent back to the user on WhatsApp. " +
-						"When asked to create documents, write them to the workspace/ directory. " +
+						"When asked to create documents or markdown files, write them to the workspace/ directory. " +
 						"Keep text responses concise since they appear in a chat interface. " +
 						"You can send WhatsApp messages to other people using the send_whatsapp_message tool. " +
 						"If you don't know a contact's number, ask the user or use list_whatsapp_contacts to check saved contacts. " +

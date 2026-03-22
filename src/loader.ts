@@ -318,8 +318,8 @@ export async function loadAgent(
 
 Your working directory is \`${agentDir}\`.
 
-When creating files (documents, PDFs, images, spreadsheets, code output, exports, assets, etc.), write them to the \`workspace/\` directory by default.
-- Example: \`workspace/report.pdf\`, \`workspace/chart.png\`, \`workspace/data.csv\`
+When creating files (documents, markdown files, PDFs, images, spreadsheets, code output, exports, assets, etc.), write them to the \`workspace/\` directory by default.
+- Example: \`workspace/report.pdf\`, \`workspace/chart.png\`, \`workspace/data.csv\`, \`workspace/todo.md\`
 - The \`workspace/\` directory is the designated output folder for generated artifacts
 - If the user explicitly specifies a path (e.g. "create ~/notes/todo.md"), use the path they requested
 - This rule applies to ALL channels: voice, chat, Telegram, WhatsApp`);
