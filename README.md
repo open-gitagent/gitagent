@@ -23,7 +23,8 @@
   <a href="#architecture">Architecture</a> &bull;
   <a href="#tools">Tools</a> &bull;
   <a href="#hooks">Hooks</a> &bull;
-  <a href="#skills">Skills</a>
+  <a href="#skills">Skills</a> &bull;
+  <a href="#plugins">Plugins</a>
 </p>
 
 ---
@@ -287,6 +288,8 @@ my-agent/
 │   └── *.yaml|*.md     # Multi-step workflow definitions
 ├── agents/
 │   └── <name>/         # Sub-agent definitions
+├── plugins/
+│   └── <name>/         # Local plugins (plugin.yaml + tools/hooks/skills)
 ├── hooks/
 │   └── hooks.yaml      # Lifecycle hook scripts
 ├── knowledge/
@@ -419,6 +422,166 @@ When reviewing code:
 ```
 
 Invoke via CLI: `/skill:code-review Review the auth module`
+
+## Plugins
+
+Plugins are reusable extensions that can provide tools, hooks, skills, prompts, and memory layers. They follow the same git-native philosophy — a plugin is a directory with a `plugin.yaml` manifest.
+
+### CLI Commands
+
+```bash
+# Install from git URL
+gitclaw plugin install https://github.com/org/my-plugin.git
+
+# Install from local path
+gitclaw plugin install ./path/to/plugin
+
+# Install with options
+gitclaw plugin install <source> --name custom-name --force --no-enable
+
+# List all discovered plugins
+gitclaw plugin list
+
+# Enable / disable
+gitclaw plugin enable my-plugin
+gitclaw plugin disable my-plugin
+
+# Remove
+gitclaw plugin remove my-plugin
+
+# Scaffold a new plugin
+gitclaw plugin init my-plugin
+```
+
+| Flag | Description |
+|---|---|
+| `--name <name>` | Custom plugin name (default: derived from source) |
+| `--force` | Reinstall even if already present |
+| `--no-enable` | Install without auto-enabling |
+
+### Plugin Manifest (`plugin.yaml`)
+
+```yaml
+id: my-plugin                    # Required, kebab-case
+name: My Plugin
+version: 0.1.0
+description: What this plugin does
+author: Your Name
+license: MIT
+engine: ">=0.3.0"               # Min gitclaw version
+
+provides:
+  tools: true                    # Load tools from tools/*.yaml
+  skills: true                   # Load skills from skills/
+  prompt: prompt.md              # Inject into system prompt
+  hooks:
+    pre_tool_use:
+      - script: hooks/audit.sh
+        description: Audit tool calls
+
+config:
+  properties:
+    api_key:
+      type: string
+      description: API key
+      env: MY_API_KEY            # Env var fallback
+    timeout:
+      type: number
+      default: 30
+  required: [api_key]
+
+entry: index.ts                  # Optional programmatic entry point
+```
+
+### Plugin Config in `agent.yaml`
+
+```yaml
+plugins:
+  my-plugin:
+    enabled: true
+    source: https://github.com/org/my-plugin.git  # Auto-install on load
+    version: main                                   # Git branch/tag
+    config:
+      api_key: "${MY_API_KEY}"                      # Supports env interpolation
+      timeout: 60
+```
+
+Config resolution priority: `agent.yaml config` > `env var` > `manifest default`.
+
+### Discovery Order
+
+Plugins are discovered in this order (first match wins):
+
+1. **Local** — `<agent-dir>/plugins/<name>/`
+2. **Global** — `~/.gitclaw/plugins/<name>/`
+3. **Installed** — `<agent-dir>/.gitagent/plugins/<name>/`
+
+### Programmatic Plugins
+
+Plugins with an `entry` field in their manifest get a full API:
+
+```typescript
+// index.ts
+import type { GitclawPluginApi } from "gitclaw";
+
+export async function register(api: GitclawPluginApi) {
+  // Register a tool
+  api.registerTool({
+    name: "search_docs",
+    description: "Search documentation",
+    inputSchema: {
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    },
+    handler: async (args) => {
+      const results = await search(args.query);
+      return { text: JSON.stringify(results) };
+    },
+  });
+
+  // Register a lifecycle hook
+  api.registerHook("pre_tool_use", async (ctx) => {
+    api.logger.info(`Tool called: ${ctx.tool}`);
+    return { action: "allow" };
+  });
+
+  // Add to system prompt
+  api.addPrompt("Always check docs before answering questions.");
+
+  // Register a memory layer
+  api.registerMemoryLayer({
+    name: "docs-cache",
+    path: "memory/docs-cache.md",
+    description: "Cached documentation lookups",
+  });
+}
+```
+
+**Available API methods:**
+
+| Method | Description |
+|---|---|
+| `registerTool(def)` | Register a tool the agent can call |
+| `registerHook(event, handler)` | Register a lifecycle hook (`on_session_start`, `pre_tool_use`, `post_response`, `on_error`) |
+| `addPrompt(text)` | Append text to the system prompt |
+| `registerMemoryLayer(layer)` | Register a memory layer |
+| `logger.info/warn/error(msg)` | Prefixed logging (`[plugin:id]`) |
+| `pluginId` | Plugin identifier |
+| `pluginDir` | Absolute path to plugin directory |
+| `config` | Resolved config values |
+
+### Plugin Structure
+
+```
+my-plugin/
+├── plugin.yaml          # Manifest (required)
+├── tools/               # Declarative tool definitions
+│   └── *.yaml
+├── hooks/               # Hook scripts
+├── skills/              # Skill modules
+├── prompt.md            # System prompt addition
+└── index.ts             # Programmatic entry point
+```
 
 ## Multi-Model Support
 
