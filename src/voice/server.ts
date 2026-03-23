@@ -69,6 +69,55 @@ function isMomentWorthy(text: string): boolean {
 }
 
 let vitalsTokenCount = 0;
+
+// ── Centralized vitals snapshot ────────────────────────────────────────
+// All surfaces (API, UI, logs) share the same cached snapshot so values
+// are always consistent regardless of who reads them or when.
+interface VitalsSnapshot {
+	cpu: number;
+	mem: number;
+	heapUsed: number;
+	heapTotal: number;
+	uptime: number;
+	tokens: number;
+	ts: number; // unix-ms when this snapshot was taken
+}
+
+let _lastCpuUsage = process.cpuUsage();
+let _lastCpuTime = process.hrtime.bigint();
+let _vitalsCache: VitalsSnapshot | null = null;
+const VITALS_CACHE_MS = 1000; // cache for 1s — all readers within 1s see identical values
+
+function getVitalsSnapshot(): VitalsSnapshot {
+	const now = Date.now();
+	if (_vitalsCache && now - _vitalsCache.ts < VITALS_CACHE_MS) return _vitalsCache;
+
+	const mem = process.memoryUsage();
+	const currentCpu = process.cpuUsage();
+	const currentTime = process.hrtime.bigint();
+
+	// Delta-based CPU: measure CPU microseconds consumed since last sample
+	const userDelta = currentCpu.user - _lastCpuUsage.user;
+	const sysDelta = currentCpu.system - _lastCpuUsage.system;
+	const wallDeltaUs = Number(currentTime - _lastCpuTime) / 1000; // ns → µs
+	const cpuPercent = wallDeltaUs > 0
+		? Math.min(100, Math.round((userDelta + sysDelta) / wallDeltaUs * 100))
+		: 0;
+
+	_lastCpuUsage = currentCpu;
+	_lastCpuTime = currentTime;
+
+	_vitalsCache = {
+		cpu: cpuPercent,
+		mem: Math.round(mem.rss / 1024 / 1024),
+		heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
+		heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
+		uptime: Math.round(process.uptime()),
+		tokens: vitalsTokenCount,
+		ts: now,
+	};
+	return _vitalsCache;
+}
 const PHOTOS_DIR = "memory/photos";
 const INDEX_FILE = "memory/photos/INDEX.md";
 const LATEST_FRAME_FILE = "memory/.latest-frame.jpg";
@@ -1595,17 +1644,7 @@ ${runningContext}`;
 			jsonReply(res, 200, { status: "ok" });
 
 		} else if (url.pathname === "/api/vitals") {
-			const mem = process.memoryUsage();
-			const cpuUsage = process.cpuUsage();
-			const cpuPercent = Math.min(100, Math.round((cpuUsage.user + cpuUsage.system) / 1000 / (process.uptime() * 10000)));
-			jsonReply(res, 200, {
-				cpu: cpuPercent,
-				mem: Math.round(mem.rss / 1024 / 1024),
-				heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
-				heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
-				uptime: Math.round(process.uptime()),
-				tokens: vitalsTokenCount,
-			});
+			jsonReply(res, 200, getVitalsSnapshot());
 
 		} else if (url.pathname === "/" || url.pathname === "/test") {
 			res.writeHead(200, { "Content-Type": "text/html" });

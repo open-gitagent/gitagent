@@ -1747,14 +1747,19 @@ function connectWS(){if(ws)return;setStatus('Connecting...','');ws=new WebSocket
 function sendMsg(m){if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(m));}
 
 // Agent Vitals
-var vitalsStart=Date.now(), vitalsTokenCount=0, vitalsMaxTokens=200000;
+var vitalsTokenCount=0, vitalsMaxTokens=200000, vitalsServerUptime=0;
 var waveData=[], waveCanvas=document.getElementById('vitalsWaveCanvas'), waveCtx=waveCanvas?waveCanvas.getContext('2d'):null;
 
-function updateUptime(){
-  var s=Math.floor((Date.now()-vitalsStart)/1000);
+function formatUptime(s){
   var h=Math.floor(s/3600), m=Math.floor((s%3600)/60), sec=s%60;
+  return (h>0?(h+':'):'')+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+}
+function updateUptime(){
+  // Interpolate locally between API polls for smooth display,
+  // but base value always comes from the server snapshot
+  vitalsServerUptime++;
   var el=document.getElementById('vitalUptime');
-  if(el) el.innerHTML=(h>0?(h+':'):'')+String(m).padStart(2,'0')+':'+String(sec).padStart(2,'0');
+  if(el) el.innerHTML=formatUptime(vitalsServerUptime);
 }
 setInterval(updateUptime,1000);
 
@@ -1782,6 +1787,8 @@ function pollSystemVitals(){
       if(memBar)memBar.style.width=Math.min(100,Math.round(mb/4096*100))+'%';
     }
     if(d.tokens!==undefined) updateVitalTokens(d.tokens);
+    // Sync uptime from server snapshot so UI matches API
+    if(d.uptime!==undefined) vitalsServerUptime=d.uptime;
     // Push to wave
     waveData.push(d.cpu||0);
     if(waveData.length>60) waveData.shift();
