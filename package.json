@@ -37,7 +37,7 @@
     }
   },
   "scripts": {
-    "build": "tsc && copy src\\voice\\ui.html dist\\voice\\",
+    "build": "tsc && node -e \"require('fs').cpSync('src/voice/ui.html','dist/voice/ui.html')\"",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "node --test test/*.test.ts --experimental-strip-types"
