@@ -1646,6 +1646,63 @@ ${runningContext}`;
 		} else if (url.pathname === "/api/vitals") {
 			jsonReply(res, 200, getVitalsSnapshot());
 
+		} else if (url.pathname === "/api/settings" && req.method === "GET") {
+			// Read current model from agent.yaml and key presence from .env
+			let model = "";
+			try {
+				const yamlRaw = readFileSync(join(agentRoot, "agent.yaml"), "utf-8");
+				const m = yamlRaw.match(/preferred:\s*["']?([^"'\n]+)["']?/);
+				if (m) model = m[1].trim();
+			} catch { /* no agent.yaml */ }
+			const keys: Record<string, boolean> = {};
+			for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "COMPOSIO_API_KEY"]) {
+				keys[k] = !!process.env[k];
+			}
+			jsonReply(res, 200, { model, keys });
+
+		} else if (url.pathname === "/api/settings" && req.method === "PUT") {
+			try {
+				const body = JSON.parse(await readBody(req));
+
+				// Update .env with new keys
+				const envPath = join(agentRoot, ".env");
+				let envContent = "";
+				try { envContent = readFileSync(envPath, "utf-8"); } catch { /* new file */ }
+
+				const envKeys = body.keys || {};
+				for (const [key, val] of Object.entries(envKeys)) {
+					if (typeof val !== "string" || !val) continue;
+					process.env[key] = val;
+					const regex = new RegExp(`^${key}=.*$`, "m");
+					if (regex.test(envContent)) {
+						envContent = envContent.replace(regex, `${key}=${val}`);
+					} else {
+						envContent += (envContent.endsWith("\n") || !envContent ? "" : "\n") + `${key}=${val}\n`;
+					}
+				}
+				writeFileSync(envPath, envContent, "utf-8");
+
+				// Update model in agent.yaml
+				if (body.model) {
+					const yamlPath = join(agentRoot, "agent.yaml");
+					try {
+						let yamlContent = readFileSync(yamlPath, "utf-8");
+						if (/preferred:\s*["']?[^"'\n]*["']?/.test(yamlContent)) {
+							yamlContent = yamlContent.replace(
+								/preferred:\s*["']?[^"'\n]*["']?/,
+								`preferred: "${body.model}"`,
+							);
+						}
+						writeFileSync(yamlPath, yamlContent, "utf-8");
+					} catch { /* no agent.yaml to update */ }
+				}
+
+				console.log("[settings] Configuration updated — keys in process.env, model in agent.yaml");
+				jsonReply(res, 200, { ok: true });
+			} catch (err: any) {
+				jsonReply(res, 400, { error: err.message || "Invalid request" });
+			}
+
 		} else if (url.pathname === "/" || url.pathname === "/test") {
 			res.writeHead(200, { "Content-Type": "text/html" });
 			res.end(uiHtml);

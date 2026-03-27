@@ -1008,6 +1008,7 @@
       <button class="view-tab" id="tabComms" onclick="switchView('comms')">Communication</button>
       <button class="view-tab" id="tabFlows" onclick="switchView('flows')">SkillFlows</button>
       <button class="view-tab" id="tabScheduler" onclick="switchView('scheduler')">Scheduler</button>
+      <button class="view-tab" id="tabSettings" onclick="switchView('settings')">Settings</button>
     </div>
   </div>
   <div class="header-right">
@@ -1350,6 +1351,47 @@
       <div id="schedulesList"></div>
     </div>
   </div>
+  <div class="settings-view hidden" id="settingsView" style="display:flex;flex:1;overflow-y:auto;padding:16px;">
+    <div style="max-width:560px;width:100%;margin:0 auto;">
+      <h3 style="margin:0 0 16px;color:#e6edf3;font-size:16px;">Settings</h3>
+      <div id="settingsStatus" style="display:none;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:13px;"></div>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">Agent Model</label>
+          <select id="settingsModel" style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;">
+            <option value="">Loading...</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">Custom Model <span style="color:#484f58;">(provider:model-id)</span></label>
+          <input id="settingsCustomModel" type="text" placeholder="e.g. anthropic:claude-opus-4-6" style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
+        </div>
+        <hr style="border:none;border-top:1px solid #21262d;margin:4px 0;">
+        <div>
+          <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">OpenAI API Key <span style="color:#484f58;">(voice)</span></label>
+          <input id="settingsOpenaiKey" type="password" placeholder="sk-..." style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">Anthropic API Key <span style="color:#484f58;">(agent brain)</span></label>
+          <input id="settingsAnthropicKey" type="password" placeholder="sk-ant-..." style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">Gemini API Key <span style="color:#484f58;">(optional)</span></label>
+          <input id="settingsGeminiKey" type="password" placeholder="AI..." style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">Composio API Key <span style="color:#484f58;">(optional — Gmail, Calendar, Slack)</span></label>
+          <input id="settingsComposioKey" type="password" placeholder="ak_..." style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
+        </div>
+        <hr style="border:none;border-top:1px solid #21262d;margin:4px 0;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button onclick="saveSettings()" style="padding:8px 20px;background:#238636;border:1px solid #2ea043;border-radius:6px;color:#fff;cursor:pointer;font-size:13px;">Save</button>
+          <span id="settingsSaving" style="display:none;color:#8b949e;font-size:12px;">Saving...</span>
+        </div>
+        <p style="color:#484f58;font-size:11px;margin:0;">Saves to .env and agent.yaml in your agent directory. Changes take effect on the next query.</p>
+      </div>
+    </div>
+  </div>
   <div class="skills-view hidden" id="skillsView" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
     <iframe id="skillsFrame" src="" style="flex:1;border:none;background:#0d1117;width:100%;"></iframe>
   </div>
@@ -1360,7 +1402,7 @@
 <script>
 var hasComposio={{HAS_COMPOSIO}};
 if(!hasComposio){document.getElementById('tabIntegrations').style.display='none';}
-let currentView='chat',filesLoaded=false,integrationsLoaded=false,commsLoaded=false,skillsLoaded=false,flowsLoaded=false,schedulerLoaded=false;
+let currentView='chat',filesLoaded=false,integrationsLoaded=false,commsLoaded=false,skillsLoaded=false,flowsLoaded=false,schedulerLoaded=false,settingsLoaded=false;
 function switchView(v){
   currentView=v;
   document.getElementById('chatView').classList.toggle('hidden',v!=='chat');
@@ -1369,17 +1411,20 @@ function switchView(v){
   document.getElementById('skillsView').classList.toggle('hidden',v!=='skills');
   document.getElementById('flowsView').classList.toggle('hidden',v!=='flows');
   document.getElementById('schedulerView').classList.toggle('hidden',v!=='scheduler');
+  document.getElementById('settingsView').classList.toggle('hidden',v!=='settings');
   document.getElementById('tabChat').classList.toggle('active',v==='chat');
   document.getElementById('tabIntegrations').classList.toggle('active',v==='integrations');
   document.getElementById('tabComms').classList.toggle('active',v==='comms');
   document.getElementById('tabSkills').classList.toggle('active',v==='skills');
   document.getElementById('tabFlows').classList.toggle('active',v==='flows');
   document.getElementById('tabScheduler').classList.toggle('active',v==='scheduler');
+  document.getElementById('tabSettings').classList.toggle('active',v==='settings');
   if(v==='integrations'&&!integrationsLoaded){loadToolkits();integrationsLoaded=true;}
   if(v==='comms'&&!commsLoaded){loadTelegramStatus();loadWhatsAppStatus();loadPhoneWebhookUrl();commsLoaded=true;}
   if(v==='skills'&&!skillsLoaded){document.getElementById('skillsFrame').src='/api/skills-mp/proxy?path=/';skillsLoaded=true;}
   if(v==='flows'){loadFlowSkills();loadSavedFlows();flowsLoaded=true;}
   if(v==='scheduler'&&!schedulerLoaded){loadSchedules();schedulerLoaded=true;}
+  if(v==='settings'&&!settingsLoaded){loadSettings();settingsLoaded=true;}
 }
 // Skills MP install handler
 window.addEventListener('message',function(e){
@@ -2651,6 +2696,82 @@ async function resetScheduleJob(id){
       loadSchedules();
     }catch(e){alert('Error: '+e.message);}
   }
+}
+
+// ── SETTINGS ────────────────────────────────────────────────────────
+var _knownModels=[
+  {value:'anthropic:claude-sonnet-4-6',label:'Claude Sonnet 4.6'},
+  {value:'anthropic:claude-opus-4-6',label:'Claude Opus 4.6'},
+  {value:'anthropic:claude-haiku-4-5-20251001',label:'Claude Haiku 4.5'},
+  {value:'openai:gpt-4o',label:'GPT-4o'},
+  {value:'openai:gpt-4o-mini',label:'GPT-4o Mini'},
+  {value:'google:gemini-2.0-flash-001',label:'Gemini 2.0 Flash'},
+  {value:'groq:llama-3.3-70b-versatile',label:'Groq Llama 3.3 70B'},
+  {value:'deepseek:deepseek-chat',label:'DeepSeek Chat'},
+  {value:'',label:'Custom (enter below)'}
+];
+function loadSettings(){
+  fetch('/api/settings').then(function(r){return r.json();}).then(function(d){
+    var sel=document.getElementById('settingsModel');
+    sel.innerHTML='';
+    _knownModels.forEach(function(m){
+      var opt=document.createElement('option');opt.value=m.value;opt.textContent=m.label;
+      sel.appendChild(opt);
+    });
+    // Set current model
+    if(d.model){
+      var found=_knownModels.some(function(m){return m.value===d.model;});
+      if(found){sel.value=d.model;}
+      else{sel.value='';document.getElementById('settingsCustomModel').value=d.model;}
+    }
+    // Mask keys — show placeholder if set
+    document.getElementById('settingsOpenaiKey').placeholder=d.keys.OPENAI_API_KEY?'••••••••  (set)':'sk-...';
+    document.getElementById('settingsAnthropicKey').placeholder=d.keys.ANTHROPIC_API_KEY?'••••••••  (set)':'sk-ant-...';
+    document.getElementById('settingsGeminiKey').placeholder=d.keys.GEMINI_API_KEY?'••••••••  (set)':'AI...';
+    document.getElementById('settingsComposioKey').placeholder=d.keys.COMPOSIO_API_KEY?'••••••••  (set)':'ak_...';
+  }).catch(function(e){showSettingsStatus('Failed to load settings: '+e.message,'error');});
+}
+function showSettingsStatus(msg,type){
+  var el=document.getElementById('settingsStatus');
+  el.style.display='block';
+  el.textContent=msg;
+  el.style.background=type==='error'?'rgba(248,81,73,0.15)':'rgba(63,185,80,0.15)';
+  el.style.color=type==='error'?'#f85149':'#3fb950';
+  el.style.border='1px solid '+(type==='error'?'#f8514966':'#3fb95066');
+  if(type!=='error')setTimeout(function(){el.style.display='none';},4000);
+}
+function saveSettings(){
+  var sel=document.getElementById('settingsModel');
+  var model=sel.value||document.getElementById('settingsCustomModel').value;
+  var payload={model:model,keys:{}};
+  var openai=document.getElementById('settingsOpenaiKey').value;
+  var anthropic=document.getElementById('settingsAnthropicKey').value;
+  var gemini=document.getElementById('settingsGeminiKey').value;
+  var composio=document.getElementById('settingsComposioKey').value;
+  if(openai)payload.keys.OPENAI_API_KEY=openai;
+  if(anthropic)payload.keys.ANTHROPIC_API_KEY=anthropic;
+  if(gemini)payload.keys.GEMINI_API_KEY=gemini;
+  if(composio)payload.keys.COMPOSIO_API_KEY=composio;
+  document.getElementById('settingsSaving').style.display='inline';
+  fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){return r.json().then(function(d){return{ok:r.ok,data:d};});})
+    .then(function(res){
+      document.getElementById('settingsSaving').style.display='none';
+      if(res.ok){
+        showSettingsStatus('Settings saved. Changes take effect on next query.','success');
+        // Clear password fields and refresh placeholders
+        document.getElementById('settingsOpenaiKey').value='';
+        document.getElementById('settingsAnthropicKey').value='';
+        document.getElementById('settingsGeminiKey').value='';
+        document.getElementById('settingsComposioKey').value='';
+        settingsLoaded=false;loadSettings();settingsLoaded=true;
+      }else{
+        showSettingsStatus(res.data.error||'Failed to save','error');
+      }
+    }).catch(function(e){
+      document.getElementById('settingsSaving').style.display='none';
+      showSettingsStatus('Error: '+e.message,'error');
+    });
 }
 
 // ── TELEGRAM / COMMUNICATION ────────────────────────────────────────
