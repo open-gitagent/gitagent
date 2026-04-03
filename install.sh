@@ -100,6 +100,12 @@ echo -e "  ${GREEN}✓${NC} node $(node -v)  ${GREEN}✓${NC} npm $(npm -v)  ${G
 echo ""
 
 # ── Install / update gitclaw globally ────────────────────────────
+# Use sudo on Linux if needed (npm global installs require root on most Linux distros)
+NPM_CMD="npm"
+if [ "$(uname)" != "Darwin" ] && ! npm root -g 2>/dev/null | grep -q "$HOME"; then
+  NPM_CMD="sudo npm"
+fi
+
 if command -v gitclaw &>/dev/null; then
   INSTALLED_VER="$(npm ls -g gitclaw --depth=0 --json 2>/dev/null | node -pe "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).dependencies?.gitclaw?.version || ''" 2>/dev/null || echo "")"
   LATEST_VER="$(npm view gitclaw version 2>/dev/null || echo "")"
@@ -110,7 +116,7 @@ if command -v gitclaw &>/dev/null; then
     UPDATE_CHOICE="${UPDATE_CHOICE:-Y}"
     if [[ "$UPDATE_CHOICE" =~ ^[Yy] ]]; then
       echo -e "  ${BOLD}Updating gitclaw...${NC}"
-      npm install -g gitclaw@latest 2>&1 | tail -2
+      $NPM_CMD install -g gitclaw@latest 2>&1 | tail -2
       echo -e "  ${GREEN}✓${NC} gitclaw updated to v${LATEST_VER}"
     else
       echo -e "  ${DIM}  keeping v${INSTALLED_VER}${NC}"
@@ -123,9 +129,9 @@ else
   # Remove corrupted partial installs that cause ENOTDIR
   NPM_GLOBAL_DIR="$(npm root -g 2>/dev/null || echo "")"
   if [ -n "$NPM_GLOBAL_DIR" ] && [ -d "${NPM_GLOBAL_DIR}/gitclaw" ] && [ ! -f "${NPM_GLOBAL_DIR}/gitclaw/package.json" ]; then
-    rm -rf "${NPM_GLOBAL_DIR}/gitclaw"
+    $NPM_CMD rm -rf "${NPM_GLOBAL_DIR}/gitclaw" 2>/dev/null
   fi
-  npm install -g gitclaw@latest 2>&1 | tail -2
+  $NPM_CMD install -g gitclaw@latest 2>&1 | tail -2
   echo -e "  ${GREEN}✓${NC} gitclaw installed"
 fi
 echo ""
