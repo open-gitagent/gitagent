@@ -144,44 +144,52 @@ if [ -d "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/agent.yaml" ]; then
     echo -e "  ${GREEN}✓${NC} Loaded keys from ${DIM}${PROJECT_DIR}/.env${NC}"
   fi
 
-  # Prompt for missing required keys
-  if [ -z "${OPENAI_API_KEY:-}" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
-    echo ""
-    echo -e "  ${YELLOW}⚠${NC}  No voice API key found."
-    echo -e "  ${BOLD}OpenAI API Key${NC} ${DIM}(for voice — get one at platform.openai.com)${NC}"
-    read -rsp "  Key: " OPENAI_KEY
-    echo ""
-    if [ -z "$OPENAI_KEY" ]; then
-      echo -e "  ${RED}✗ OpenAI or Gemini key is required for voice mode${NC}"
-      exit 1
+  # Prompt for missing required keys (skip if Lyzr is configured)
+  if [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ]; then
+    echo -e "  ${GREEN}✓${NC} Lyzr agent: ${DIM}${GITCLAW_LYZR_AGENT_ID}${NC}"
+  else
+    if [ -z "${OPENAI_API_KEY:-}" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
+      echo ""
+      echo -e "  ${YELLOW}⚠${NC}  No voice API key found."
+      echo -e "  ${BOLD}OpenAI API Key${NC} ${DIM}(for voice — get one at platform.openai.com)${NC}"
+      read -rsp "  Key: " OPENAI_KEY
+      echo ""
+      if [ -n "$OPENAI_KEY" ]; then
+        export OPENAI_API_KEY="$OPENAI_KEY"
+        echo -e "  ${GREEN}✓${NC} OPENAI_API_KEY saved"
+        echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> "$PROJECT_DIR/.env"
+      else
+        echo -e "  ${DIM}  skipped — text-only mode${NC}"
+      fi
     fi
-    export OPENAI_API_KEY="$OPENAI_KEY"
-    echo -e "  ${GREEN}✓${NC} OPENAI_API_KEY saved"
-    # Append to .env for future runs
-    echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> "$PROJECT_DIR/.env"
+
+    if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+      echo ""
+      echo -e "  ${YELLOW}⚠${NC}  No Anthropic API key found."
+      echo -e "  ${BOLD}Anthropic API Key${NC} ${DIM}(for agent brain — get one at console.anthropic.com)${NC}"
+      read -rsp "  Key: " ANTHROPIC_KEY
+      echo ""
+      if [ -z "$ANTHROPIC_KEY" ]; then
+        echo -e "  ${RED}✗ Anthropic key is required for the agent${NC}"
+        exit 1
+      fi
+      export ANTHROPIC_API_KEY="$ANTHROPIC_KEY"
+      echo -e "  ${GREEN}✓${NC} ANTHROPIC_API_KEY saved"
+      echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> "$PROJECT_DIR/.env"
+    fi
   fi
 
-  if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-    echo ""
-    echo -e "  ${YELLOW}⚠${NC}  No Anthropic API key found."
-    echo -e "  ${BOLD}Anthropic API Key${NC} ${DIM}(for agent brain — get one at console.anthropic.com)${NC}"
-    read -rsp "  Key: " ANTHROPIC_KEY
-    echo ""
-    if [ -z "$ANTHROPIC_KEY" ]; then
-      echo -e "  ${RED}✗ Anthropic key is required for the agent${NC}"
-      exit 1
-    fi
-    export ANTHROPIC_API_KEY="$ANTHROPIC_KEY"
-    echo -e "  ${GREEN}✓${NC} ANTHROPIC_API_KEY saved"
-    # Append to .env for future runs
-    echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> "$PROJECT_DIR/.env"
+  # Set model — use Lyzr if configured, otherwise let loadAgent() read from agent.yaml
+  if [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ]; then
+    MODEL="lyzr:${GITCLAW_LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4/chat"
+  else
+    MODEL=""
   fi
-
-  # Let loadAgent() read model directly from agent.yaml — no extraction needed
-  MODEL=""
 
   # Determine adapter from available keys
-  if [ -n "${GEMINI_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+  if [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+    ADAPTER_LABEL="Text Only (Lyzr)"
+  elif [ -n "${GEMINI_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
     ADAPTER_LABEL="Gemini Live"
   elif [ -n "${OPENAI_API_KEY:-}" ]; then
     ADAPTER_LABEL="OpenAI Realtime"
@@ -199,9 +207,10 @@ else
 # ── Setup Mode Selection ─────────────────────────────────────────
 echo -e "  ${BOLD}How would you like to run?${NC}"
 echo ""
-echo -e "    ${RED}${BOLD}1)${NC} ${BOLD}Voice + Text${NC}    ${DIM}— real-time voice chat + text (requires OpenAI key)${NC}"
-echo -e "    ${RED}${BOLD}2)${NC} ${BOLD}Text Only${NC}       ${DIM}— text chat only, no voice (just Anthropic key)${NC}"
-echo -e "    ${RED}${BOLD}3)${NC} ${BOLD}Advanced Setup${NC}  ${DIM}— choose voice adapter, model, project dir, integrations${NC}"
+echo -e "    ${RED}${BOLD}1)${NC} ${BOLD}Install with LYZR${NC} ${DIM}— powered by Lyzr AI Studio (easiest)${NC}"
+echo -e "    ${RED}${BOLD}2)${NC} ${BOLD}Voice + Text${NC}    ${DIM}— real-time voice chat + text (requires OpenAI key)${NC}"
+echo -e "    ${RED}${BOLD}3)${NC} ${BOLD}Text Only${NC}       ${DIM}— text chat only, no voice (just Anthropic key)${NC}"
+echo -e "    ${RED}${BOLD}4)${NC} ${BOLD}Advanced Setup${NC}  ${DIM}— choose voice adapter, model, project dir, integrations${NC}"
 echo ""
 read -rp "  Choice [1]: " SETUP_MODE
 SETUP_MODE="${SETUP_MODE:-1}"
@@ -210,10 +219,121 @@ echo ""
 # ═══════════════════════════════════════════════════════════════════
 # QUICK SETUP
 # ═══════════════════════════════════════════════════════════════════
-if [ "$SETUP_MODE" = "1" ] || [ "$SETUP_MODE" = "2" ]; then
+# ═══════════════════════════════════════════════════════════════════
+# LYZR SETUP
+# ═══════════════════════════════════════════════════════════════════
+if [ "$SETUP_MODE" = "1" ]; then
+
+  echo -e "  ${DIM}────────────────────────────────────────────────────${NC}"
+  echo -e "  ${RED}${BOLD}Install with LYZR${NC}"
+  echo -e "  ${DIM}Powered by Lyzr AI Studio — agent brain runs on Lyzr cloud${NC}"
+  echo ""
+
+  # LYZR API key
+  echo -e "  ${BOLD}Lyzr API Key${NC} ${DIM}(get one at studio.lyzr.ai)${NC}"
+  read -rsp "  Key: " LYZR_KEY
+  echo ""
+  if [ -z "$LYZR_KEY" ]; then
+    echo -e "  ${RED}✗ Lyzr API key is required${NC}"
+    exit 1
+  fi
+  export LYZR_API_KEY="$LYZR_KEY"
+  echo -e "  ${GREEN}✓${NC} LYZR_API_KEY saved"
+
+  # Check if agent already exists
+  if [ -z "${GITCLAW_LYZR_AGENT_ID:-}" ]; then
+    echo ""
+    echo -e "  ${DIM}Creating Lyzr agent...${NC}"
+    LYZR_RESPONSE=$(curl -s -X POST 'https://agent-prod.studio.lyzr.ai/v3/agents/' \
+      -H 'accept: application/json' \
+      -H 'content-type: application/json' \
+      -H "x-api-key: ${LYZR_API_KEY}" \
+      --data-raw '{
+        "name": "GitClaw Assistant",
+        "description": "GitClaw AI agent powered by Lyzr",
+        "agent_role": "",
+        "agent_goal": "",
+        "agent_instructions": "",
+        "examples": null,
+        "tools": [],
+        "tool_usage_description": "{}",
+        "tool_configs": [],
+        "provider_id": "Anthropic",
+        "model": "anthropic/claude-sonnet-4-6",
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "llm_credential_id": "lyzr_anthropic",
+        "features": [],
+        "managed_agents": [],
+        "a2a_tools": [],
+        "additional_model_params": null,
+        "response_format": {"type": "text"},
+        "store_messages": true,
+        "file_output": false,
+        "image_output_config": null,
+        "max_iterations": 25
+      }' 2>/dev/null)
+
+    # Extract agent ID from response
+    LYZR_AGENT_ID=$(echo "$LYZR_RESPONSE" | grep -o '"agent_id"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"agent_id"\s*:\s*"\([^"]*\)".*/\1/')
+    if [ -z "$LYZR_AGENT_ID" ]; then
+      # Try alternate field name
+      LYZR_AGENT_ID=$(echo "$LYZR_RESPONSE" | grep -o '"id"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"id"\s*:\s*"\([^"]*\)".*/\1/')
+    fi
+
+    if [ -z "$LYZR_AGENT_ID" ]; then
+      echo -e "  ${RED}✗ Failed to create Lyzr agent${NC}"
+      echo -e "  ${DIM}Response: ${LYZR_RESPONSE}${NC}"
+      exit 1
+    fi
+
+    export GITCLAW_LYZR_AGENT_ID="$LYZR_AGENT_ID"
+    echo -e "  ${GREEN}✓${NC} Agent created: ${DIM}${LYZR_AGENT_ID}${NC}"
+  else
+    echo -e "  ${GREEN}✓${NC} Using existing agent: ${DIM}${GITCLAW_LYZR_AGENT_ID}${NC}"
+  fi
+
+  # OpenAI key for voice (optional)
+  echo ""
+  echo -e "  ${BOLD}OpenAI API Key${NC} ${DIM}(optional — for voice mode, press Enter to skip)${NC}"
+  read -rsp "  Key: " OPENAI_KEY
+  echo ""
+  if [ -n "$OPENAI_KEY" ]; then
+    export OPENAI_API_KEY="$OPENAI_KEY"
+    echo -e "  ${GREEN}✓${NC} OPENAI_API_KEY saved"
+    VOICE_ENABLED=true
+  else
+    echo -e "  ${DIM}  skipped — text-only mode${NC}"
+    VOICE_ENABLED=false
+  fi
+
+  # Set model to use Lyzr completions endpoint with agent ID as model
+  MODEL="lyzr:${GITCLAW_LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4/chat"
+  export GITCLAW_MODEL_BASE_URL="https://agent-prod.studio.lyzr.ai/v4/chat"
+  ADAPTER_LABEL="${VOICE_ENABLED:+OpenAI Realtime}${VOICE_ENABLED:-Text Only}"
+  if [ "$VOICE_ENABLED" = true ]; then
+    ADAPTER_LABEL="OpenAI Realtime"
+  else
+    ADAPTER_LABEL="Text Only (Lyzr)"
+  fi
+  PROJECT_DIR="${HOME}/assistant"
+
+  # Create project dir and init git if needed
+  mkdir -p "$PROJECT_DIR"
+  if [ ! -d "$PROJECT_DIR/.git" ]; then
+    git init -q "$PROJECT_DIR"
+    echo -e "  ${GREEN}✓${NC} Initialized ~/assistant"
+  fi
+
+  echo ""
+
+# ═══════════════════════════════════════════════════════════════════
+# VOICE + TEXT / TEXT ONLY SETUP
+# ═══════════════════════════════════════════════════════════════════
+elif [ "$SETUP_MODE" = "2" ] || [ "$SETUP_MODE" = "3" ]; then
 
   VOICE_ENABLED=true
-  if [ "$SETUP_MODE" = "2" ]; then
+  if [ "$SETUP_MODE" = "3" ]; then
     VOICE_ENABLED=false
   fi
 
@@ -424,6 +544,9 @@ echo -e "    ${LGRAY}Voice${NC}      ${WHITE}${ADAPTER_LABEL}${NC}"
 echo -e "    ${LGRAY}Model${NC}      ${WHITE}${MODEL}${NC}"
 echo -e "    ${LGRAY}Directory${NC}  ${WHITE}${PROJECT_DIR}${NC}"
 echo -e "    ${LGRAY}Port${NC}       ${WHITE}${PORT}${NC}"
+if [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ]; then
+  echo -e "    ${LGRAY}Lyzr${NC}       ${GREEN}enabled${NC} ${DIM}(agent: ${GITCLAW_LYZR_AGENT_ID})${NC}"
+fi
 if [ -n "${COMPOSIO_API_KEY:-}" ]; then
   echo -e "    ${LGRAY}Composio${NC}   ${GREEN}enabled${NC}"
 fi
@@ -445,6 +568,9 @@ ENV_FILE="${PROJECT_DIR}/.env"
   [ -n "${ANTHROPIC_API_KEY:-}" ] && echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}"
   [ -n "${COMPOSIO_API_KEY:-}" ] && echo "COMPOSIO_API_KEY=${COMPOSIO_API_KEY}"
   [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}"
+  [ -n "${LYZR_API_KEY:-}" ] && echo "LYZR_API_KEY=${LYZR_API_KEY}"
+  [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ] && echo "GITCLAW_LYZR_AGENT_ID=${GITCLAW_LYZR_AGENT_ID}"
+  [ -n "${GITCLAW_MODEL_BASE_URL:-}" ] && echo "GITCLAW_MODEL_BASE_URL=${GITCLAW_MODEL_BASE_URL}"
 } > "$ENV_FILE"
 echo -e "  ${GREEN}✓${NC} Keys saved to ${DIM}${ENV_FILE}${NC} ${DIM}(gitignored)${NC}"
 echo ""

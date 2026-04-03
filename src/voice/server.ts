@@ -1627,6 +1627,60 @@ ${runningContext}`;
 		return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 	}
 
+	// ── Password protection ──────────────────────────────────────────
+	const serverPassword = process.env.GITCLAW_PASSWORD || "";
+	const authCookieName = "gitclaw_auth";
+
+	function generateAuthToken(): string {
+		// Simple hash of password + salt for cookie token
+		const { createHash } = require("crypto") as typeof import("crypto");
+		return createHash("sha256").update(serverPassword + "_gitclaw_session").digest("hex").slice(0, 32);
+	}
+
+	function isAuthenticated(req: IncomingMessage): boolean {
+		if (!serverPassword) return true; // No password set — open access
+		const cookie = req.headers.cookie || "";
+		const match = cookie.match(new RegExp(`${authCookieName}=([^;]+)`));
+		return match?.[1] === generateAuthToken();
+	}
+
+	const loginPageHtml = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>GitClaw — Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#e6edf3;font-family:'Inter',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}
+.login{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:40px;width:340px;text-align:center}
+.login h1{font-size:20px;margin-bottom:8px;font-weight:600}
+.login p{font-size:13px;color:#8b949e;margin-bottom:24px}
+.login input{width:100%;padding:12px 14px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:14px;outline:none;margin-bottom:16px}
+.login input:focus{border-color:#58a6ff}
+.login button{width:100%;padding:12px;background:#238636;border:none;border-radius:6px;color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+.login button:hover{background:#2ea043}
+.login .error{color:#f85149;font-size:12px;margin-bottom:12px;display:none}
+</style></head><body>
+<div class="login">
+<h1>GitClaw</h1>
+<p>Enter password to continue</p>
+<div class="error" id="err">Incorrect password</div>
+<form onsubmit="return doLogin()">
+<input type="password" id="pw" placeholder="Password" autofocus>
+<button type="submit">Login</button>
+</form>
+</div>
+<script>
+function doLogin(){
+var pw=document.getElementById('pw').value;
+fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})})
+.then(function(r){return r.json().then(function(d){return{ok:r.ok,data:d};});})
+.then(function(res){
+if(res.ok&&res.data.ok){window.location.reload();}
+else{document.getElementById('err').style.display='block';document.getElementById('pw').value='';}
+});
+return false;
+}
+</script></body></html>`;
+
 	// HTTP server
 	const httpServer: Server = createServer(async (req, res) => {
 		res.setHeader("Access-Control-Allow-Origin", "*");
@@ -1639,6 +1693,30 @@ ${runningContext}`;
 		}
 
 		const url = new URL(req.url || "/", `http://localhost:${port}`);
+
+		// ── Auth endpoints (always accessible) ──
+		if (url.pathname === "/api/auth" && req.method === "POST") {
+			const body = JSON.parse(await readBody(req));
+			if (body.password === serverPassword) {
+				res.setHeader("Set-Cookie", `${authCookieName}=${generateAuthToken()}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`);
+				jsonReply(res, 200, { ok: true });
+			} else {
+				jsonReply(res, 401, { ok: false, error: "Incorrect password" });
+			}
+			return;
+		}
+
+		// ── Password gate — block everything if not authenticated ──
+		if (!isAuthenticated(req)) {
+			if (url.pathname === "/health") {
+				// Health check always open for load balancers
+				jsonReply(res, 200, { status: "ok", auth: "required" });
+				return;
+			}
+			res.writeHead(200, { "Content-Type": "text/html" });
+			res.end(loginPageHtml);
+			return;
+		}
 
 		if (url.pathname === "/health") {
 			jsonReply(res, 200, { status: "ok" });
@@ -1658,7 +1736,8 @@ ${runningContext}`;
 			for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "COMPOSIO_API_KEY"]) {
 				keys[k] = !!process.env[k];
 			}
-			jsonReply(res, 200, { model, keys });
+			const baseUrl = process.env.GITCLAW_MODEL_BASE_URL || "";
+			jsonReply(res, 200, { model, keys, baseUrl });
 
 		} else if (url.pathname === "/api/settings" && req.method === "PUT") {
 			try {
@@ -1695,6 +1774,24 @@ ${runningContext}`;
 						}
 						writeFileSync(yamlPath, yamlContent, "utf-8");
 					} catch { /* no agent.yaml to update */ }
+				}
+
+				// Update base URL in .env
+				if (body.baseUrl !== undefined) {
+					const baseUrlKey = "GITCLAW_MODEL_BASE_URL";
+					if (body.baseUrl) {
+						process.env[baseUrlKey] = body.baseUrl;
+						const regex = new RegExp(`^${baseUrlKey}=.*$`, "m");
+						if (regex.test(envContent)) {
+							envContent = envContent.replace(regex, `${baseUrlKey}=${body.baseUrl}`);
+						} else {
+							envContent += (envContent.endsWith("\n") || !envContent ? "" : "\n") + `${baseUrlKey}=${body.baseUrl}\n`;
+						}
+					} else {
+						delete process.env[baseUrlKey];
+						envContent = envContent.replace(/^GITCLAW_MODEL_BASE_URL=.*\n?/m, "");
+					}
+					writeFileSync(envPath, envContent, "utf-8");
 				}
 
 				console.log("[settings] Configuration updated — keys in process.env, model in agent.yaml");
@@ -2553,7 +2650,12 @@ a{color:#58a6ff;}</style></head>
 	// WebSocket server — adapter-agnostic proxy
 	const wss = new WebSocketServer({ server: httpServer });
 
-	wss.on("connection", async (browserWs: WS) => {
+	wss.on("connection", async (browserWs: WS, req: IncomingMessage) => {
+		// Check auth on WebSocket connections
+		if (!isAuthenticated(req)) {
+			browserWs.close(4401, "Unauthorized");
+			return;
+		}
 		console.log(dim("[voice] Browser connected"));
 
 		// ── Per-connection frame buffer + moment capture state ──────────

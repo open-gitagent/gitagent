@@ -1426,7 +1426,11 @@
         </div>
         <div>
           <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">Custom Model <span style="color:#484f58;">(provider:model-id)</span></label>
-          <input id="settingsCustomModel" type="text" placeholder="e.g. anthropic:claude-opus-4-6" style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
+          <input id="settingsCustomModel" type="text" placeholder="e.g. ollama:llama3 or ollama:llama3@http://localhost:11434/v1" style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">Custom Base URL <span style="color:#484f58;">(for OpenAI-compatible endpoints — Ollama, LM Studio, vLLM, etc.)</span></label>
+          <input id="settingsBaseUrl" type="text" placeholder="e.g. http://localhost:11434/v1" style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
         </div>
         <hr style="border:none;border-top:1px solid #21262d;margin:4px 0;">
         <div>
@@ -2803,6 +2807,8 @@ function loadSettings(){
     document.getElementById('settingsAnthropicKey').placeholder=d.keys.ANTHROPIC_API_KEY?'••••••••  (set)':'sk-ant-...';
     document.getElementById('settingsGeminiKey').placeholder=d.keys.GEMINI_API_KEY?'••••••••  (set)':'AI...';
     document.getElementById('settingsComposioKey').placeholder=d.keys.COMPOSIO_API_KEY?'••••••••  (set)':'ak_...';
+    // Base URL
+    if(d.baseUrl)document.getElementById('settingsBaseUrl').value=d.baseUrl;
   }).catch(function(e){showSettingsStatus('Failed to load settings: '+e.message,'error');});
 }
 function showSettingsStatus(msg,type){
@@ -2817,7 +2823,8 @@ function showSettingsStatus(msg,type){
 function saveSettings(){
   var sel=document.getElementById('settingsModel');
   var model=sel.value||document.getElementById('settingsCustomModel').value;
-  var payload={model:model,keys:{}};
+  var baseUrl=document.getElementById('settingsBaseUrl').value.trim();
+  var payload={model:model,baseUrl:baseUrl,keys:{}};
   var openai=document.getElementById('settingsOpenaiKey').value;
   var anthropic=document.getElementById('settingsAnthropicKey').value;
   var gemini=document.getElementById('settingsGeminiKey').value;

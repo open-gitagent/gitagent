@@ -78,6 +78,32 @@ function parseModelString(modelStr: string): { provider: string; modelId: string
 	};
 }
 
+/**
+ * Create a custom Model for any OpenAI-compatible endpoint.
+ * Used when model string contains @baseUrl or GITCLAW_MODEL_BASE_URL is set.
+ */
+function createCustomModel(provider: string, modelId: string, baseUrl: string): Model<any> {
+	// Build custom headers for specific providers
+	const headers: Record<string, string> = {};
+	if (provider === "lyzr" && process.env.LYZR_API_KEY) {
+		headers["x-api-key"] = process.env.LYZR_API_KEY;
+	}
+
+	return {
+		id: modelId,
+		name: `${modelId} (${provider})`,
+		api: "openai-completions" as const,
+		provider,
+		baseUrl,
+		reasoning: false,
+		input: ["text", "image"] as ("text" | "image")[],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 128000,
+		maxTokens: 32000,
+		...(Object.keys(headers).length > 0 ? { headers } : {}),
+	};
+}
+
 async function ensureGitagentDir(agentDir: string): Promise<string> {
 	const gitagentDir = join(agentDir, ".gitagent");
 	await mkdir(gitagentDir, { recursive: true });
@@ -360,7 +386,29 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 	}
 
 	const { provider, modelId } = parseModelString(modelStr);
-	const model = getModel(provider as any, modelId as any);
+	const envBaseUrl = process.env.GITCLAW_MODEL_BASE_URL;
+
+	let model: Model<any>;
+	if (modelId.includes("@")) {
+		// Custom endpoint: provider:model-id@base-url
+		const atIndex = modelId.indexOf("@");
+		model = createCustomModel(provider, modelId.slice(0, atIndex), modelId.slice(atIndex + 1));
+	} else if (envBaseUrl) {
+		// Environment-specified base URL overrides all providers
+		model = createCustomModel(provider, modelId, envBaseUrl);
+	} else {
+		// Standard registered model
+		model = getModel(provider as any, modelId as any);
+	}
+
+	// For custom providers not in pi-ai's env key map, ensure an API key is available.
+	// pi-ai looks up keys by provider name — unknown providers get undefined and throw.
+	// Set OPENAI_API_KEY as fallback since custom models use the openai-completions API.
+	const knownProviders = new Set(["openai", "anthropic", "google", "google-vertex", "groq", "cerebras", "xai", "openrouter", "mistral", "amazon-bedrock", "azure-openai-responses"]);
+	if (model.baseUrl && !knownProviders.has(provider) && !process.env.OPENAI_API_KEY) {
+		const fallbackKey = process.env[`${provider.toUpperCase()}_API_KEY`] || process.env.LYZR_API_KEY || "dummy";
+		process.env.OPENAI_API_KEY = fallbackKey;
+	}
 
 	return {
 		systemPrompt,
