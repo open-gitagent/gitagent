@@ -187,7 +187,7 @@ if [ -d "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/agent.yaml" ]; then
 
   # Set model — use Lyzr if configured, otherwise let loadAgent() read from agent.yaml
   if [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ]; then
-    MODEL="lyzr:${GITCLAW_LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4/chat"
+    MODEL="lyzr:${GITCLAW_LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4"
   else
     MODEL=""
   fi
@@ -314,8 +314,8 @@ if [ "$SETUP_MODE" = "1" ]; then
   fi
 
   # Set model to use Lyzr completions endpoint with agent ID as model
-  MODEL="lyzr:${GITCLAW_LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4/chat"
-  export GITCLAW_MODEL_BASE_URL="https://agent-prod.studio.lyzr.ai/v4/chat"
+  MODEL="lyzr:${GITCLAW_LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4"
+  export GITCLAW_MODEL_BASE_URL="https://agent-prod.studio.lyzr.ai/v4"
   ADAPTER_LABEL="${VOICE_ENABLED:+OpenAI Realtime}${VOICE_ENABLED:-Text Only}"
   if [ "$VOICE_ENABLED" = true ]; then
     ADAPTER_LABEL="OpenAI Realtime"

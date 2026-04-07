@@ -83,12 +83,6 @@ function parseModelString(modelStr: string): { provider: string; modelId: string
  * Used when model string contains @baseUrl or GITCLAW_MODEL_BASE_URL is set.
  */
 function createCustomModel(provider: string, modelId: string, baseUrl: string): Model<any> {
-	// Build custom headers for specific providers
-	const headers: Record<string, string> = {};
-	if (provider === "lyzr" && process.env.LYZR_API_KEY) {
-		headers["x-api-key"] = process.env.LYZR_API_KEY;
-	}
-
 	return {
 		id: modelId,
 		name: `${modelId} (${provider})`,
@@ -100,7 +94,6 @@ function createCustomModel(provider: string, modelId: string, baseUrl: string): 
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 128000,
 		maxTokens: 32000,
-		...(Object.keys(headers).length > 0 ? { headers } : {}),
 	};
 }
 
