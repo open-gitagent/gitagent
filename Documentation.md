@@ -1,7 +1,7 @@
 # GitClaw Documentation
 
 > **GitClaw** — A universal git-native multimodal always-learning AI Agent
-> Version 1.3.0 | MIT License | [github.com/open-gitagent/gitclaw](https://github.com/open-gitagent/gitclaw)
+> Version 1.3.3 | MIT License | [github.com/open-gitagent/gitclaw](https://github.com/open-gitagent/gitclaw)
 
 ---
 
@@ -306,14 +306,45 @@ model:
 
 ### Lyzr Integration
 
-When installed via the LYZR setup mode, GitClaw uses Lyzr AI Studio as the agent brain:
+GitClaw integrates with [Lyzr AI Studio](https://studio.lyzr.ai) as an agent brain. The Lyzr completions endpoint is fully OpenAI-compatible.
 
+**Via installer (easiest):**
 ```bash
-# Model format for Lyzr
-lyzr:<agent-id>@https://agent-prod.studio.lyzr.ai/v4/chat
+curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitclaw/main/install.sh | bash
+# Pick option 1: "Install with LYZR"
+# Enter your Lyzr API key — agent is created automatically
 ```
 
-The installer automatically creates the Lyzr agent and configures the endpoint.
+**Via CLI flag:**
+```bash
+export OPENAI_API_KEY="your-lyzr-api-key"   # Lyzr uses standard Bearer auth
+gitclaw --model "lyzr:<agent-id>@https://agent-prod.studio.lyzr.ai/v4" --voice --dir ~/assistant
+```
+
+**Via SDK (programmatic):**
+```typescript
+import { query } from "gitclaw";
+
+// Set OPENAI_API_KEY to your Lyzr API key (uses standard Bearer auth)
+process.env.OPENAI_API_KEY = process.env.LYZR_API_KEY;
+
+const result = query({
+  prompt: "Hello! What can you help me with?",
+  dir: "/path/to/agent",
+  model: `lyzr:${LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4`,
+  constraints: { temperature: 0.7, maxTokens: 2000 },
+});
+
+for await (const msg of result) {
+  if (msg.type === "assistant") console.log(msg.content);
+}
+```
+
+**How it works:**
+- Base URL: `https://agent-prod.studio.lyzr.ai/v4` (OpenAI SDK appends `/chat/completions`)
+- Auth: `Authorization: Bearer <LYZR_API_KEY>` (standard OpenAI-compatible)
+- Model field: your Lyzr agent ID (e.g., `69d52b90a011dc91d7877bfd`)
+- Full example: `examples/lyzr-sdk.ts`
 
 ---
 
