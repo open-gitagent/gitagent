@@ -56,6 +56,20 @@ function extractSource(msg: string): { source: string; cleaned: string } {
 	return { source: "system", cleaned: msg };
 }
 
+function formatArg(a: any): string {
+	if (a == null) return String(a);
+	if (typeof a === "string") return a;
+	if (a instanceof Error) return `${a.message}${a.stack ? "\n" + a.stack : ""}`;
+	try { return JSON.stringify(a, (_k, v) => v instanceof Error ? { message: v.message, stack: v.stack } : v); }
+	catch { return String(a); }
+}
+
+export function logToBuffer(source: string, level: "info" | "warn" | "error", message: string): LogEntry {
+	const entry = logBuffer.push(source, level, message);
+	if (logBroadcast) logBroadcast(entry);
+	return entry;
+}
+
 function installConsoleIntercept() {
 	const origLog = console.log.bind(console);
 	const origError = console.error.bind(console);
@@ -64,7 +78,7 @@ function installConsoleIntercept() {
 	function intercept(level: "info" | "warn" | "error", origFn: (...args: any[]) => void, ...args: any[]) {
 		origFn(...args);
 		try {
-			const raw = args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
+			const raw = args.map(formatArg).join(" ");
 			const clean = stripAnsi(raw);
 			if (!clean.trim()) return;
 			const { source, cleaned } = extractSource(clean);
@@ -79,6 +93,21 @@ function installConsoleIntercept() {
 }
 
 installConsoleIntercept();
+
+// Global error handlers — capture everything that would otherwise be lost
+if (!(process as any).__gitclawLogHandlersInstalled) {
+	(process as any).__gitclawLogHandlersInstalled = true;
+	process.on("uncaughtException", (err: Error) => {
+		console.error(`[system] UNCAUGHT EXCEPTION: ${err.message}\n${err.stack}`);
+	});
+	process.on("unhandledRejection", (reason: any) => {
+		const msg = reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason);
+		console.error(`[system] UNHANDLED REJECTION: ${msg}`);
+	});
+	process.on("warning", (warning: Error) => {
+		console.warn(`[system] Node warning: ${warning.name}: ${warning.message}`);
+	});
+}
 
 // ── Background memory saver ────────────────────────────────────────────
 // Patterns that indicate the user is sharing personal info worth saving.
@@ -1680,6 +1709,11 @@ ${runningContext}`;
 	}
 
 	function jsonReply(res: ServerResponse, status: number, data: any) {
+		if (status >= 500 && data && data.error) {
+			console.error(`[http] 500 response: ${data.error}`);
+		} else if (status >= 400 && data && data.error) {
+			console.warn(`[http] ${status} response: ${data.error}`);
+		}
 		res.writeHead(status, { "Content-Type": "application/json" });
 		res.end(JSON.stringify(data));
 	}
@@ -1744,6 +1778,7 @@ return false;
 
 	// HTTP server
 	const httpServer: Server = createServer(async (req, res) => {
+		const reqStart = Date.now();
 		res.setHeader("Access-Control-Allow-Origin", "*");
 		res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 		res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -1754,6 +1789,21 @@ return false;
 		}
 
 		const url = new URL(req.url || "/", `http://localhost:${port}`);
+
+		// Log every HTTP request (skip UI + static paths to reduce noise; always log API/errors)
+		const isApi = url.pathname.startsWith("/api/");
+		res.on("finish", () => {
+			if (isApi || res.statusCode >= 400) {
+				const dur = Date.now() - reqStart;
+				const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "log";
+				const line = `[http] ${req.method} ${url.pathname} → ${res.statusCode} (${dur}ms)`;
+				if (level === "error") console.error(line);
+				else if (level === "warn") console.warn(line);
+				else console.log(line);
+			}
+		});
+		req.on("error", (err) => console.error(`[http] Request error on ${req.method} ${url.pathname}: ${err.message}`));
+		res.on("error", (err) => console.error(`[http] Response error on ${req.method} ${url.pathname}: ${err.message}`));
 
 		// ── Auth endpoints (always accessible) ──
 		if (url.pathname === "/api/auth" && req.method === "POST") {
@@ -2720,16 +2770,32 @@ a{color:#58a6ff;}</style></head>
 		}
 	});
 
+	httpServer.on("error", (err: Error) => {
+		console.error(`[http] Server error: ${err.message}\n${err.stack}`);
+	});
+	httpServer.on("clientError", (err: any, socket: any) => {
+		console.error(`[http] Client error: ${err.message}`);
+		try { socket.destroy(); } catch { /* no-op */ }
+	});
+
 	// WebSocket server — adapter-agnostic proxy
 	const wss = new WebSocketServer({ server: httpServer });
+	wss.on("error", (err: Error) => {
+		console.error(`[voice] WebSocket server error: ${err.message}\n${err.stack}`);
+	});
 
 	wss.on("connection", async (browserWs: WS, req: IncomingMessage) => {
 		// Check auth on WebSocket connections
 		if (!isAuthenticated(req)) {
+			console.warn(`[voice] Browser WS rejected (unauthorized) from ${req.socket.remoteAddress}`);
 			browserWs.close(4401, "Unauthorized");
 			return;
 		}
-		console.log(dim("[voice] Browser connected"));
+		const remote = req.socket.remoteAddress || "unknown";
+		console.log(dim(`[voice] Browser connected from ${remote}`));
+		browserWs.on("error", (err: Error) => {
+			console.error(`[voice] Browser WS error (${remote}): ${err.message}`);
+		});
 
 		// ── Per-connection frame buffer + moment capture state ──────────
 		let latestVideoFrame: { frame: string; mimeType: string; ts: number } | null = null;
@@ -2915,8 +2981,8 @@ a{color:#58a6ff;}</style></head>
 					});
 				}
 				adapter?.send(msg);
-			} catch {
-				// Ignore unparseable messages
+			} catch (err: any) {
+				console.error(`[voice] WS message handler error: ${err?.message || err}${err?.stack ? "\n" + err.stack : ""}`);
 			}
 		});
 
@@ -2945,6 +3011,11 @@ a{color:#58a6ff;}</style></head>
 
 	console.log(bold(`Voice server running on :${port}`));
 	console.log(dim(`[voice] Backend: ${opts.adapter}`));
+	console.log(dim(`[voice] Agent dir: ${agentRoot}`));
+	console.log(dim(`[voice] Model: ${opts.model || "(default)"}`));
+	console.log(dim(`[voice] Composio: ${composioAdapter ? "enabled" : "disabled"}`));
+	console.log(dim(`[voice] Telegram: ${telegramToken ? "configured" : "not configured"}`));
+	console.log(dim(`[voice] Auth: ${serverPassword ? "password-protected" : "open"}`));
 	console.log(dim(`[voice] Open http://localhost:${port} in your browser`));
 
 	// Start the cron scheduler
