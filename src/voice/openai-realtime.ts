@@ -18,6 +18,13 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 	private toolHandler: ((query: string) => Promise<string>) | null = null;
 	private interrupted = false;
 
+	// Session-refresh state
+	private refreshTimer: NodeJS.Timeout | null = null;
+	private refreshing = false;
+	private disposed = false;
+	// Refresh 5 minutes before OpenAI Realtime's 60-min hard cap
+	private static readonly REFRESH_AFTER_MS = 55 * 60 * 1000;
+
 	constructor(config: MultimodalAdapterConfig) {
 		this.config = config;
 	}
@@ -249,9 +256,61 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 	}
 
 	async disconnect(): Promise<void> {
+		this.disposed = true;
+		if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = null; }
 		if (this.ws) {
 			this.ws.close();
 			this.ws = null;
+		}
+	}
+
+	/**
+	 * Tear down and reopen the Realtime WS before (or right after) OpenAI's
+	 * 60-minute hard cap expires. Re-sends the stored session.update so the
+	 * agent picks up where it left off without the user noticing.
+	 */
+	private async refreshSession(reason: string): Promise<void> {
+		if (this.refreshing || this.disposed) return;
+		this.refreshing = true;
+		console.log(dim(`[voice] Refreshing Realtime session (${reason})`));
+		try {
+			// Close the old WS without disposing the adapter
+			if (this.refreshTimer) { clearTimeout(this.refreshTimer); this.refreshTimer = null; }
+			if (this.ws) { try { this.ws.close(); } catch {} this.ws = null; }
+
+			const model = this.config.model || "gpt-realtime-2025-08-28";
+			const url = `wss://api.openai.com/v1/realtime?model=${model}`;
+
+			try {
+				await this.connectWs(url, {
+					headers: {
+						Authorization: `Bearer ${this.config.apiKey}`,
+						"OpenAI-Beta": "realtime=v1",
+					},
+				});
+			} catch (err: any) {
+				const msg = err?.message || "";
+				if (!msg.includes("authentication") && !msg.includes("401")) throw err;
+				// Ephemeral token fallback (matches connect() path)
+				const sessionResp = await fetch("https://api.openai.com/v1/realtime/sessions", {
+					method: "POST",
+					headers: { Authorization: `Bearer ${this.config.apiKey}`, "Content-Type": "application/json" },
+					body: JSON.stringify({ model }),
+				});
+				if (!sessionResp.ok) throw new Error(`refresh ephemeral token: ${sessionResp.status}`);
+				const session = (await sessionResp.json()) as { client_secret?: { value?: string } };
+				const ephemeralKey = session.client_secret?.value;
+				if (!ephemeralKey) throw new Error("No ephemeral key on refresh");
+				await this.connectWs(url, {
+					headers: { Authorization: `Bearer ${ephemeralKey}`, "OpenAI-Beta": "realtime=v1" },
+				});
+			}
+			console.log(dim("[voice] Session refreshed"));
+		} catch (err: any) {
+			console.error(dim(`[voice] Session refresh failed: ${err.message}`));
+			this.emit({ type: "error", message: `Voice session refresh failed: ${err.message}` });
+		} finally {
+			this.refreshing = false;
 		}
 	}
 
@@ -295,6 +354,10 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 		switch (event.type) {
 			case "session.created":
 				console.log(dim("[voice] Session created"));
+				if (this.refreshTimer) clearTimeout(this.refreshTimer);
+				this.refreshTimer = setTimeout(() => {
+					this.refreshSession("proactive refresh before 60-min cap").catch(() => {});
+				}, OpenAIRealtimeAdapter.REFRESH_AFTER_MS);
 				break;
 
 			case "session.updated":
@@ -347,9 +410,20 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 
 			case "error": {
 				const errMsg = event.error?.message || "Unknown OpenAI error";
+				const code = event.error?.code || "";
 				console.error(dim(`[voice] Error: ${JSON.stringify(event.error)}`));
 				// Don't surface cancellation errors — they happen when user interrupts with no active response
 				if (errMsg.toLowerCase().includes("cancellation failed")) break;
+				// Session expired (60-min cap) — silently reconnect instead of surfacing
+				const lower = errMsg.toLowerCase();
+				if (
+					lower.includes("maximum duration") ||
+					lower.includes("session_expired") ||
+					code === "session_expired"
+				) {
+					this.refreshSession("session expired").catch(() => {});
+					break;
+				}
 				this.emit({ type: "error", message: errMsg });
 				break;
 			}
