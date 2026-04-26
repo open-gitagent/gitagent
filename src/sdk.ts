@@ -23,6 +23,12 @@ import type {
 	SandboxOptions,
 } from "./sdk-types.js";
 import { CostTracker } from "./cost-tracker.js";
+import { context as otelContext } from "@opentelemetry/api";
+import {
+	wrapToolWithOtel,
+	startSessionSpan,
+	recordGenAiCall,
+} from "./telemetry.js";
 
 // ── Event channel ──────────────────────────────────────────────────────
 
@@ -103,8 +109,19 @@ export function query(options: QueryOptions): Query {
 	// Local session (hoisted for cleanup in catch)
 	let localSession: LocalSession | undefined;
 
+	// OpenTelemetry session span — opened immediately so it covers agent
+	// load + prompt + cleanup. Closed in the IIFE's finally so every exit
+	// path (success, hook-block early-return, thrown error) ends it exactly
+	// once.
+	const _session = startSessionSpan("gitclaw.agent.session", {
+		"gitclaw.entry": "sdk",
+	});
+	let _llmCallStart = 0;
+	let _totalCostUsd = 0;
+
 	// Async initialization + run
 	const runPromise = (async () => {
+		try {
 		// Validate mutually exclusive options
 		if (options.repo && options.sandbox) {
 			throw new Error("repo and sandbox options are mutually exclusive");
@@ -190,9 +207,7 @@ export function query(options: QueryOptions): Query {
 		if (options.tools) {
 			const converted = options.tools.map(toAgentTool);
 			tools = [...tools, ...converted];
-			console.error(`[sdk] Injected ${converted.length} external tools: ${converted.map(t => t.name).join(", ")}`);
 		}
-		console.error(`[sdk] Total tools before filtering: ${tools.length} → ${tools.map(t => t.name).join(", ")}`);
 
 		// Filter by allowlist/denylist
 		if (options.allowedTools) {
@@ -219,6 +234,11 @@ export function query(options: QueryOptions): Query {
 				wrapToolWithProgrammaticHooks(t, options.hooks!, _sessionId, loaded.manifest.name),
 			);
 		}
+
+		// 5b. Wrap every tool with OpenTelemetry instrumentation. No-op if
+		// telemetry isn't initialised — wrapToolWithOtel returns the tool
+		// unchanged in that case.
+		tools = tools.map(wrapToolWithOtel);
 
 		// 6. Run on_session_start hooks (script-based)
 		if (hooksConfig?.hooks.on_session_start) {
@@ -299,6 +319,12 @@ export function query(options: QueryOptions): Query {
 
 				case "message_update": {
 					const e = event.assistantMessageEvent;
+					// Capture the start of this LLM turn on the first delta so
+					// recordGenAiCall has a duration. (pi-agent-core does not
+					// expose a message_start event in its public union.)
+					if (_llmCallStart === 0) {
+						_llmCallStart = Date.now();
+					}
 					if (e.type === "text_delta") {
 						accText += e.delta;
 						pushMsg({
@@ -366,7 +392,18 @@ export function query(options: QueryOptions): Query {
 							`${assistantMsg.provider}:${assistantMsg.model}`,
 							assistantMsg.usage,
 						);
+						_totalCostUsd += assistantMsg.usage.costUsd ?? 0;
 					}
+
+					// Emit gen_ai.chat span (no-op if telemetry disabled).
+					try {
+						const durationMs =
+							_llmCallStart > 0 ? Date.now() - _llmCallStart : 0;
+						recordGenAiCall(msg, { durationMs });
+					} catch {
+						/* never let telemetry break the agent */
+					}
+					_llmCallStart = 0;
 
 					// Reset accumulators
 					accText = "";
@@ -422,14 +459,20 @@ export function query(options: QueryOptions): Query {
 			}
 		});
 
-		// 10. Send prompt
+		// 10. Send prompt — run inside the session span's context so that
+		// gen_ai.chat and gitclaw.tool.execute spans become children of
+		// gitclaw.agent.session.
 		if (typeof options.prompt === "string") {
-			await agent.prompt(options.prompt);
+			await otelContext.with(_session.ctx, () =>
+				agent.prompt(options.prompt as string),
+			);
 		} else {
 			// Multi-turn: iterate the async iterable
 			for await (const userMsg of options.prompt) {
 				pushMsg({ type: "user", content: userMsg.content });
-				await agent.prompt(userMsg.content);
+				await otelContext.with(_session.ctx, () =>
+					agent.prompt(userMsg.content),
+				);
 			}
 		}
 
@@ -445,6 +488,16 @@ export function query(options: QueryOptions): Query {
 
 		// Ensure channel finishes even if no agent_end event
 		channel.finish();
+		} finally {
+			// Close the session span on every exit path — success, hook-block
+			// early-return, and the .catch() handler below (rethrow so this
+			// runs first).
+			try {
+				_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+			} catch {
+				/* ignore */
+			}
+		}
 	})().catch(async (err) => {
 		// Finalize local session on error
 		if (localSession) {
@@ -480,8 +533,6 @@ export function query(options: QueryOptions): Query {
 		},
 
 		steer(_message: string) {
-			// Steering requires agent reference — for now this is a placeholder.
-			// Full steering support would require exposing the Agent instance.
 		},
 
 		sessionId() {

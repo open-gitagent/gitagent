@@ -22,6 +22,13 @@ import { initLocalSession } from "./session.js";
 import type { LocalSession } from "./session.js";
 import { startVoiceServer } from "./voice/server.js";
 import { handlePluginCommand } from "./plugin-cli.js";
+import { context as otelContext } from "@opentelemetry/api";
+import {
+	wrapToolWithOtel,
+	startSessionSpan,
+	recordGenAiCall,
+	shutdownTelemetry,
+} from "./telemetry.js";
 
 // ANSI helpers
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -519,6 +526,10 @@ async function main(): Promise<void> {
 		tools = tools.map((t) => wrapToolWithHooks(t, hooksConfig, agentDir, sessionId));
 	}
 
+	// Wrap every tool with OpenTelemetry instrumentation. No-op if telemetry
+	// isn't initialised (wrapToolWithOtel returns the tool unchanged).
+	tools = tools.map(wrapToolWithOtel);
+
 	// Build model options from manifest constraints
 	const modelOptions: Record<string, any> = {};
 	if (manifest.model.constraints) {
@@ -530,6 +541,13 @@ async function main(): Promise<void> {
 		if (c.stop_sequences !== undefined) modelOptions.stopSequences = c.stop_sequences;
 	}
 
+	// OpenTelemetry session span — covers the whole CLI lifetime.
+	const _session = startSessionSpan("gitclaw.agent.session", {
+		"gitclaw.entry": "cli",
+	});
+	let _llmCallStart = 0;
+	let _totalCostUsd = 0;
+
 	const agent = new Agent({
 		initialState: {
 			systemPrompt,
@@ -539,7 +557,27 @@ async function main(): Promise<void> {
 		},
 	});
 
-	agent.subscribe((event) => handleEvent(event, hooksConfig, agentDir, sessionId, auditLogger));
+	agent.subscribe((event) => {
+		// Closure-capture _llmCallStart since handleEvent is module-scope.
+		if (event.type === "message_update" && _llmCallStart === 0) {
+			_llmCallStart = Date.now();
+		}
+		if (event.type === "message_end") {
+			const raw = (event as any).message;
+			if (raw && raw.role === "assistant") {
+				try {
+					const durationMs =
+						_llmCallStart > 0 ? Date.now() - _llmCallStart : 0;
+					recordGenAiCall(raw, { durationMs });
+				} catch {
+					/* never let telemetry break the agent */
+				}
+				_totalCostUsd += Number(raw.usage?.cost?.total ?? 0) || 0;
+				_llmCallStart = 0;
+			}
+		}
+		handleEvent(event, hooksConfig, agentDir, sessionId, auditLogger);
+	});
 
 	console.log(bold(`${manifest.name} v${manifest.version}`));
 	console.log(dim(`Model: ${loaded.model.provider}:${loaded.model.id}`));
@@ -562,7 +600,7 @@ async function main(): Promise<void> {
 	// Single-shot mode
 	if (prompt) {
 		try {
-			await agent.prompt(prompt);
+			await otelContext.with(_session.ctx, () => agent.prompt(prompt));
 		} catch (err: any) {
 			auditLogger?.logError(err.message).catch(() => {});
 			// Fire on_error hooks
@@ -582,6 +620,11 @@ async function main(): Promise<void> {
 			if (sandboxCtx) {
 				console.log(dim("Stopping sandbox..."));
 				await sandboxCtx.gitMachine.stop();
+			}
+			try {
+				_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+			} catch {
+				/* ignore */
 			}
 		}
 		return;
@@ -609,6 +652,11 @@ async function main(): Promise<void> {
 					localSession.finalize();
 				}
 				await stopSandbox();
+				try {
+					_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+				} catch {
+					/* ignore */
+				}
 				process.exit(0);
 			}
 
@@ -711,7 +759,7 @@ async function main(): Promise<void> {
 			}
 
 			try {
-				await agent.prompt(promptText);
+				await otelContext.with(_session.ctx, () => agent.prompt(promptText));
 			} catch (err: any) {
 				console.error(red(`Error: ${err.message}`));
 				auditLogger?.logError(err.message).catch(() => {});
@@ -747,12 +795,20 @@ async function main(): Promise<void> {
 			if (localSession) {
 				try { localSession.finalize(); } catch { /* best-effort */ }
 			}
+			try {
+				_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+			} catch { /* ignore */ }
 			stopSandbox().finally(() => process.exit(0));
 		}
 	});
 
 	ask();
 }
+
+// Flush OpenTelemetry exporters on SIGTERM. No-op when telemetry is disabled.
+process.on("SIGTERM", () => {
+	shutdownTelemetry().catch(() => {}).finally(() => process.exit(0));
+});
 
 main().catch((err) => {
 	console.error(red(`Fatal: ${err.message}`));

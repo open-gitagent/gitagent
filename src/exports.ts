@@ -59,3 +59,11 @@ export { estimateTokens, estimateMessageTokens, needsCompaction, truncateToolRes
 
 // Loader (escape hatch)
 export { loadAgent } from "./loader.js";
+
+// Telemetry (OpenTelemetry instrumentation)
+export {
+	initTelemetry,
+	shutdownTelemetry,
+	isTelemetryEnabled,
+} from "./telemetry.js";
+export type { TelemetryOptions } from "./telemetry.js";
