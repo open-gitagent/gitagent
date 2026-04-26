@@ -1,4 +1,4 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import { buildTypeboxSchema } from "./tool-loader.js";
 
 // ── Tool metadata for concurrency, safety, and budget ─────────────────
@@ -44,11 +44,12 @@ export function buildTool<T = any>(def: ToolDefinition<T>): AgentTool<any> & { m
 		parameters: schema,
 		metadata,
 		async execute(
-			_toolCallId: string,
-			params: T,
+			toolCallId: string,
+			params: unknown,
 			signal?: AbortSignal,
+			_onUpdate?: AgentToolUpdateCallback,
 		) {
-			let result = await def.execute(params, signal);
+			let result = await def.execute(params as T, signal);
 			if (result.length > metadata.maxResultSizeChars) {
 				result = result.slice(0, metadata.maxResultSizeChars) +
 					`\n\n[Truncated: ${result.length} chars total, showing first ${metadata.maxResultSizeChars}]`;

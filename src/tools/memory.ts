@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { join, dirname } from "path";
 import { execSync } from "child_process";
+import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { memorySchema, DEFAULT_MEMORY_PATH } from "./shared.js";
 import yaml from "js-yaml";
@@ -104,9 +105,10 @@ export function createMemoryTool(cwd: string, pluginLayers?: MemoryLayerDef[]): 
 		parameters: memorySchema,
 		execute: async (
 			_toolCallId: string,
-			{ action, content, message }: { action: string; content?: string; message?: string },
+			rawParams: unknown,
 			signal?: AbortSignal,
 		) => {
+			const { action, content, message } = rawParams as Static<typeof memorySchema>;
 			if (signal?.aborted) throw new Error("Operation aborted");
 
 			const config = await loadMemoryConfig(cwd, pluginLayers);

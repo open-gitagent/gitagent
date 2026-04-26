@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, readdir } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { taskTrackerSchema } from "./shared.js";
 import { adjustConfidence, loadSkillStats, saveSkillStats } from "../learning/reinforcement.js";
@@ -157,17 +158,10 @@ export function createTaskTrackerTool(agentDir: string, gitagentDir: string): Ag
 		parameters: taskTrackerSchema,
 		execute: async (
 			_toolCallId: string,
-			params: {
-				action: string;
-				objective?: string;
-				task_id?: string;
-				step?: string;
-				outcome?: string;
-				failure_reason?: string;
-				skill_used?: string;
-			},
+			rawParams: unknown,
 			signal?: AbortSignal,
 		) => {
+			const params = rawParams as Static<typeof taskTrackerSchema>;
 			if (signal?.aborted) throw new Error("Operation aborted");
 
 			const store = await loadTasks(gitagentDir);

@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, readdir, rm } from "fs/promises";
 import { join } from "path";
 import { execSync } from "child_process";
+import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { skillLearnerSchema } from "./shared.js";
 import { loadSkillStats, isSkillFlagged } from "../learning/reinforcement.js";
@@ -107,16 +108,10 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 		parameters: skillLearnerSchema,
 		execute: async (
 			_toolCallId: string,
-			params: {
-				action: string;
-				task_id?: string;
-				skill_name?: string;
-				skill_description?: string;
-				instructions?: string;
-				override_heuristic?: boolean;
-			},
+			rawParams: unknown,
 			signal?: AbortSignal,
 		) => {
+			const params = rawParams as Static<typeof skillLearnerSchema>;
 			if (signal?.aborted) throw new Error("Operation aborted");
 
 			switch (params.action) {

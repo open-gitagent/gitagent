@@ -1,3 +1,4 @@
+import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { SandboxContext } from "../sandbox.js";
 import { memorySchema, DEFAULT_MEMORY_PATH, resolveSandboxPath } from "./shared.js";
@@ -78,9 +79,10 @@ export function createSandboxMemoryTool(ctx: SandboxContext): AgentTool<typeof m
 		parameters: memorySchema,
 		execute: async (
 			_toolCallId: string,
-			{ action, content, message }: { action: string; content?: string; message?: string },
+			rawParams: unknown,
 			signal?: AbortSignal,
 		) => {
+			const { action, content, message } = rawParams as Static<typeof memorySchema>;
 			if (signal?.aborted) throw new Error("Operation aborted");
 
 			const config = await loadMemoryConfig(ctx);

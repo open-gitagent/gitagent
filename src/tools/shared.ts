@@ -1,5 +1,4 @@
 import { Type } from "@sinclair/typebox";
-import { StringEnum } from "@mariozechner/pi-ai";
 import { homedir } from "os";
 
 // ── Constants ───────────────────────────────────────────────────────────
@@ -39,17 +38,17 @@ export const editSchema = Type.Object({
 });
 
 export const memorySchema = Type.Object({
-	action: StringEnum(["load", "save"], { description: "Whether to load or save memory" }),
+	action: Type.Union([Type.Literal("load"), Type.Literal("save")], { description: "Whether to load or save memory" }),
 	content: Type.Optional(Type.String({ description: "Memory content to save (required for save)" })),
 	message: Type.Optional(Type.String({ description: "Commit message describing why this memory changed (required for save)" })),
 });
 
 export const taskTrackerSchema = Type.Object({
-	action: StringEnum(["begin", "update", "end", "list"], { description: "Action to perform" }),
+	action: Type.Union([Type.Literal("begin"), Type.Literal("update"), Type.Literal("end"), Type.Literal("list")], { description: "Action to perform" }),
 	objective: Type.Optional(Type.String({ description: "Task objective (required for begin)" })),
 	task_id: Type.Optional(Type.String({ description: "Task ID (required for update/end)" })),
 	step: Type.Optional(Type.String({ description: "Step description (for update)" })),
-	outcome: Type.Optional(StringEnum(["success", "failure", "partial"], { description: "Task outcome (for end)" })),
+	outcome: Type.Optional(Type.Union([Type.Literal("success"), Type.Literal("failure"), Type.Literal("partial")], { description: "Task outcome (for end)" })),
 	failure_reason: Type.Optional(Type.String({ description: "Why the task failed (for end+failure)" })),
 	skill_used: Type.Optional(Type.String({ description: "Name of skill used, if any (for end)" })),
 });
@@ -59,7 +58,7 @@ export const capturePhotoSchema = Type.Object({
 });
 
 export const skillLearnerSchema = Type.Object({
-	action: StringEnum(["evaluate", "crystallize", "status", "review", "update", "delete"], { description: "Action to perform" }),
+	action: Type.Union([Type.Literal("evaluate"), Type.Literal("crystallize"), Type.Literal("status"), Type.Literal("review"), Type.Literal("update"), Type.Literal("delete")], { description: "Action to perform" }),
 	task_id: Type.Optional(Type.String({ description: "Task ID (for evaluate/crystallize)" })),
 	skill_name: Type.Optional(Type.String({ description: "Skill name (for crystallize/update/delete)" })),
 	skill_description: Type.Optional(Type.String({ description: "Skill description (for crystallize)" })),
