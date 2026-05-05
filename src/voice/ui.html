@@ -489,7 +489,39 @@
     padding: 16px 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
     font-size: 13px; line-height: 1.6; color: #e6edf3;
   }
-  .dv-markdown.hidden, .dv-image.hidden { display: none; }
+  .dv-markdown.hidden, .dv-image.hidden,
+  .dv-html.hidden, .dv-pdf.hidden, .dv-video.hidden, .dv-audio.hidden, .dv-binary.hidden { display: none; }
+  .dv-html, .dv-pdf {
+    flex: 1; width: 100%; height: 100%; border: 0; background: #0a0d12;
+  }
+  .dv-video, .dv-audio {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    padding: 16px; background: #0a0d12; max-width: 100%;
+  }
+  .dv-video video, .dv-video { max-width: 100%; max-height: 100%; }
+  .dv-audio audio { width: 100%; max-width: 480px; }
+  .dv-binary {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px; background: #0a0d12; gap: 14px; text-align: center; color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  }
+  .dv-binary .bin-icon { font-size: 32px; opacity: 0.6; }
+  .dv-binary .bin-name { font-size: 14px; font-weight: 600; word-break: break-all; max-width: 100%; }
+  .dv-binary .bin-meta { font-size: 11px; color: #8b949e; font-family: 'IBM Plex Mono', monospace; }
+  .dv-binary .bin-hint { font-size: 11px; color: #6e7681; max-width: 320px; }
+  .dv-binary a.bin-download {
+    display: inline-block; padding: 6px 14px; border-radius: 6px;
+    background: #238636; color: #fff; text-decoration: none; font-size: 12px; font-weight: 600;
+    border: 1px solid #2ea043;
+  }
+  .dv-binary a.bin-download:hover { background: #2ea043; }
+  .dv-dl-btn {
+    background: transparent; border: 1px solid #30363d; color: #8b949e;
+    padding: 2px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;
+    margin-right: 4px;
+  }
+  .dv-dl-btn:hover { border-color: #58a6ff; color: #58a6ff; }
+  .dv-dl-btn.hidden { display: none; }
   .dv-image {
     display: flex; align-items: center; justify-content: center; padding: 20px;
     flex: 1; background: #0a0d12; overflow: auto;
@@ -1239,6 +1271,7 @@
           <button class="dv-md-toggle hidden" id="dvMdToggle" onclick="toggleMdView()" title="Toggle markdown preview">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h20v18H2z"/><path d="M7 15V9l2.5 3L12 9v6"/><path d="M17 9v6l-2-3"/></svg>
           </button>
+          <button class="dv-dl-btn hidden" id="dvDownload" onclick="downloadCurrentFile()" title="Download">Download</button>
           <button onclick="closeDiffViewer()" title="Close">&times;</button>
         </div>
         <div class="dv-countdown" id="dvCountdown" style="width:100%"></div>
@@ -1246,6 +1279,11 @@
           <pre id="dvPre"></pre>
           <div class="dv-markdown hidden" id="dvMarkdown"></div>
           <div class="dv-image hidden" id="dvImage"></div>
+          <iframe id="dvHtml" class="dv-html hidden" sandbox="allow-scripts allow-forms allow-popups allow-modals" referrerpolicy="no-referrer"></iframe>
+          <iframe id="dvPdf" class="dv-pdf hidden"></iframe>
+          <div class="dv-video hidden" id="dvVideo"></div>
+          <div class="dv-audio hidden" id="dvAudio"></div>
+          <div class="dv-binary hidden" id="dvBinary"></div>
         </div>
       </div>
     </div>
@@ -3472,6 +3510,20 @@ function renderExplorerTree(entries,parent,depth,justChanged,justNew){
 }
 
 // ── Inline diff viewer (inside files panel) ──────────────────────────
+function previewUrlFor(path){
+  return '/preview/'+path.split('/').map(encodeURIComponent).join('/');
+}
+function rawUrlFor(path,download){
+  return '/api/file/raw?path='+encodeURIComponent(path)+(download?'&download=1':'');
+}
+function fmtBytes(n){
+  if(!Number.isFinite(n))return '';
+  if(n<1024)return n+' B';
+  if(n<1024*1024)return (n/1024).toFixed(1)+' KB';
+  if(n<1024*1024*1024)return (n/1024/1024).toFixed(1)+' MB';
+  return (n/1024/1024/1024).toFixed(2)+' GB';
+}
+
 async function openDiffViewer(path,isAutoEdit,autoCloseMs){
   if(autoCloseTimer){clearTimeout(autoCloseTimer);autoCloseTimer=null;}
   var viewer=document.getElementById('diffViewer');
@@ -3479,6 +3531,15 @@ async function openDiffViewer(path,isAutoEdit,autoCloseMs){
   var statusEl=document.getElementById('dvStatus');
   var countdown=document.getElementById('dvCountdown');
   var pre=document.getElementById('dvPre');
+  var mdToggle=document.getElementById('dvMdToggle');
+  var mdDiv=document.getElementById('dvMarkdown');
+  var imgDiv=document.getElementById('dvImage');
+  var htmlEl=document.getElementById('dvHtml');
+  var pdfEl=document.getElementById('dvPdf');
+  var videoEl=document.getElementById('dvVideo');
+  var audioEl=document.getElementById('dvAudio');
+  var binEl=document.getElementById('dvBinary');
+  var dlBtn=document.getElementById('dvDownload');
 
   // Highlight active file in tree
   document.querySelectorAll('#explorerTree .ft-item').forEach(function(el){
@@ -3490,32 +3551,19 @@ async function openDiffViewer(path,isAutoEdit,autoCloseMs){
   pathEl.textContent=path.split('/').pop();
   pathEl.title=path;
 
-  // Detect file type
-  var ext=path.split('.').pop().toLowerCase();
-  var isMd=ext==='md';
-  var isImage=/^(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/.test(ext);
-  var mdToggle=document.getElementById('dvMdToggle');
-  var mdDiv=document.getElementById('dvMarkdown');
-  var imgDiv=document.getElementById('dvImage');
-
-  // Reset all content panels
-  mdToggle.classList.toggle('hidden',!isMd);
-  imgDiv.classList.add('hidden');
-  imgDiv.innerHTML='';
-  if(isMd){
-    dvMdActive=true;
-    mdToggle.classList.add('active');
-    pre.style.display='none';
-    mdDiv.classList.remove('hidden');
-  }else{
-    dvMdActive=false;
-    mdToggle.classList.remove('active');
-    pre.style.display='';
-    mdDiv.classList.add('hidden');
-  }
-  if(isImage){
-    pre.style.display='none';
-  }
+  // Reset every panel — strict additive show below.
+  mdToggle.classList.add('hidden');
+  mdToggle.classList.remove('active');
+  pre.style.display='';
+  mdDiv.classList.add('hidden');
+  imgDiv.classList.add('hidden'); imgDiv.innerHTML='';
+  htmlEl.classList.add('hidden'); htmlEl.removeAttribute('src');
+  pdfEl.classList.add('hidden'); pdfEl.removeAttribute('src');
+  videoEl.classList.add('hidden'); videoEl.innerHTML='';
+  audioEl.classList.add('hidden'); audioEl.innerHTML='';
+  binEl.classList.add('hidden'); binEl.innerHTML='';
+  dvMdActive=false;
+  dlBtn.classList.add('hidden');
 
   if(isAutoEdit){
     statusEl.className='dv-status edited';
@@ -3527,7 +3575,6 @@ async function openDiffViewer(path,isAutoEdit,autoCloseMs){
 
   // Open the viewer panel
   viewer.classList.add('open');
-  // Reset countdown
   countdown.style.transition='none';
   countdown.style.width='100%';
   countdown.classList.remove('done');
@@ -3536,23 +3583,121 @@ async function openDiffViewer(path,isAutoEdit,autoCloseMs){
     pre.innerHTML='<span class="dv-line" style="color:#484f58;">Loading...</span>';
   }
 
-  // Image files — render directly, skip text parsing
-  if(isImage){
+  // Fetch metadata first so we know how to render before pulling bytes.
+  var meta=null;
+  try{
+    var mr=await fetch('/api/file/meta?path='+encodeURIComponent(path));
+    if(mr.ok)meta=await mr.json();
+  }catch(_){/* fall through to extension-based guess */}
+  if(!meta||!meta.kind){
+    var ext=(path.split('.').pop()||'').toLowerCase();
+    var guess='text';
+    if(/^(png|jpg|jpeg|gif|webp|svg|bmp|ico|avif)$/.test(ext))guess='image';
+    else if(ext==='md'||ext==='markdown')guess='markdown';
+    else if(ext==='html'||ext==='htm')guess='html';
+    else if(ext==='pdf')guess='pdf';
+    else if(/^(mp4|webm|mov|m4v)$/.test(ext))guess='video';
+    else if(/^(mp3|wav|ogg|m4a|aac|flac)$/.test(ext))guess='audio';
+    meta={kind:guess,name:path.split('/').pop(),size:0,mtime:0};
+  }
+
+  var nonText=(meta.kind!=='text'&&meta.kind!=='markdown');
+
+  // HTML — render in sandboxed iframe via path-based /preview route so relative URLs resolve.
+  if(meta.kind==='html'){
+    pre.style.display='none';
     pre.innerHTML='';
-    imgDiv.classList.remove('hidden');
-    var img=document.createElement('img');
-    img.src='/api/file/raw?path='+encodeURIComponent(path)+'&t='+Date.now();
-    img.alt=path.split('/').pop();
-    img.onload=function(){
-      var meta=document.createElement('span');
-      meta.className='img-meta';
-      meta.textContent=img.naturalWidth+'×'+img.naturalHeight;
-      imgDiv.appendChild(meta);
-    };
-    imgDiv.appendChild(img);
-    // No auto-close for images
+    htmlEl.src=previewUrlFor(path)+'?t='+Date.now();
+    htmlEl.classList.remove('hidden');
+    dlBtn.classList.remove('hidden');
     countdown.style.width='0';
     return;
+  }
+
+  // PDF — browsers render natively in an iframe given the right Content-Type.
+  if(meta.kind==='pdf'){
+    pre.style.display='none';
+    pre.innerHTML='';
+    pdfEl.src=rawUrlFor(path)+'&t='+Date.now();
+    pdfEl.classList.remove('hidden');
+    dlBtn.classList.remove('hidden');
+    countdown.style.width='0';
+    return;
+  }
+
+  // Video / Audio — native elements, server supports Range so they stream.
+  if(meta.kind==='video'){
+    pre.style.display='none'; pre.innerHTML='';
+    var v=document.createElement('video');
+    v.controls=true; v.src=rawUrlFor(path); v.preload='metadata';
+    videoEl.appendChild(v);
+    videoEl.classList.remove('hidden');
+    dlBtn.classList.remove('hidden');
+    countdown.style.width='0';
+    return;
+  }
+  if(meta.kind==='audio'){
+    pre.style.display='none'; pre.innerHTML='';
+    var a=document.createElement('audio');
+    a.controls=true; a.src=rawUrlFor(path); a.preload='metadata';
+    audioEl.appendChild(a);
+    audioEl.classList.remove('hidden');
+    dlBtn.classList.remove('hidden');
+    countdown.style.width='0';
+    return;
+  }
+
+  // Image — keep existing direct render (now keyed off meta).
+  if(meta.kind==='image'){
+    pre.style.display='none'; pre.innerHTML='';
+    imgDiv.classList.remove('hidden');
+    var img=document.createElement('img');
+    img.src=rawUrlFor(path)+'&t='+Date.now();
+    img.alt=path.split('/').pop();
+    img.onload=function(){
+      var m=document.createElement('span');
+      m.className='img-meta';
+      m.textContent=img.naturalWidth+'×'+img.naturalHeight;
+      imgDiv.appendChild(m);
+    };
+    imgDiv.appendChild(img);
+    dlBtn.classList.remove('hidden');
+    countdown.style.width='0';
+    return;
+  }
+
+  // Binary / unviewable — placeholder card + Download. On manual click (not auto-edit), trigger download immediately.
+  if(meta.kind==='binary'){
+    pre.style.display='none'; pre.innerHTML='';
+    var when=meta.mtime?new Date(meta.mtime).toLocaleString():'';
+    binEl.innerHTML=
+      '<div class="bin-icon">📄</div>'+
+      '<div class="bin-name"></div>'+
+      '<div class="bin-meta"></div>'+
+      '<a class="bin-download" download href="'+rawUrlFor(path,true)+'">Download</a>'+
+      '<div class="bin-hint">This file type can’t be previewed in the browser. Download it to open with the right app.</div>';
+    binEl.querySelector('.bin-name').textContent=meta.name||path.split('/').pop();
+    binEl.querySelector('.bin-meta').textContent=[fmtBytes(meta.size),when].filter(Boolean).join(' · ');
+    binEl.classList.remove('hidden');
+    dlBtn.classList.remove('hidden');
+    countdown.style.width='0';
+    if(!isAutoEdit&&!isReopen){
+      // Auto-trigger download when the user manually clicked an unviewable file.
+      // Skip on reopen so re-clicking the same row doesn't repeatedly download.
+      var anchor=binEl.querySelector('a.bin-download');
+      if(anchor)anchor.click();
+    }
+    return;
+  }
+
+  // Markdown vs plain text — existing diff/highlight branch.
+  var isMd=(meta.kind==='markdown');
+  mdToggle.classList.toggle('hidden',!isMd);
+  if(isMd){
+    dvMdActive=true;
+    mdToggle.classList.add('active');
+    pre.style.display='none';
+    mdDiv.classList.remove('hidden');
   }
 
   try{
@@ -3666,8 +3811,29 @@ function closeDiffViewer(){
   document.querySelectorAll('#explorerTree .ft-item.active-viewer').forEach(function(el){
     el.classList.remove('active-viewer');
   });
+  // Stop any media / iframe loads to free resources.
+  ['dvHtml','dvPdf'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el){el.removeAttribute('src');el.classList.add('hidden');}
+  });
+  ['dvVideo','dvAudio','dvBinary','dvImage'].forEach(function(id){
+    var el=document.getElementById(id);
+    if(el){el.innerHTML='';el.classList.add('hidden');}
+  });
+  var dlBtn=document.getElementById('dvDownload');
+  if(dlBtn)dlBtn.classList.add('hidden');
   diffOpenPath=null;
   diffOpenContent='';
+}
+
+function downloadCurrentFile(){
+  if(!diffOpenPath)return;
+  var a=document.createElement('a');
+  a.href='/api/file/raw?path='+encodeURIComponent(diffOpenPath)+'&download=1';
+  a.download=diffOpenPath.split('/').pop()||'file';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 function refreshFileTree(){

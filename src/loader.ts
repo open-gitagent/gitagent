@@ -333,7 +333,12 @@ export async function loadAgent(
 	if (complianceBlock) parts.push(complianceBlock);
 
 	// Workspace directory — all generated files go here
-	parts.push(`# Workspace Directory
+	const cloudMode =
+		process.env.GITCLAW_CLOUD === "true" ||
+		!!process.env.KUBERNETES_SERVICE_HOST ||
+		!!process.env.RENDER ||
+		!!process.env.FLY_APP_NAME;
+	const workspaceBlock = `# Workspace Directory
 
 Your working directory is \`${agentDir}\`.
 
@@ -341,7 +346,11 @@ When creating files (documents, markdown files, PDFs, images, spreadsheets, code
 - Example: \`workspace/report.pdf\`, \`workspace/chart.png\`, \`workspace/data.csv\`, \`workspace/todo.md\`
 - The \`workspace/\` directory is the designated output folder for generated artifacts
 - If the user explicitly specifies a path (e.g. "create ~/notes/todo.md"), use the path they requested
-- This rule applies to ALL channels: voice, chat, Telegram, WhatsApp`);
+- This rule applies to ALL channels: voice, chat, Telegram, WhatsApp`;
+	const cloudBlock = cloudMode
+		? `\n\n## Cloud Mode\n\nYou are running inside a containerized cloud deployment — there is no desktop. Do NOT call \`open\`, \`xdg-open\`, \`start\`, \`osascript\`, or any GUI launcher; they will silently fail. To "show" the user an artifact:\n- Write it to \`workspace/\` (e.g. \`workspace/index.html\`, \`workspace/deck.pptx\`).\n- Mention the relative path in your reply.\n\nThe web UI auto-opens generated files in its viewer: HTML renders inline (with relative \`<link>\`/\`<script>\` working), PDFs/audio/video preview natively, and Office docs (PPTX/DOCX/XLSX) show a Download button. Don't shell out to "open" anything — just create the file and tell the user where it is.`
+		: "";
+	parts.push(workspaceBlock + cloudBlock);
 
 	// Task learning & skill discovery
 	parts.push(`# Task Learning & Skill Discovery

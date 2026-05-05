@@ -2,7 +2,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { WebSocketServer, WebSocket as WS } from "ws";
 import { query } from "../sdk.js";
 import type { VoiceServerOptions, ClientMessage, ServerMessage, MultimodalAdapter } from "./adapter.js";
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync, appendFileSync, rmSync } from "fs";
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync, appendFileSync, rmSync, createReadStream } from "fs";
 import { execSync } from "child_process";
 import { join, dirname, resolve, relative } from "path";
 import { writeFile, readFile, mkdir, stat } from "fs/promises";
@@ -107,6 +107,144 @@ if (!(process as any).__gitclawLogHandlersInstalled) {
 	process.on("warning", (warning: Error) => {
 		console.warn(`[system] Node warning: ${warning.name}: ${warning.message}`);
 	});
+}
+
+// ── File type / MIME helper ────────────────────────────────────────────
+export type FileKind = "html" | "image" | "pdf" | "video" | "audio" | "markdown" | "text" | "binary";
+export interface FileTypeInfo { mime: string; kind: FileKind; }
+
+const FILE_TYPES: Record<string, FileTypeInfo> = {
+	// html
+	html: { mime: "text/html; charset=utf-8", kind: "html" },
+	htm:  { mime: "text/html; charset=utf-8", kind: "html" },
+	// images
+	png:  { mime: "image/png",     kind: "image" },
+	jpg:  { mime: "image/jpeg",    kind: "image" },
+	jpeg: { mime: "image/jpeg",    kind: "image" },
+	gif:  { mime: "image/gif",     kind: "image" },
+	webp: { mime: "image/webp",    kind: "image" },
+	svg:  { mime: "image/svg+xml", kind: "image" },
+	bmp:  { mime: "image/bmp",     kind: "image" },
+	ico:  { mime: "image/x-icon",  kind: "image" },
+	avif: { mime: "image/avif",    kind: "image" },
+	// pdf
+	pdf:  { mime: "application/pdf", kind: "pdf" },
+	// video
+	mp4:  { mime: "video/mp4",        kind: "video" },
+	webm: { mime: "video/webm",       kind: "video" },
+	mov:  { mime: "video/quicktime",  kind: "video" },
+	m4v:  { mime: "video/x-m4v",      kind: "video" },
+	// audio
+	mp3:  { mime: "audio/mpeg",  kind: "audio" },
+	wav:  { mime: "audio/wav",   kind: "audio" },
+	ogg:  { mime: "audio/ogg",   kind: "audio" },
+	m4a:  { mime: "audio/mp4",   kind: "audio" },
+	aac:  { mime: "audio/aac",   kind: "audio" },
+	flac: { mime: "audio/flac",  kind: "audio" },
+	// markdown
+	md:       { mime: "text/markdown; charset=utf-8", kind: "markdown" },
+	markdown: { mime: "text/markdown; charset=utf-8", kind: "markdown" },
+	// text-ish
+	txt:  { mime: "text/plain; charset=utf-8",       kind: "text" },
+	json: { mime: "application/json; charset=utf-8", kind: "text" },
+	js:   { mime: "text/javascript; charset=utf-8",  kind: "text" },
+	mjs:  { mime: "text/javascript; charset=utf-8",  kind: "text" },
+	cjs:  { mime: "text/javascript; charset=utf-8",  kind: "text" },
+	ts:   { mime: "text/plain; charset=utf-8",       kind: "text" },
+	tsx:  { mime: "text/plain; charset=utf-8",       kind: "text" },
+	jsx:  { mime: "text/plain; charset=utf-8",       kind: "text" },
+	css:  { mime: "text/css; charset=utf-8",         kind: "text" },
+	yaml: { mime: "text/yaml; charset=utf-8",        kind: "text" },
+	yml:  { mime: "text/yaml; charset=utf-8",        kind: "text" },
+	toml: { mime: "text/plain; charset=utf-8",       kind: "text" },
+	csv:  { mime: "text/csv; charset=utf-8",         kind: "text" },
+	log:  { mime: "text/plain; charset=utf-8",       kind: "text" },
+	sh:   { mime: "text/x-shellscript; charset=utf-8", kind: "text" },
+	py:   { mime: "text/x-python; charset=utf-8",    kind: "text" },
+	go:   { mime: "text/plain; charset=utf-8",       kind: "text" },
+	rs:   { mime: "text/plain; charset=utf-8",       kind: "text" },
+	java: { mime: "text/x-java; charset=utf-8",      kind: "text" },
+	c:    { mime: "text/x-c; charset=utf-8",         kind: "text" },
+	cpp:  { mime: "text/x-c++; charset=utf-8",       kind: "text" },
+	h:    { mime: "text/x-c; charset=utf-8",         kind: "text" },
+	xml:  { mime: "application/xml; charset=utf-8",  kind: "text" },
+	// office / archives — kind: binary, but with proper MIME so downloads name correctly
+	doc:  { mime: "application/msword", kind: "binary" },
+	docx: { mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", kind: "binary" },
+	xls:  { mime: "application/vnd.ms-excel", kind: "binary" },
+	xlsx: { mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", kind: "binary" },
+	ppt:  { mime: "application/vnd.ms-powerpoint", kind: "binary" },
+	pptx: { mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", kind: "binary" },
+	zip:  { mime: "application/zip", kind: "binary" },
+	tar:  { mime: "application/x-tar", kind: "binary" },
+	gz:   { mime: "application/gzip", kind: "binary" },
+};
+
+export function fileTypeFor(pathOrName: string): FileTypeInfo {
+	const name = pathOrName.split("/").pop() || pathOrName;
+	const dot = name.lastIndexOf(".");
+	const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+	return FILE_TYPES[ext] || { mime: "application/octet-stream", kind: "binary" };
+}
+
+const MAX_FILE_BYTES = (() => {
+	const v = parseInt(process.env.GITCLAW_MAX_FILE_BYTES || "", 10);
+	return Number.isFinite(v) && v > 0 ? v : 200 * 1024 * 1024;
+})();
+
+export const CLOUD_MODE =
+	process.env.GITCLAW_CLOUD === "true" ||
+	!!process.env.KUBERNETES_SERVICE_HOST ||
+	!!process.env.RENDER ||
+	!!process.env.FLY_APP_NAME;
+
+const CLOUD_VOICE_SUFFIX =
+	" CLOUD MODE: You are running inside a containerized cloud deployment — there is no desktop, no `open`/`xdg-open`/`osascript`, " +
+	"no Spotify, no Apple Music, no GUI apps. Do NOT instruct run_agent to call those. " +
+	"To 'show' the user something, write the artifact to `workspace/` (e.g. `workspace/index.html`, `workspace/deck.pptx`) " +
+	"and mention the path in your reply — the web UI auto-opens it (HTML renders inline, PDFs preview, Office files offer Download).";
+
+function streamFileWithRange(
+	req: IncomingMessage,
+	res: ServerResponse,
+	abs: string,
+	opts: { mime: string; download?: boolean; filename?: string; extraHeaders?: Record<string, string> },
+): void {
+	const st = statSync(abs);
+	if (st.size > MAX_FILE_BYTES) {
+		res.writeHead(413, { "Content-Type": "application/json" });
+		res.end(JSON.stringify({ error: `File too large (>${Math.floor(MAX_FILE_BYTES / 1024 / 1024)}MB)` }));
+		return;
+	}
+	const headers: Record<string, string> = {
+		"Content-Type": opts.mime,
+		"Cache-Control": "no-cache",
+		"Accept-Ranges": "bytes",
+		...(opts.extraHeaders || {}),
+	};
+	if (opts.download) {
+		const fn = (opts.filename || abs.split("/").pop() || "download").replace(/"/g, "");
+		headers["Content-Disposition"] = `attachment; filename="${fn}"`;
+	}
+	const range = req.headers.range;
+	if (range) {
+		const m = /^bytes=(\d*)-(\d*)$/.exec(range);
+		if (m) {
+			const start = m[1] ? parseInt(m[1], 10) : 0;
+			const end = m[2] ? parseInt(m[2], 10) : st.size - 1;
+			if (Number.isFinite(start) && Number.isFinite(end) && start <= end && start < st.size) {
+				const length = end - start + 1;
+				headers["Content-Range"] = `bytes ${start}-${end}/${st.size}`;
+				headers["Content-Length"] = String(length);
+				res.writeHead(206, headers);
+				createReadStream(abs, { start, end }).pipe(res);
+				return;
+			}
+		}
+	}
+	headers["Content-Length"] = String(st.size);
+	res.writeHead(200, headers);
+	createReadStream(abs).pipe(res);
 }
 
 // ── Background memory saver ────────────────────────────────────────────
@@ -505,9 +643,13 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 		const m = yamlRaw.match(/^name:\s*(.+)$/m);
 		if (m) agentName = m[1].trim();
 	} catch { /* fallback to default */ }
-	const uiHtml = loadUIHtml()
-		.replace(/\{\{AGENT_NAME\}\}/g, agentName)
-		.replace(/\{\{HAS_COMPOSIO\}\}/g, process.env.COMPOSIO_API_KEY ? "true" : "false");
+	// Re-read on every request so `npm run build` is picked up live without a server restart.
+	// The file sits in the OS page cache, so the per-request cost is negligible.
+	function buildUiHtml(): string {
+		return loadUIHtml()
+			.replace(/\{\{AGENT_NAME\}\}/g, agentName)
+			.replace(/\{\{HAS_COMPOSIO\}\}/g, process.env.COMPOSIO_API_KEY ? "true" : "false");
+	}
 
 	// Current date/time context injected into every query
 	function getCurrentDateTimeContext(): string {
@@ -896,15 +1038,8 @@ ${runningContext}`;
 			parts.push(nl);
 		}
 
-		// file field
-		const mimeMap: Record<string, string> = {
-			pdf: "application/pdf", doc: "application/msword", docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-			xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-			ppt: "application/vnd.ms-powerpoint", pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-			png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
-			zip: "application/zip", csv: "text/csv", txt: "text/plain", json: "application/json", md: "text/markdown",
-		};
-		const mime = mimeMap[ext] || "application/octet-stream";
+		// file field — strip charset from text MIMEs since Telegram expects bare types
+		const mime = fileTypeFor(fileName).mime.split(";")[0].trim();
 		parts.push(Buffer.from(`--${formBoundary}\r\nContent-Disposition: form-data; name="${fieldName}"; filename="${fileName}"\r\nContent-Type: ${mime}\r\n\r\n`));
 		parts.push(fileData);
 		parts.push(nl);
@@ -1723,13 +1858,19 @@ ${runningContext}`;
 	}
 
 	// ── Password protection ──────────────────────────────────────────
+	// Auth gates the UI when GITCLAW_PASSWORD is set. GITCLAW_USERNAME is
+	// optional and defaults to "admin" when a password is configured.
 	const serverPassword = process.env.GITCLAW_PASSWORD || "";
+	const serverUsername = process.env.GITCLAW_USERNAME || (serverPassword ? "admin" : "");
 	const authCookieName = "gitclaw_auth";
 
 	function generateAuthToken(): string {
-		// Simple hash of password + salt for cookie token
+		// Hash username + password + salt so changing either invalidates existing cookies.
 		const { createHash } = require("crypto") as typeof import("crypto");
-		return createHash("sha256").update(serverPassword + "_gitclaw_session").digest("hex").slice(0, 32);
+		return createHash("sha256")
+			.update(`${serverUsername}:${serverPassword}:_gitclaw_session`)
+			.digest("hex")
+			.slice(0, 32);
 	}
 
 	function isAuthenticated(req: IncomingMessage): boolean {
@@ -1737,6 +1878,14 @@ ${runningContext}`;
 		const cookie = req.headers.cookie || "";
 		const match = cookie.match(new RegExp(`${authCookieName}=([^;]+)`));
 		return match?.[1] === generateAuthToken();
+	}
+
+	function timingSafeEqualStr(a: string, b: string): boolean {
+		const { timingSafeEqual } = require("crypto") as typeof import("crypto");
+		const ab = Buffer.from(a);
+		const bb = Buffer.from(b);
+		if (ab.length !== bb.length) return false;
+		return timingSafeEqual(ab, bb);
 	}
 
 	const loginPageHtml = `<!DOCTYPE html>
@@ -1748,29 +1897,31 @@ body{background:#0d1117;color:#e6edf3;font-family:'Inter',system-ui,sans-serif;d
 .login{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:40px;width:340px;text-align:center}
 .login h1{font-size:20px;margin-bottom:8px;font-weight:600}
 .login p{font-size:13px;color:#8b949e;margin-bottom:24px}
-.login input{width:100%;padding:12px 14px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:14px;outline:none;margin-bottom:16px}
+.login input{width:100%;padding:12px 14px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:14px;outline:none;margin-bottom:12px}
 .login input:focus{border-color:#58a6ff}
-.login button{width:100%;padding:12px;background:#238636;border:none;border-radius:6px;color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+.login button{width:100%;padding:12px;background:#238636;border:none;border-radius:6px;color:#fff;font-size:14px;font-weight:600;cursor:pointer;margin-top:4px}
 .login button:hover{background:#2ea043}
 .login .error{color:#f85149;font-size:12px;margin-bottom:12px;display:none}
 </style></head><body>
 <div class="login">
 <h1>GitClaw</h1>
-<p>Enter password to continue</p>
-<div class="error" id="err">Incorrect password</div>
+<p>Sign in to continue</p>
+<div class="error" id="err">Incorrect username or password</div>
 <form onsubmit="return doLogin()">
-<input type="password" id="pw" placeholder="Password" autofocus>
-<button type="submit">Login</button>
+<input type="text" id="un" placeholder="Username" autocomplete="username" autofocus>
+<input type="password" id="pw" placeholder="Password" autocomplete="current-password">
+<button type="submit">Sign in</button>
 </form>
 </div>
 <script>
 function doLogin(){
+var un=document.getElementById('un').value;
 var pw=document.getElementById('pw').value;
-fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})})
+fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:un,password:pw})})
 .then(function(r){return r.json().then(function(d){return{ok:r.ok,data:d};});})
 .then(function(res){
 if(res.ok&&res.data.ok){window.location.reload();}
-else{document.getElementById('err').style.display='block';document.getElementById('pw').value='';}
+else{document.getElementById('err').style.display='block';document.getElementById('pw').value='';document.getElementById('pw').focus();}
 });
 return false;
 }
@@ -1807,12 +1958,19 @@ return false;
 
 		// ── Auth endpoints (always accessible) ──
 		if (url.pathname === "/api/auth" && req.method === "POST") {
-			const body = JSON.parse(await readBody(req));
-			if (body.password === serverPassword) {
+			let body: { username?: string; password?: string };
+			try {
+				body = JSON.parse(await readBody(req));
+			} catch {
+				return jsonReply(res, 400, { ok: false, error: "Invalid request" });
+			}
+			const userOk = timingSafeEqualStr(String(body.username ?? ""), serverUsername);
+			const passOk = timingSafeEqualStr(String(body.password ?? ""), serverPassword);
+			if (userOk && passOk && serverPassword) {
 				res.setHeader("Set-Cookie", `${authCookieName}=${generateAuthToken()}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`);
 				jsonReply(res, 200, { ok: true });
 			} else {
-				jsonReply(res, 401, { ok: false, error: "Incorrect password" });
+				jsonReply(res, 401, { ok: false, error: "Incorrect username or password" });
 			}
 			return;
 		}
@@ -1913,7 +2071,7 @@ return false;
 
 		} else if (url.pathname === "/" || url.pathname === "/test") {
 			res.writeHead(200, { "Content-Type": "text/html" });
-			res.end(uiHtml);
+			res.end(buildUiHtml());
 
 		} else if (url.pathname === "/api/files" && req.method === "GET") {
 			// List files as a tree
@@ -1940,7 +2098,27 @@ return false;
 			}
 
 		} else if (url.pathname === "/api/file/raw" && req.method === "GET") {
-			// Serve raw file with correct MIME type (for images, etc.)
+			// Serve raw file with correct MIME type, streaming + Range support.
+			// ?download=1 forces Content-Disposition: attachment.
+			const reqPath = url.searchParams.get("path");
+			if (!reqPath) return jsonReply(res, 400, { error: "Missing path param" });
+			const abs = safePath(reqPath);
+			if (!abs) return jsonReply(res, 403, { error: "Path outside workspace" });
+			if (!existsSync(abs)) return jsonReply(res, 404, { error: "File not found" });
+			try {
+				const info = fileTypeFor(reqPath);
+				const download = url.searchParams.get("download") === "1";
+				streamFileWithRange(req, res, abs, {
+					mime: info.mime,
+					download,
+					filename: reqPath.split("/").pop() || undefined,
+				});
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname === "/api/file/meta" && req.method === "GET") {
+			// File metadata (kind, mime, size, mtime) — UI calls this before deciding what to render.
 			const reqPath = url.searchParams.get("path");
 			if (!reqPath) return jsonReply(res, 400, { error: "Missing path param" });
 			const abs = safePath(reqPath);
@@ -1948,16 +2126,46 @@ return false;
 			if (!existsSync(abs)) return jsonReply(res, 404, { error: "File not found" });
 			try {
 				const st = statSync(abs);
-				if (st.size > 10 * 1024 * 1024) return jsonReply(res, 413, { error: "File too large (>10MB)" });
-				const ext = reqPath.split(".").pop()?.toLowerCase() || "";
-				const mimeMap: Record<string, string> = {
-					png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
-					webp: "image/webp", svg: "image/svg+xml", ico: "image/x-icon", bmp: "image/bmp",
-				};
-				const mime = mimeMap[ext] || "application/octet-stream";
-				const data = readFileSync(abs);
-				res.writeHead(200, { "Content-Type": mime, "Content-Length": data.length, "Cache-Control": "no-cache" });
-				res.end(data);
+				const info = fileTypeFor(reqPath);
+				jsonReply(res, 200, {
+					path: reqPath,
+					name: reqPath.split("/").pop() || reqPath,
+					size: st.size,
+					mtime: st.mtimeMs,
+					kind: info.kind,
+					mime: info.mime,
+				});
+			} catch (err: any) {
+				jsonReply(res, 500, { error: err.message });
+			}
+
+		} else if (url.pathname.startsWith("/preview/") && req.method === "GET") {
+			// Path-based file preview — relative URLs in HTML resolve against this prefix.
+			// e.g. /preview/workspace/site/index.html  →  <link href="style.css">  →  /preview/workspace/site/style.css
+			let relPath: string;
+			try {
+				relPath = decodeURIComponent(url.pathname.slice("/preview/".length));
+			} catch {
+				return jsonReply(res, 400, { error: "Invalid path encoding" });
+			}
+			if (!relPath) return jsonReply(res, 400, { error: "Missing path" });
+			const abs = safePath(relPath);
+			if (!abs) return jsonReply(res, 403, { error: "Path outside workspace" });
+			if (!existsSync(abs)) return jsonReply(res, 404, { error: "File not found" });
+			try {
+				const info = fileTypeFor(relPath);
+				const extraHeaders: Record<string, string> = {};
+				if (info.kind === "html") {
+					// Sandbox is also applied on the iframe element; CSP is the real enforcement layer.
+					extraHeaders["Content-Security-Policy"] =
+						"default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors 'self'";
+					extraHeaders["X-Frame-Options"] = "SAMEORIGIN";
+				}
+				streamFileWithRange(req, res, abs, {
+					mime: info.mime,
+					filename: relPath.split("/").pop() || undefined,
+					extraHeaders,
+				});
 			} catch (err: any) {
 				jsonReply(res, 500, { error: err.message });
 			}
@@ -2814,6 +3022,9 @@ a{color:#58a6ff;}</style></head>
 		if (voiceContext) {
 			instructions += "\n\n" + voiceContext;
 		}
+		if (CLOUD_MODE) {
+			instructions += CLOUD_VOICE_SUFFIX;
+		}
 
 		// Inject Composio awareness into adapter instructions so the voice LLM
 		// never tells the user "I can't access" external services
@@ -3015,7 +3226,7 @@ a{color:#58a6ff;}</style></head>
 	console.log(dim(`[voice] Model: ${opts.model || "(default)"}`));
 	console.log(dim(`[voice] Composio: ${composioAdapter ? "enabled" : "disabled"}`));
 	console.log(dim(`[voice] Telegram: ${telegramToken ? "configured" : "not configured"}`));
-	console.log(dim(`[voice] Auth: ${serverPassword ? "password-protected" : "open"}`));
+	console.log(dim(`[voice] Auth: ${serverPassword ? `protected (user "${serverUsername}")` : "open — set GITCLAW_PASSWORD (and optionally GITCLAW_USERNAME) to require login"}`));
 	console.log(dim(`[voice] Open http://localhost:${port} in your browser`));
 
 	// Start the cron scheduler
