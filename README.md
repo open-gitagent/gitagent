@@ -48,7 +48,7 @@ Fork an agent. Branch a personality. `git log` your agent's memory. Diff its rul
 Copy, paste, run. That's it — no cloning, no manual setup. The installer handles everything:
 
 ```bash
-bash <(curl -fsSL "https://raw.githubusercontent.com/open-gitagent/gitclaw/main/install.sh?$(date +%s)")
+bash <(curl -fsSL "https://raw.githubusercontent.com/open-gitagent/gitagent/main/install.sh?$(date +%s)")
 ```
 
 This will:
