@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir, stat } from "fs/promises";
 import { join } from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { capturePhotoSchema } from "./shared.js";
 
@@ -85,7 +85,8 @@ export function createCapturePhotoTool(cwd: string): AgentTool<typeof capturePho
 			// Git add + commit
 			const commitMsg = `Capture moment: ${reason}`;
 			try {
-				execSync(`git add "${photoRelPath}" "${INDEX_FILE}" && git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, {
+				execFileSync("git", ["add", photoRelPath, INDEX_FILE], { cwd, stdio: "pipe" });
+				execFileSync("git", ["commit", "-m", commitMsg], {
 					cwd,
 					stdio: "pipe",
 				});

@@ -17,7 +17,7 @@ import { formatComplianceWarnings } from "./compliance.js";
 import { readFile, mkdir, writeFile, stat, access } from "fs/promises";
 import { existsSync, readFileSync } from "fs";
 import { join, resolve } from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { initLocalSession } from "./session.js";
 import type { LocalSession } from "./session.js";
 import { startVoiceServer } from "./voice/server.js";
@@ -175,6 +175,12 @@ function handleEvent(
 			break;
 		}
 		case "agent_end":
+			if (event.messages && event.messages.length > 0) {
+				const last = event.messages[event.messages.length - 1];
+				if (last.role === "assistant" && last.errorMessage) {
+					process.stdout.write(red(`\nError: ${last.errorMessage}\n`));
+				}
+			}
 			break;
 	}
 }
@@ -195,7 +201,7 @@ function summarizeArgs(args: any): string {
 
 function isGitRepo(dir: string): boolean {
 	try {
-		execSync("git rev-parse --is-inside-work-tree", { cwd: dir, stdio: "pipe" });
+		execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: dir, stdio: "pipe" });
 		return true;
 	} catch {
 		return false;
@@ -223,7 +229,7 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 	// Git init if not a repo
 	if (!isGitRepo(absDir)) {
 		console.log(dim("Initializing git repository..."));
-		execSync("git init", { cwd: absDir, stdio: "pipe" });
+		execFileSync("git", ["init"], { cwd: absDir, stdio: "pipe" });
 
 		// Create .gitignore
 		const gitignorePath = join(absDir, ".gitignore");
@@ -232,7 +238,8 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 		}
 
 		// Initial commit so memory saves work
-		execSync("git add -A && git commit -m 'Initial commit' --allow-empty", {
+		execFileSync("git", ["add", "-A"], { cwd: absDir, stdio: "pipe" });
+		execFileSync("git", ["commit", "-m", "Initial commit", "--allow-empty"], {
 			cwd: absDir,
 			stdio: "pipe",
 		});
@@ -289,10 +296,13 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 
 	// Stage new scaffolded files
 	try {
-		execSync("git add -A && git diff --cached --quiet || git commit -m 'Scaffold gitclaw agent'", {
-			cwd: absDir,
-			stdio: "pipe",
-		});
+		execFileSync("git", ["add", "-A"], { cwd: absDir, stdio: "pipe" });
+		try {
+			execFileSync("git", ["diff", "--cached", "--quiet"], { cwd: absDir, stdio: "pipe" });
+		} catch {
+			// There are staged changes — commit them
+			execFileSync("git", ["commit", "-m", "Scaffold gitclaw agent"], { cwd: absDir, stdio: "pipe" });
+		}
 	} catch {
 		// ok if nothing to commit
 	}
