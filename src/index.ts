@@ -22,6 +22,7 @@ import { initLocalSession } from "./session.js";
 import type { LocalSession } from "./session.js";
 import { startVoiceServer } from "./voice/server.js";
 import { handlePluginCommand } from "./plugin-cli.js";
+import { handleWorkflowCommand } from "./commands/workflow.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	initTelemetry,
@@ -301,6 +302,12 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
+	// Handle workflow subcommand: gitclaw workflow <generate|...>
+	if (process.argv[2] === "workflow") {
+		await handleWorkflowCommand(process.argv.slice(2));
+		return;
+	}
+
 	// Handle plugin subcommand: gitclaw plugin <install|list|remove|...>
 	if (process.argv[2] === "plugin") {
 		const allArgs = process.argv.slice(3);
