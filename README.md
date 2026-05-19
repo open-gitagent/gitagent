@@ -831,3 +831,161 @@ OpenTelemetry integration for observability:
 ## License
 
 This project is licensed under the [MIT License](./LICENSE).
+## FAQ
+
+### What is Gitclaw (Gitagent)?
+
+Gitclaw is a **universal git-native multimodal AI Agent framework** (also called TinyHuman). Your agent lives inside a git repository — identity, rules, memory, tools, and skills are all version-controlled files. This is "agents as repos" — fork an agent, branch a personality, `git log` your agent's memory.
+
+### How does Gitclaw compare to other agent tools?
+
+| Feature | Gitclaw | Claude Code | Codex | OpenClaw |
+|:--------|:-------:|:-----------:|:-----:|:--------:|
+| Git-native agent | ✅ | ❌ | ❌ | ❌ |
+| Version-controlled memory | ✅ | ❌ | ❌ | ❌ |
+| Declarative YAML tools | ✅ | ❌ | ❌ | ❌ |
+| Skills modules | ✅ | ❌ | ❌ | ✅ |
+| SDK in-process | ✅ | subprocess | subprocess | subprocess |
+| Hooks system | ✅ | ❌ | ❌ | ✅ |
+| Voice UI | ✅ | ❌ | ❌ | ❌ |
+| One-command install | ✅ | ✅ | ✅ | ✅ |
+
+**Key difference:** Gitclaw treats configuration as git repo content (agent.yaml, SOUL.md, RULES.md, memory/) rather than scattered application code.
+
+### What files define a Gitclaw agent?
+
+A Gitclaw agent IS a git repository with these files:
+
+- **`agent.yaml`** — model, tools, runtime config
+- **`SOUL.md`** — personality and identity
+- **`RULES.md`** — behavioral constraints
+- **`memory/`** — git-committed memory with full history
+- **`tools/`** — declarative YAML tool definitions
+- **`skills/`** — composable skill modules
+- **`hooks/`** — lifecycle hooks (script or programmatic)
+
+### What LLM providers does Gitclaw support?
+
+Gitclaw supports multiple providers via the `--model` flag:
+
+| Provider | Example |
+|:---------|:--------|
+| OpenAI | `openai:gpt-4o`, `openai:gpt-4o-mini` |
+| Anthropic | `anthropic:claude-sonnet-4-5-20250929` |
+| Google | `google:gemini-1.5-pro` |
+| Custom | Any OpenAI-compatible API |
+
+```bash
+gitclaw --model anthropic:claude-sonnet-4-5-20250929 "Analyze this project"
+```
+
+### How do I get started?
+
+**Requirements:** Node.js 18+, npm, git
+
+**One-command install:**
+
+```bash
+bash <(curl -fsSL "https://raw.githubusercontent.com/open-gitagent/gitagent/main/install.sh")
+```
+
+This installs gitclaw globally, walks you through API key setup, and launches the voice UI at `http://localhost:3333`.
+
+**Or install manually:**
+
+```bash
+npm install -g gitclaw
+export OPENAI_API_KEY="sk-..."
+gitclaw --dir ~/my-project "Explain this project"
+```
+
+### How does Local Repo Mode work?
+
+Clone a GitHub repo, run an agent on it, auto-commit and push to a session branch:
+
+```bash
+# With GitHub PAT
+gitclaw --repo https://github.com/org/repo --pat ghp_xxx "Fix the login bug"
+
+# Or with GITHUB_TOKEN env
+export GITHUB_TOKEN=ghp_xxx
+gitclaw --repo https://github.com/org/repo "Add unit tests"
+
+# Resume existing session
+gitclaw --repo https://github.com/org/repo --session gitclaw/session-a1b2c3d4 "Continue"
+```
+
+### What CLI options are available?
+
+| Flag | Short | Description |
+|:-----|:------|:------------|
+| `--dir <path>` | `-d` | Agent directory (default: cwd) |
+| `--repo <url>` | `-r` | GitHub repo URL to clone and work on |
+| `--pat <token>` | | GitHub PAT (or set `GITHUB_TOKEN`) |
+| `--session <branch>` | | Resume an existing session branch |
+| `--model <provider:model>` | `-m` | Override model |
+| `--sandbox` | `-s` | Run in sandbox VM |
+| `--prompt <text>` | `-p` | Single-shot prompt (skip REPL) |
+| `--env <name>` | `-e` | Environment config |
+
+### How do I use the SDK?
+
+```typescript
+import { query, tool } from "gitclaw";
+
+// Simple query
+for await (const msg of query({
+  prompt: "Summarize the project",
+  dir: "./my-agent",
+  model: "openai:gpt-4o-mini",
+})) {
+  if (msg.type === "delta") process.stdout.write(msg.content);
+  if (msg.type === "assistant") console.log("\nDone.");
+}
+
+// Define custom tools
+const search = tool("search_docs", "Search documentation",
+  { properties: { query: { type: "string" } }, required: ["query"] },
+  async (args) => { return { text: JSON.stringify(await mySearch(args.query)) }; }
+);
+
+for await (const msg of query({
+  prompt: "Find docs about auth",
+  tools: [search],
+})) { /* agent can call search_docs */ }
+```
+
+### What hooks are available?
+
+Programmatic lifecycle hooks for gating, logging, and control:
+
+```typescript
+for await (const msg of query({
+  prompt: "Deploy the service",
+  hooks: {
+    preToolUse: async (ctx) => {
+      // Block dangerous operations
+      if (ctx.toolName === "cli" && ctx.args.command?.includes("rm -rf"))
+        return { action: "block", reason: "Destructive command blocked" };
+      // Modify arguments
+      if (ctx.toolName === "write")
+        return { action: "modify", args: { ...ctx.args, path: `/safe/${ctx.args.path}` } };
+      return { action: "allow" };
+    },
+    onError: async (ctx) => { console.error(`Agent error: ${ctx.error}`); },
+  },
+})) { /* ... */ }
+```
+
+### What license does Gitclaw use?
+
+Gitclaw uses a custom license — check the repository for details.
+
+### Where can I get help?
+
+- **Documentation** — [GitHub README](https://github.com/open-gitagent/gitagent)
+- **SDK Reference** — README SDK section
+- **Issues** — [GitHub Issues](https://github.com/open-gitagent/gitagent/issues)
+- **NPM Package** — `gitclaw`
+
+---
