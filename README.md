@@ -61,7 +61,7 @@ This will:
 ### Or install manually:
 
 ```bash
-npm install -g gitagent
+npm install -g @open-gitagent/gitagent
 ```
 
 ## Quick Start
@@ -756,7 +756,7 @@ Your agent lives in a git repository with structured files:
 ### Installation & Setup
 
 **What are the requirements?**
-Node.js 18+ (or 20+ recommended), npm, and git. Install globally with `npm install -g gitagent`.
+Node.js 18+ (or 20+ recommended), npm, and git. Install globally with `npm install -g @open-gitagent/gitagent`.
 
 **How do I set up API keys?**
 Run the installer for guided setup:

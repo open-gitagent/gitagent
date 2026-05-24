@@ -60,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/install
 
 **Manual install:**
 ```bash
-npm install -g gitagent
+npm install -g @open-gitagent/gitagent
 mkdir ~/assistant && cd ~/assistant && git init
 gitagent --voice --dir .
 ```

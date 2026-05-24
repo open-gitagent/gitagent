@@ -107,8 +107,8 @@ if [ "$(uname)" != "Darwin" ] && ! npm root -g 2>/dev/null | grep -q "$HOME"; th
 fi
 
 if command -v gitagent &>/dev/null; then
-  INSTALLED_VER="$(npm ls -g gitagent --depth=0 --json 2>/dev/null | node -pe "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).dependencies?.gitagent?.version || ''" 2>/dev/null || echo "")"
-  LATEST_VER="$(npm view gitagent version 2>/dev/null || echo "")"
+  INSTALLED_VER="$(npm ls -g @open-gitagent/gitagent --depth=0 --json 2>/dev/null | node -pe "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).dependencies?.['@open-gitagent/gitagent']?.version || ''" 2>/dev/null || echo "")"
+  LATEST_VER="$(npm view @open-gitagent/gitagent version 2>/dev/null || echo "")"
 
   if [ -n "$INSTALLED_VER" ] && [ -n "$LATEST_VER" ] && [ "$INSTALLED_VER" != "$LATEST_VER" ]; then
     echo -e "  ${YELLOW}⬆${NC}  gitagent ${DIM}v${INSTALLED_VER}${NC} installed — ${GREEN}v${LATEST_VER}${NC} available"
@@ -116,7 +116,7 @@ if command -v gitagent &>/dev/null; then
     UPDATE_CHOICE="${UPDATE_CHOICE:-Y}"
     if [[ "$UPDATE_CHOICE" =~ ^[Yy] ]]; then
       echo -e "  ${BOLD}Updating gitagent...${NC}"
-      $NPM_CMD install -g gitagent@latest 2>&1 | tail -2
+      $NPM_CMD install -g @open-gitagent/gitagent@latest 2>&1 | tail -2
       echo -e "  ${GREEN}✓${NC} gitagent updated to v${LATEST_VER}"
     else
       echo -e "  ${DIM}  keeping v${INSTALLED_VER}${NC}"
@@ -128,10 +128,10 @@ else
   echo -e "  ${BOLD}Installing gitagent...${NC}"
   # Remove corrupted partial installs that cause ENOTDIR
   NPM_GLOBAL_DIR="$(npm root -g 2>/dev/null || echo "")"
-  if [ -n "$NPM_GLOBAL_DIR" ] && [ -d "${NPM_GLOBAL_DIR}/gitagent" ] && [ ! -f "${NPM_GLOBAL_DIR}/gitagent/package.json" ]; then
-    $NPM_CMD rm -rf "${NPM_GLOBAL_DIR}/gitagent" 2>/dev/null
+  if [ -n "$NPM_GLOBAL_DIR" ] && [ -d "${NPM_GLOBAL_DIR}/@open-gitagent/gitagent" ] && [ ! -f "${NPM_GLOBAL_DIR}/@open-gitagent/gitagent/package.json" ]; then
+    $NPM_CMD rm -rf "${NPM_GLOBAL_DIR}/@open-gitagent/gitagent" 2>/dev/null
   fi
-  $NPM_CMD install -g gitagent@latest 2>&1 | tail -2
+  $NPM_CMD install -g @open-gitagent/gitagent@latest 2>&1 | tail -2
   echo -e "  ${GREEN}✓${NC} gitagent installed"
 fi
 echo ""

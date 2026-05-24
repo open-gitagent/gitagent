@@ -1,5 +1,5 @@
 {
-  "name": "gitagent",
+  "name": "@open-gitagent/gitagent",
   "version": "1.5.0",
   "description": "A universal git-native multimodal always learning AI Agent (TinyHuman)",
   "author": "shreyaskapale",
