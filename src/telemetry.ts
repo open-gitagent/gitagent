@@ -1,4 +1,4 @@
-// OpenTelemetry instrumentation for gitclaw.
+// OpenTelemetry instrumentation for gitagent.
 //
 // Design:
 //  - All OTel packages are regular dependencies and always installed.
@@ -52,8 +52,8 @@ export interface TelemetryOptions {
 let _initialized = false;
 let _sdk: any = null;
 
-const TRACER_NAME = "gitclaw";
-const METER_NAME = "gitclaw";
+const TRACER_NAME = "gitagent";
+const METER_NAME = "gitagent";
 
 // Lazily-cached metric handles. Created on first use; rely on a no-op meter
 // when telemetry is disabled.
@@ -101,7 +101,7 @@ export async function initTelemetry(opts: TelemetryOptions): Promise<void> {
 		const { UndiciInstrumentation } = undiciInstrumentationMod;
 
 		const resourceAttrs: Record<string, any> = { ...(opts.resourceAttributes ?? {}) };
-		const serviceName = opts.serviceName ?? process.env.OTEL_SERVICE_NAME ?? "gitclaw";
+		const serviceName = opts.serviceName ?? process.env.OTEL_SERVICE_NAME ?? "gitagent";
 		resourceAttrs[ATTR_SERVICE_NAME ?? "service.name"] = serviceName;
 		const serviceVersion = opts.serviceVersion ?? process.env.OTEL_SERVICE_VERSION;
 		if (serviceVersion) resourceAttrs[ATTR_SERVICE_VERSION ?? "service.version"] = serviceVersion;
@@ -221,13 +221,13 @@ function lazyHistogram(
 }
 
 function getToolCallCounter(): Counter {
-	return lazyCounter(_slots.toolCalls, "gitclaw.tool.calls", "Number of tool executions");
+	return lazyCounter(_slots.toolCalls, "gitagent.tool.calls", "Number of tool executions");
 }
 
 function getToolDurationHistogram(): Histogram {
 	return lazyHistogram(
 		_slots.toolDuration,
-		"gitclaw.tool.duration_ms",
+		"gitagent.tool.duration_ms",
 		"Tool execution duration in milliseconds",
 		"ms",
 	);
@@ -236,7 +236,7 @@ function getToolDurationHistogram(): Histogram {
 function getSessionDurationHistogram(): Histogram {
 	return lazyHistogram(
 		_slots.sessionDuration,
-		"gitclaw.session.duration_ms",
+		"gitagent.session.duration_ms",
 		"Agent session duration in milliseconds",
 		"ms",
 	);
@@ -245,7 +245,7 @@ function getSessionDurationHistogram(): Histogram {
 function getSessionCostCounter(): Counter {
 	return lazyCounter(
 		_slots.sessionCost,
-		"gitclaw.session.cost_usd",
+		"gitagent.session.cost_usd",
 		"Cumulative agent session cost in USD",
 	);
 }
@@ -276,7 +276,7 @@ export interface SessionHandle {
 }
 
 export function startSessionSpan(
-	name = "gitclaw.agent.session",
+	name = "gitagent.agent.session",
 	attrs: Record<string, any> = {},
 ): SessionHandle {
 	const startedAt = Date.now();
@@ -307,20 +307,20 @@ export function startSessionSpan(
 			const durationMs = Date.now() - startedAt;
 			try {
 				if (extraAttrs) span.setAttributes(extraAttrs);
-				span.setAttribute("gitclaw.session.duration_ms", durationMs);
+				span.setAttribute("gitagent.session.duration_ms", durationMs);
 				span.end();
 			} catch {
 				/* ignore */
 			}
 			try {
 				getSessionDurationHistogram().record(durationMs, {
-					"gitclaw.entry": String(attrs["gitclaw.entry"] ?? "unknown"),
+					"gitagent.entry": String(attrs["gitagent.entry"] ?? "unknown"),
 				});
-				const cost = Number(extraAttrs?.["gitclaw.cost_usd"] ?? 0);
+				const cost = Number(extraAttrs?.["gitagent.cost_usd"] ?? 0);
 				if (Number.isFinite(cost) && cost > 0) {
 					getSessionCostCounter().add(cost, {
-						"gitclaw.entry": String(
-							attrs["gitclaw.entry"] ?? "unknown",
+						"gitagent.entry": String(
+							attrs["gitagent.entry"] ?? "unknown",
 						),
 					});
 				}
@@ -347,7 +347,7 @@ export function wrapToolWithOtel<T extends AgentTool<any>>(tool: T): T {
 			`call_${Math.random().toString(36).slice(2, 10)}`;
 
 		return await tracer.startActiveSpan(
-			"gitclaw.tool.execute",
+			"gitagent.tool.execute",
 			{
 				kind: SpanKind.INTERNAL,
 				attributes: {
@@ -443,7 +443,7 @@ export function recordGenAiCall(
 				"gen_ai.response.finish_reasons": [String(finishReason)],
 				"gen_ai.usage.input_tokens": inputTokens,
 				"gen_ai.usage.output_tokens": outputTokens,
-				"gitclaw.cost_usd": Number.isFinite(cost) ? cost : 0,
+				"gitagent.cost_usd": Number.isFinite(cost) ? cost : 0,
 			},
 		});
 

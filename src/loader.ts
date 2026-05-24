@@ -80,7 +80,7 @@ function parseModelString(modelStr: string): { provider: string; modelId: string
 
 /**
  * Create a custom Model for any OpenAI-compatible endpoint.
- * Used when model string contains @baseUrl or GITCLAW_MODEL_BASE_URL is set.
+ * Used when model string contains @baseUrl or GITAGENT_MODEL_BASE_URL is set.
  */
 function createCustomModel(provider: string, modelId: string, baseUrl: string): Model<any> {
 	return {
@@ -334,7 +334,7 @@ export async function loadAgent(
 
 	// Workspace directory — all generated files go here
 	const cloudMode =
-		process.env.GITCLAW_CLOUD === "true" ||
+		process.env.GITAGENT_CLOUD === "true" ||
 		!!process.env.KUBERNETES_SERVICE_HOST ||
 		!!process.env.RENDER ||
 		!!process.env.FLY_APP_NAME;
@@ -388,7 +388,7 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 	}
 
 	const { provider, modelId } = parseModelString(modelStr);
-	const envBaseUrl = process.env.GITCLAW_MODEL_BASE_URL;
+	const envBaseUrl = process.env.GITAGENT_MODEL_BASE_URL;
 
 	let model: Model<any>;
 	if (modelId.includes("@")) {

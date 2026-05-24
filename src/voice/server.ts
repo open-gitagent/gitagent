@@ -95,8 +95,8 @@ function installConsoleIntercept() {
 installConsoleIntercept();
 
 // Global error handlers — capture everything that would otherwise be lost
-if (!(process as any).__gitclawLogHandlersInstalled) {
-	(process as any).__gitclawLogHandlersInstalled = true;
+if (!(process as any).__gitagentLogHandlersInstalled) {
+	(process as any).__gitagentLogHandlersInstalled = true;
 	process.on("uncaughtException", (err: Error) => {
 		console.error(`[system] UNCAUGHT EXCEPTION: ${err.message}\n${err.stack}`);
 	});
@@ -188,12 +188,12 @@ export function fileTypeFor(pathOrName: string): FileTypeInfo {
 }
 
 const MAX_FILE_BYTES = (() => {
-	const v = parseInt(process.env.GITCLAW_MAX_FILE_BYTES || "", 10);
+	const v = parseInt(process.env.GITAGENT_MAX_FILE_BYTES || "", 10);
 	return Number.isFinite(v) && v > 0 ? v : 200 * 1024 * 1024;
 })();
 
 export const CLOUD_MODE =
-	process.env.GITCLAW_CLOUD === "true" ||
+	process.env.GITAGENT_CLOUD === "true" ||
 	!!process.env.KUBERNETES_SERVICE_HOST ||
 	!!process.env.RENDER ||
 	!!process.env.FLY_APP_NAME;
@@ -637,7 +637,7 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	loadEnvFile(resolve(opts.agentDir));
 
 	const port = opts.port || 3333;
-	let agentName = "GitClaw";
+	let agentName = "GitAgent";
 	try {
 		const yamlRaw = readFileSync(join(resolve(opts.agentDir), "agent.yaml"), "utf-8");
 		const m = yamlRaw.match(/^name:\s*(.+)$/m);
@@ -1561,7 +1561,7 @@ ${runningContext}`;
 		const sock = makeWASocket({
 			auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys) },
 			version,
-			browser: ["GitClaw", "cli", "0.3.1"],
+			browser: ["GitAgent", "cli", "0.3.1"],
 			printQRInTerminal: false,
 			syncFullHistory: false,
 			markOnlineOnConnect: false,
@@ -1724,7 +1724,7 @@ ${runningContext}`;
 						for (let i = 0; i < reply.length; i += 4000) chunks.push(reply.slice(i, i + 4000));
 						for (const chunk of chunks) {
 							const italicChunk = chunk.split("\n").map(line => line ? `_${line}_` : "").join("\n");
-						const sent = await sock.sendMessage(replyJid, { text: `*GitClaw:*\n${italicChunk}` });
+						const sent = await sock.sendMessage(replyJid, { text: `*GitAgent:*\n${italicChunk}` });
 							if (sent?.key?.id) whatsappSentIds.add(sent.key.id);
 						}
 					}
@@ -1753,7 +1753,7 @@ ${runningContext}`;
 				} catch (err: any) {
 					console.error(dim(`[whatsapp] Agent error: ${err.message}`));
 					try {
-						const sent = await sock.sendMessage(replyJid, { text: "*GitClaw:* _Sorry, I encountered an error processing your message._" });
+						const sent = await sock.sendMessage(replyJid, { text: "*GitAgent:* _Sorry, I encountered an error processing your message._" });
 						if (sent?.key?.id) whatsappSentIds.add(sent.key.id);
 					} catch { /* ignore */ }
 				}
@@ -1858,17 +1858,17 @@ ${runningContext}`;
 	}
 
 	// ── Password protection ──────────────────────────────────────────
-	// Auth gates the UI when GITCLAW_PASSWORD is set. GITCLAW_USERNAME is
+	// Auth gates the UI when GITAGENT_PASSWORD is set. GITAGENT_USERNAME is
 	// optional and defaults to "admin" when a password is configured.
-	const serverPassword = process.env.GITCLAW_PASSWORD || "";
-	const serverUsername = process.env.GITCLAW_USERNAME || (serverPassword ? "admin" : "");
-	const authCookieName = "gitclaw_auth";
+	const serverPassword = process.env.GITAGENT_PASSWORD || "";
+	const serverUsername = process.env.GITAGENT_USERNAME || (serverPassword ? "admin" : "");
+	const authCookieName = "gitagent_auth";
 
 	function generateAuthToken(): string {
 		// Hash username + password + salt so changing either invalidates existing cookies.
 		const { createHash } = require("crypto") as typeof import("crypto");
 		return createHash("sha256")
-			.update(`${serverUsername}:${serverPassword}:_gitclaw_session`)
+			.update(`${serverUsername}:${serverPassword}:_gitagent_session`)
 			.digest("hex")
 			.slice(0, 32);
 	}
@@ -1890,7 +1890,7 @@ ${runningContext}`;
 
 	const loginPageHtml = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>GitClaw — Login</title>
+<title>GitAgent — Login</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0d1117;color:#e6edf3;font-family:'Inter',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}
@@ -1904,7 +1904,7 @@ body{background:#0d1117;color:#e6edf3;font-family:'Inter',system-ui,sans-serif;d
 .login .error{color:#f85149;font-size:12px;margin-bottom:12px;display:none}
 </style></head><body>
 <div class="login">
-<h1>GitClaw</h1>
+<h1>GitAgent</h1>
 <p>Sign in to continue</p>
 <div class="error" id="err">Incorrect username or password</div>
 <form onsubmit="return doLogin()">
@@ -2005,7 +2005,7 @@ return false;
 			for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "COMPOSIO_API_KEY"]) {
 				keys[k] = !!process.env[k];
 			}
-			const baseUrl = process.env.GITCLAW_MODEL_BASE_URL || "";
+			const baseUrl = process.env.GITAGENT_MODEL_BASE_URL || "";
 			jsonReply(res, 200, { model, keys, baseUrl });
 
 		} else if (url.pathname === "/api/settings" && req.method === "PUT") {
@@ -2047,7 +2047,7 @@ return false;
 
 				// Update base URL in .env
 				if (body.baseUrl !== undefined) {
-					const baseUrlKey = "GITCLAW_MODEL_BASE_URL";
+					const baseUrlKey = "GITAGENT_MODEL_BASE_URL";
 					if (body.baseUrl) {
 						process.env[baseUrlKey] = body.baseUrl;
 						const regex = new RegExp(`^${baseUrlKey}=.*$`, "m");
@@ -2058,7 +2058,7 @@ return false;
 						}
 					} else {
 						delete process.env[baseUrlKey];
-						envContent = envContent.replace(/^GITCLAW_MODEL_BASE_URL=.*\n?/m, "");
+						envContent = envContent.replace(/^GITAGENT_MODEL_BASE_URL=.*\n?/m, "");
 					}
 					writeFileSync(envPath, envContent, "utf-8");
 				}
@@ -2846,7 +2846,7 @@ return false;
         btn.disabled = true;
         btn.style.cssText = 'background:#1a7f37;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:default;font-size:14px;font-weight:600;margin:4px;opacity:0.85;';
       } else {
-        btn.textContent = 'Install on GitClaw';
+        btn.textContent = 'Install on GitAgent';
         btn.style.cssText = 'background:#238636;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;margin:4px;';
         btn.onmouseenter = function(){ btn.style.background='#2ea043'; };
         btn.onmouseleave = function(){ btn.style.background='#238636'; };
@@ -3226,7 +3226,7 @@ a{color:#58a6ff;}</style></head>
 	console.log(dim(`[voice] Model: ${opts.model || "(default)"}`));
 	console.log(dim(`[voice] Composio: ${composioAdapter ? "enabled" : "disabled"}`));
 	console.log(dim(`[voice] Telegram: ${telegramToken ? "configured" : "not configured"}`));
-	console.log(dim(`[voice] Auth: ${serverPassword ? `protected (user "${serverUsername}")` : "open — set GITCLAW_PASSWORD (and optionally GITCLAW_USERNAME) to require login"}`));
+	console.log(dim(`[voice] Auth: ${serverPassword ? `protected (user "${serverUsername}")` : "open — set GITAGENT_PASSWORD (and optionally GITAGENT_USERNAME) to require login"}`));
 	console.log(dim(`[voice] Open http://localhost:${port} in your browser`));
 
 	// Start the cron scheduler

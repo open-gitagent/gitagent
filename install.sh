@@ -45,7 +45,7 @@ rows=(
 text=(
   ""
   ""
-  "${RED}${BOLD}GitClaw v1.1.1${RESET}"
+  "${RED}${BOLD}GitAgent v1.1.1${RESET}"
   "${GRAY}A universal git-native multimodal always learning AI Agent${RESET}"
   "${GRAY}(TinyHuman)${RESET}"
   ""
@@ -99,40 +99,40 @@ fi
 echo -e "  ${GREEN}✓${NC} node $(node -v)  ${GREEN}✓${NC} npm $(npm -v)  ${GREEN}✓${NC} git $(git --version | cut -d' ' -f3)"
 echo ""
 
-# ── Install / update gitclaw globally ────────────────────────────
+# ── Install / update gitagent globally ────────────────────────────
 # Use sudo on Linux if needed (npm global installs require root on most Linux distros)
 NPM_CMD="npm"
 if [ "$(uname)" != "Darwin" ] && ! npm root -g 2>/dev/null | grep -q "$HOME"; then
   NPM_CMD="sudo npm"
 fi
 
-if command -v gitclaw &>/dev/null; then
-  INSTALLED_VER="$(npm ls -g gitclaw --depth=0 --json 2>/dev/null | node -pe "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).dependencies?.gitclaw?.version || ''" 2>/dev/null || echo "")"
-  LATEST_VER="$(npm view gitclaw version 2>/dev/null || echo "")"
+if command -v gitagent &>/dev/null; then
+  INSTALLED_VER="$(npm ls -g gitagent --depth=0 --json 2>/dev/null | node -pe "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).dependencies?.gitagent?.version || ''" 2>/dev/null || echo "")"
+  LATEST_VER="$(npm view gitagent version 2>/dev/null || echo "")"
 
   if [ -n "$INSTALLED_VER" ] && [ -n "$LATEST_VER" ] && [ "$INSTALLED_VER" != "$LATEST_VER" ]; then
-    echo -e "  ${YELLOW}⬆${NC}  gitclaw ${DIM}v${INSTALLED_VER}${NC} installed — ${GREEN}v${LATEST_VER}${NC} available"
+    echo -e "  ${YELLOW}⬆${NC}  gitagent ${DIM}v${INSTALLED_VER}${NC} installed — ${GREEN}v${LATEST_VER}${NC} available"
     read -rp "  Update to v${LATEST_VER}? [Y/n]: " UPDATE_CHOICE
     UPDATE_CHOICE="${UPDATE_CHOICE:-Y}"
     if [[ "$UPDATE_CHOICE" =~ ^[Yy] ]]; then
-      echo -e "  ${BOLD}Updating gitclaw...${NC}"
-      $NPM_CMD install -g gitclaw@latest 2>&1 | tail -2
-      echo -e "  ${GREEN}✓${NC} gitclaw updated to v${LATEST_VER}"
+      echo -e "  ${BOLD}Updating gitagent...${NC}"
+      $NPM_CMD install -g gitagent@latest 2>&1 | tail -2
+      echo -e "  ${GREEN}✓${NC} gitagent updated to v${LATEST_VER}"
     else
       echo -e "  ${DIM}  keeping v${INSTALLED_VER}${NC}"
     fi
   else
-    echo -e "  ${GREEN}✓${NC} gitclaw v${INSTALLED_VER:-latest} ${DIM}(up to date)${NC}"
+    echo -e "  ${GREEN}✓${NC} gitagent v${INSTALLED_VER:-latest} ${DIM}(up to date)${NC}"
   fi
 else
-  echo -e "  ${BOLD}Installing gitclaw...${NC}"
+  echo -e "  ${BOLD}Installing gitagent...${NC}"
   # Remove corrupted partial installs that cause ENOTDIR
   NPM_GLOBAL_DIR="$(npm root -g 2>/dev/null || echo "")"
-  if [ -n "$NPM_GLOBAL_DIR" ] && [ -d "${NPM_GLOBAL_DIR}/gitclaw" ] && [ ! -f "${NPM_GLOBAL_DIR}/gitclaw/package.json" ]; then
-    $NPM_CMD rm -rf "${NPM_GLOBAL_DIR}/gitclaw" 2>/dev/null
+  if [ -n "$NPM_GLOBAL_DIR" ] && [ -d "${NPM_GLOBAL_DIR}/gitagent" ] && [ ! -f "${NPM_GLOBAL_DIR}/gitagent/package.json" ]; then
+    $NPM_CMD rm -rf "${NPM_GLOBAL_DIR}/gitagent" 2>/dev/null
   fi
-  $NPM_CMD install -g gitclaw@latest 2>&1 | tail -2
-  echo -e "  ${GREEN}✓${NC} gitclaw installed"
+  $NPM_CMD install -g gitagent@latest 2>&1 | tail -2
+  echo -e "  ${GREEN}✓${NC} gitagent installed"
 fi
 echo ""
 
@@ -151,8 +151,8 @@ if [ -d "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/agent.yaml" ]; then
   fi
 
   # Prompt for missing required keys (skip if Lyzr is configured)
-  if [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ]; then
-    echo -e "  ${GREEN}✓${NC} Lyzr agent: ${DIM}${GITCLAW_LYZR_AGENT_ID}${NC}"
+  if [ -n "${GITAGENT_LYZR_AGENT_ID:-}" ]; then
+    echo -e "  ${GREEN}✓${NC} Lyzr agent: ${DIM}${GITAGENT_LYZR_AGENT_ID}${NC}"
   else
     if [ -z "${OPENAI_API_KEY:-}" ] && [ -z "${GEMINI_API_KEY:-}" ]; then
       echo ""
@@ -186,14 +186,14 @@ if [ -d "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/agent.yaml" ]; then
   fi
 
   # Set model — use Lyzr if configured, otherwise let loadAgent() read from agent.yaml
-  if [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ]; then
-    MODEL="lyzr:${GITCLAW_LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4"
+  if [ -n "${GITAGENT_LYZR_AGENT_ID:-}" ]; then
+    MODEL="lyzr:${GITAGENT_LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4"
   else
     MODEL=""
   fi
 
   # Determine adapter from available keys
-  if [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+  if [ -n "${GITAGENT_LYZR_AGENT_ID:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
     ADAPTER_LABEL="Text Only (Lyzr)"
   elif [ -n "${GEMINI_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
     ADAPTER_LABEL="Gemini Live"
@@ -247,7 +247,7 @@ if [ "$SETUP_MODE" = "1" ]; then
   echo -e "  ${GREEN}✓${NC} LYZR_API_KEY saved"
 
   # Check if agent already exists
-  if [ -z "${GITCLAW_LYZR_AGENT_ID:-}" ]; then
+  if [ -z "${GITAGENT_LYZR_AGENT_ID:-}" ]; then
     echo ""
     echo -e "  ${DIM}Creating Lyzr agent...${NC}"
     LYZR_RESPONSE=$(curl -s -X POST 'https://agent-prod.studio.lyzr.ai/v3/agents/' \
@@ -255,8 +255,8 @@ if [ "$SETUP_MODE" = "1" ]; then
       -H 'content-type: application/json' \
       -H "x-api-key: ${LYZR_API_KEY}" \
       --data-raw '{
-        "name": "GitClaw Assistant",
-        "description": "GitClaw AI agent powered by Lyzr",
+        "name": "GitAgent Assistant",
+        "description": "GitAgent AI agent powered by Lyzr",
         "agent_role": "",
         "agent_goal": "",
         "agent_instructions": "",
@@ -293,10 +293,10 @@ if [ "$SETUP_MODE" = "1" ]; then
       exit 1
     fi
 
-    export GITCLAW_LYZR_AGENT_ID="$LYZR_AGENT_ID"
+    export GITAGENT_LYZR_AGENT_ID="$LYZR_AGENT_ID"
     echo -e "  ${GREEN}✓${NC} Agent created: ${DIM}${LYZR_AGENT_ID}${NC}"
   else
-    echo -e "  ${GREEN}✓${NC} Using existing agent: ${DIM}${GITCLAW_LYZR_AGENT_ID}${NC}"
+    echo -e "  ${GREEN}✓${NC} Using existing agent: ${DIM}${GITAGENT_LYZR_AGENT_ID}${NC}"
   fi
 
   # OpenAI key for voice (optional)
@@ -314,8 +314,8 @@ if [ "$SETUP_MODE" = "1" ]; then
   fi
 
   # Set model to use Lyzr completions endpoint with agent ID as model
-  MODEL="lyzr:${GITCLAW_LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4"
-  export GITCLAW_MODEL_BASE_URL="https://agent-prod.studio.lyzr.ai/v4"
+  MODEL="lyzr:${GITAGENT_LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4"
+  export GITAGENT_MODEL_BASE_URL="https://agent-prod.studio.lyzr.ai/v4"
   ADAPTER_LABEL="${VOICE_ENABLED:+OpenAI Realtime}${VOICE_ENABLED:-Text Only}"
   if [ "$VOICE_ENABLED" = true ]; then
     ADAPTER_LABEL="OpenAI Realtime"
@@ -492,7 +492,7 @@ else
 
   # ── Project directory ────────────────────────────────────────
   echo -e "  ${BOLD}Project Directory${NC}"
-  echo -e "  ${DIM}Where gitclaw will live — reads/writes files, runs commands.${NC}"
+  echo -e "  ${DIM}Where gitagent will live — reads/writes files, runs commands.${NC}"
   read -rp "  Path [.]: " PROJECT_DIR
   PROJECT_DIR="${PROJECT_DIR:-.}"
   PROJECT_DIR="$(cd "$PROJECT_DIR" 2>/dev/null && pwd || echo "$PROJECT_DIR")"
@@ -550,8 +550,8 @@ echo -e "    ${LGRAY}Voice${NC}      ${WHITE}${ADAPTER_LABEL}${NC}"
 echo -e "    ${LGRAY}Model${NC}      ${WHITE}${MODEL}${NC}"
 echo -e "    ${LGRAY}Directory${NC}  ${WHITE}${PROJECT_DIR}${NC}"
 echo -e "    ${LGRAY}Port${NC}       ${WHITE}${PORT}${NC}"
-if [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ]; then
-  echo -e "    ${LGRAY}Lyzr${NC}       ${GREEN}enabled${NC} ${DIM}(agent: ${GITCLAW_LYZR_AGENT_ID})${NC}"
+if [ -n "${GITAGENT_LYZR_AGENT_ID:-}" ]; then
+  echo -e "    ${LGRAY}Lyzr${NC}       ${GREEN}enabled${NC} ${DIM}(agent: ${GITAGENT_LYZR_AGENT_ID})${NC}"
 fi
 if [ -n "${COMPOSIO_API_KEY:-}" ]; then
   echo -e "    ${LGRAY}Composio${NC}   ${GREEN}enabled${NC}"
@@ -562,7 +562,7 @@ fi
 echo ""
 echo -e "  ${DIM}────────────────────────────────────────────────────${NC}"
 echo ""
-echo -e "  ${BOLD}Starting gitclaw...${NC}"
+echo -e "  ${BOLD}Starting gitagent...${NC}"
 echo -e "  ${DIM}Opening ${CYAN}http://localhost:${PORT}${DIM} in your browser${NC}"
 echo ""
 
@@ -575,8 +575,8 @@ ENV_FILE="${PROJECT_DIR}/.env"
   [ -n "${COMPOSIO_API_KEY:-}" ] && echo "COMPOSIO_API_KEY=${COMPOSIO_API_KEY}"
   [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && echo "TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}"
   [ -n "${LYZR_API_KEY:-}" ] && echo "LYZR_API_KEY=${LYZR_API_KEY}"
-  [ -n "${GITCLAW_LYZR_AGENT_ID:-}" ] && echo "GITCLAW_LYZR_AGENT_ID=${GITCLAW_LYZR_AGENT_ID}"
-  [ -n "${GITCLAW_MODEL_BASE_URL:-}" ] && echo "GITCLAW_MODEL_BASE_URL=${GITCLAW_MODEL_BASE_URL}"
+  [ -n "${GITAGENT_LYZR_AGENT_ID:-}" ] && echo "GITAGENT_LYZR_AGENT_ID=${GITAGENT_LYZR_AGENT_ID}"
+  [ -n "${GITAGENT_MODEL_BASE_URL:-}" ] && echo "GITAGENT_MODEL_BASE_URL=${GITAGENT_MODEL_BASE_URL}"
 } > "$ENV_FILE"
 echo -e "  ${GREEN}✓${NC} Keys saved to ${DIM}${ENV_FILE}${NC} ${DIM}(gitignored)${NC}"
 echo ""
@@ -602,7 +602,7 @@ echo ""
 (sleep 2 && open_browser) &
 
 if [ -n "$MODEL" ]; then
-  exec gitclaw --model "$MODEL" --voice --dir "$PROJECT_DIR"
+  exec gitagent --model "$MODEL" --voice --dir "$PROJECT_DIR"
 else
-  exec gitclaw --voice --dir "$PROJECT_DIR"
+  exec gitagent --voice --dir "$PROJECT_DIR"
 fi

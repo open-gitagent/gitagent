@@ -1,4 +1,4 @@
-# Gitclaw Memory
+# Gitagent Memory
 
 ## Recent Tasks
 

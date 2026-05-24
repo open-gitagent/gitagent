@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="./gitclaw-logo.png" alt="GitClaw Logo" width="200" />
+  <img src="./gitagent-logo.png" alt="GitAgent Logo" width="200" />
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/npm/v/gitclaw?style=flat-square&color=blue" alt="npm version" />
+  <img src="https://img.shields.io/npm/v/gitagent?style=flat-square&color=blue" alt="npm version" />
   <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen?style=flat-square" alt="node version" />
-  <img src="https://img.shields.io/github/license/open-gitagent/gitclaw?style=flat-square" alt="license" />
+  <img src="https://img.shields.io/github/license/open-gitagent/gitagent?style=flat-square" alt="license" />
   <img src="https://img.shields.io/badge/TypeScript-5.7-blue?style=flat-square&logo=typescript&logoColor=white" alt="typescript" />
 </p>
 
-<h1 align="center">Gitclaw</h1>
+<h1 align="center">Gitagent</h1>
 
 <p align="center">
   <strong>A universal git-native multimodal always learning AI Agent (TinyHuman)</strong><br/>
@@ -29,9 +29,9 @@
 
 ---
 
-## Why Gitclaw?
+## Why Gitagent?
 
-Most agent frameworks treat configuration as code scattered across your application. Gitclaw flips this — **your agent IS a git repository**:
+Most agent frameworks treat configuration as code scattered across your application. Gitagent flips this — **your agent IS a git repository**:
 
 - **`agent.yaml`** — model, tools, runtime config
 - **`SOUL.md`** — personality and identity
@@ -48,11 +48,11 @@ Fork an agent. Branch a personality. `git log` your agent's memory. Diff its rul
 Copy, paste, run. That's it — no cloning, no manual setup. The installer handles everything:
 
 ```bash
-bash <(curl -fsSL "https://raw.githubusercontent.com/open-gitagent/gitclaw/main/install.sh?$(date +%s)")
+bash <(curl -fsSL "https://raw.githubusercontent.com/open-gitagent/gitagent/main/install.sh?$(date +%s)")
 ```
 
 This will:
-- Install gitclaw globally via npm
+- Install gitagent globally via npm
 - Walk you through API key setup (Quick or Advanced mode)
 - Launch the voice UI in your browser at `http://localhost:3333`
 
@@ -61,7 +61,7 @@ This will:
 ### Or install manually:
 
 ```bash
-npm install -g gitclaw
+npm install -g gitagent
 ```
 
 ## Quick Start
@@ -70,30 +70,30 @@ npm install -g gitclaw
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-gitclaw --dir ~/my-project "Explain this project and suggest improvements"
+gitagent --dir ~/my-project "Explain this project and suggest improvements"
 ```
 
-That's it. Gitclaw auto-scaffolds everything on first run — `agent.yaml`, `SOUL.md`, `memory/` — and drops you into the agent.
+That's it. Gitagent auto-scaffolds everything on first run — `agent.yaml`, `SOUL.md`, `memory/` — and drops you into the agent.
 
 ### Local Repo Mode
 
 Clone a GitHub repo, run an agent on it, auto-commit and push to a session branch:
 
 ```bash
-gitclaw --repo https://github.com/org/repo --pat ghp_xxx "Fix the login bug"
+gitagent --repo https://github.com/org/repo --pat ghp_xxx "Fix the login bug"
 ```
 
 Resume an existing session:
 
 ```bash
-gitclaw --repo https://github.com/org/repo --pat ghp_xxx --session gitclaw/session-a1b2c3d4 "Continue"
+gitagent --repo https://github.com/org/repo --pat ghp_xxx --session gitagent/session-a1b2c3d4 "Continue"
 ```
 
 Token can come from env instead of `--pat`:
 
 ```bash
 export GITHUB_TOKEN=ghp_xxx
-gitclaw --repo https://github.com/org/repo "Add unit tests"
+gitagent --repo https://github.com/org/repo "Add unit tests"
 ```
 
 ### CLI Options
@@ -112,11 +112,11 @@ gitclaw --repo https://github.com/org/repo "Add unit tests"
 ### SDK
 
 ```bash
-npm install gitclaw
+npm install gitagent
 ```
 
 ```typescript
-import { query } from "gitclaw";
+import { query } from "gitagent";
 
 // Simple query
 for await (const msg of query({
@@ -143,14 +143,14 @@ for await (const msg of query({
 
 ## SDK
 
-The SDK provides a programmatic interface to Gitclaw agents. It mirrors the [Claude Agent SDK](https://github.com/anthropics/claude-code-sdk) pattern but runs **in-process** — no subprocesses, no IPC.
+The SDK provides a programmatic interface to Gitagent agents. It mirrors the [Claude Agent SDK](https://github.com/anthropics/claude-code-sdk) pattern but runs **in-process** — no subprocesses, no IPC.
 
 ### `query(options): Query`
 
 Returns an `AsyncGenerator<GCMessage>` that streams agent events.
 
 ```typescript
-import { query } from "gitclaw";
+import { query } from "gitagent";
 
 for await (const msg of query({
   prompt: "Refactor the auth module",
@@ -182,7 +182,7 @@ for await (const msg of query({
 Define custom tools the agent can call:
 
 ```typescript
-import { query, tool } from "gitclaw";
+import { query, tool } from "gitagent";
 
 const search = tool(
   "search_docs",
@@ -431,26 +431,26 @@ Plugins are reusable extensions that can provide tools, hooks, skills, prompts, 
 
 ```bash
 # Install from git URL
-gitclaw plugin install https://github.com/org/my-plugin.git
+gitagent plugin install https://github.com/org/my-plugin.git
 
 # Install from local path
-gitclaw plugin install ./path/to/plugin
+gitagent plugin install ./path/to/plugin
 
 # Install with options
-gitclaw plugin install <source> --name custom-name --force --no-enable
+gitagent plugin install <source> --name custom-name --force --no-enable
 
 # List all discovered plugins
-gitclaw plugin list
+gitagent plugin list
 
 # Enable / disable
-gitclaw plugin enable my-plugin
-gitclaw plugin disable my-plugin
+gitagent plugin enable my-plugin
+gitagent plugin disable my-plugin
 
 # Remove
-gitclaw plugin remove my-plugin
+gitagent plugin remove my-plugin
 
 # Scaffold a new plugin
-gitclaw plugin init my-plugin
+gitagent plugin init my-plugin
 ```
 
 | Flag | Description |
@@ -468,7 +468,7 @@ version: 0.1.0
 description: What this plugin does
 author: Your Name
 license: MIT
-engine: ">=0.3.0"               # Min gitclaw version
+engine: ">=0.3.0"               # Min gitagent version
 
 provides:
   tools: true                    # Load tools from tools/*.yaml
@@ -513,7 +513,7 @@ Config resolution priority: `agent.yaml config` > `env var` > `manifest default`
 Plugins are discovered in this order (first match wins):
 
 1. **Local** — `<agent-dir>/plugins/<name>/`
-2. **Global** — `~/.gitclaw/plugins/<name>/`
+2. **Global** — `~/.gitagent/plugins/<name>/`
 3. **Installed** — `<agent-dir>/.gitagent/plugins/<name>/`
 
 ### Programmatic Plugins
@@ -522,9 +522,9 @@ Plugins with an `entry` field in their manifest get a full API:
 
 ```typescript
 // index.ts
-import type { GitclawPluginApi } from "gitclaw";
+import type { GitagentPluginApi } from "gitagent";
 
-export async function register(api: GitclawPluginApi) {
+export async function register(api: GitagentPluginApi) {
   // Register a tool
   api.registerTool({
     name: "search_docs",
@@ -585,7 +585,7 @@ my-plugin/
 
 ## Multi-Model Support
 
-Gitclaw works with any LLM provider supported by [pi-ai](https://github.com/badlogic/pi-mono/tree/main/packages/ai):
+Gitagent works with any LLM provider supported by [pi-ai](https://github.com/badlogic/pi-mono/tree/main/packages/ai):
 
 ```yaml
 # agent.yaml
@@ -638,33 +638,33 @@ Audit logs are written to `.gitagent/audit.jsonl` with full tool invocation trac
 
 ## Telemetry
 
-Gitclaw ships with built-in OpenTelemetry instrumentation. Set `OTEL_EXPORTER_OTLP_ENDPOINT` and telemetry is on; leave it unset and runtime cost is zero.
+Gitagent ships with built-in OpenTelemetry instrumentation. Set `OTEL_EXPORTER_OTLP_ENDPOINT` and telemetry is on; leave it unset and runtime cost is zero.
 
 Three layers of signals:
 
 1. **HTTP-level** — `@opentelemetry/instrumentation-undici` auto-patches `fetch`/`undici`, so every LLM provider call (Anthropic, OpenAI, Google, …) gets a client span with URL, status code, and timing.
-2. **`gen_ai.chat` spans** — emitted on every assistant `message_end`. Carry `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, and `gitclaw.cost_usd`. Span/metric content never contains the prompt or completion text.
-3. **`gitclaw.tool.execute` spans** — wrap every tool call with `tool.name`, `tool.call_id`, `tool.status` (`ok`/`error`), and `tool.error_message` on failure.
+2. **`gen_ai.chat` spans** — emitted on every assistant `message_end`. Carry `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, and `gitagent.cost_usd`. Span/metric content never contains the prompt or completion text.
+3. **`gitagent.tool.execute` spans** — wrap every tool call with `tool.name`, `tool.call_id`, `tool.status` (`ok`/`error`), and `tool.error_message` on failure.
 
-A root `gitclaw.agent.session` span opens at agent construction and closes on every exit path (success, hook-block, SIGINT, error).
+A root `gitagent.agent.session` span opens at agent construction and closes on every exit path (success, hook-block, SIGINT, error).
 
 ### CLI usage
 
 Just set the endpoint — no `--import` flag, no extra install steps:
 
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 gitclaw -p "your prompt"
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 gitagent -p "your prompt"
 ```
 
-Telemetry is enabled automatically when the endpoint is set and disabled when it is not. To force-disable even when the endpoint is set, pass `GITCLAW_OTEL_ENABLED=false`.
+Telemetry is enabled automatically when the endpoint is set and disabled when it is not. To force-disable even when the endpoint is set, pass `GITAGENT_OTEL_ENABLED=false`.
 
 ### Environment variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP collector base URL (e.g. `http://localhost:4318`). When set, telemetry is auto-enabled. | (unset → telemetry off) |
-| `GITCLAW_OTEL_ENABLED` | Set to `false` to disable telemetry even when the endpoint is set | (unset = auto) |
-| `OTEL_SERVICE_NAME` | Resource `service.name` | `gitclaw` |
+| `GITAGENT_OTEL_ENABLED` | Set to `false` to disable telemetry even when the endpoint is set | (unset = auto) |
+| `OTEL_SERVICE_NAME` | Resource `service.name` | `gitagent` |
 | `OTEL_SERVICE_VERSION` | Resource `service.version` | (unset) |
 | `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated key=value pairs, no quotes (e.g. `Authorization=Bearer xyz,x-tenant=abc`) | (unset) |
 | `OTEL_TRACES_EXPORTER` | Set to `console` to print spans to stdout — no collector needed | (unset) |
@@ -674,7 +674,7 @@ Telemetry is enabled automatically when the endpoint is set and disabled when it
 For programmatic embedders, call `initTelemetry` explicitly — you control when initialisation happens:
 
 ```ts
-import { initTelemetry, shutdownTelemetry, query } from "gitclaw";
+import { initTelemetry, shutdownTelemetry, query } from "gitagent";
 
 await initTelemetry({ serviceName: "my-app" });
 
@@ -691,19 +691,19 @@ await shutdownTelemetry();
 
 | Name | Kind | Key attributes |
 |------|------|----------------|
-| `gitclaw.agent.session` | INTERNAL | `gitclaw.entry` (`sdk` / `cli`), `gitclaw.cost_usd`, `gitclaw.session.duration_ms` |
-| `gitclaw.tool.execute` | INTERNAL | `tool.name`, `tool.call_id`, `tool.status`, `tool.error_message` |
-| `gen_ai.chat` | CLIENT | `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `gitclaw.cost_usd` |
+| `gitagent.agent.session` | INTERNAL | `gitagent.entry` (`sdk` / `cli`), `gitagent.cost_usd`, `gitagent.session.duration_ms` |
+| `gitagent.tool.execute` | INTERNAL | `tool.name`, `tool.call_id`, `tool.status`, `tool.error_message` |
+| `gen_ai.chat` | CLIENT | `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `gitagent.cost_usd` |
 | `HTTP …` | CLIENT | URL, status code, duration (auto from `instrumentation-undici`) |
 
 ### Emitted metrics
 
 | Name | Type | Description |
 |------|------|-------------|
-| `gitclaw.tool.calls` | counter | Number of tool executions, labelled by `tool.name` |
-| `gitclaw.tool.duration_ms` | histogram | Tool execution duration |
-| `gitclaw.session.duration_ms` | histogram | Session duration |
-| `gitclaw.session.cost_usd` | counter (USD) | Cumulative session cost |
+| `gitagent.tool.calls` | counter | Number of tool executions, labelled by `tool.name` |
+| `gitagent.tool.duration_ms` | histogram | Tool execution duration |
+| `gitagent.session.duration_ms` | histogram | Session duration |
+| `gitagent.session.cost_usd` | counter (USD) | Cumulative session cost |
 | `gen_ai.client.token.usage` | counter | Token usage by `gen_ai.system`, `gen_ai.request.model`, `gen_ai.token.type` |
 | `gen_ai.client.operation.duration` | histogram | LLM call duration |
 
@@ -712,7 +712,7 @@ await shutdownTelemetry();
 Print spans directly to stdout — useful for local debugging:
 
 ```bash
-OTEL_TRACES_EXPORTER=console gitclaw -p "test"
+OTEL_TRACES_EXPORTER=console gitagent -p "test"
 ```
 
 ### Local Jaeger quickstart
@@ -720,9 +720,9 @@ OTEL_TRACES_EXPORTER=console gitclaw -p "test"
 ```bash
 docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one:latest
 
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 gitclaw -p "test"
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 gitagent -p "test"
 
-# Open http://localhost:16686 → service "gitclaw"
+# Open http://localhost:16686 → service "gitagent"
 ```
 
 ## Contributing

@@ -1,7 +1,7 @@
-# GitClaw Documentation
+# GitAgent Documentation
 
-> **GitClaw** — A universal git-native multimodal always-learning AI Agent
-> Version 1.3.3 | MIT License | [github.com/open-gitagent/gitclaw](https://github.com/open-gitagent/gitclaw)
+> **GitAgent** — A universal git-native multimodal always-learning AI Agent
+> Version 1.3.3 | MIT License | [github.com/open-gitagent/gitagent](https://github.com/open-gitagent/gitagent)
 
 ---
 
@@ -36,10 +36,10 @@
 
 ```bash
 # One-line install & launch
-curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitclaw/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/install.sh | bash
 ```
 
-This installs GitClaw globally via npm, walks you through setup (API keys, voice adapter, model), and launches the web UI at `http://localhost:3333`.
+This installs GitAgent globally via npm, walks you through setup (API keys, voice adapter, model), and launches the web UI at `http://localhost:3333`.
 
 ---
 
@@ -55,14 +55,14 @@ This installs GitClaw globally via npm, walks you through setup (API keys, voice
 
 **Interactive installer (recommended):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitclaw/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/install.sh | bash
 ```
 
 **Manual install:**
 ```bash
-npm install -g gitclaw
+npm install -g gitagent
 mkdir ~/assistant && cd ~/assistant && git init
-gitclaw --voice --dir .
+gitagent --voice --dir .
 ```
 
 ### Setup Modes
@@ -80,10 +80,10 @@ The installer offers four options:
 
 ```bash
 # The installer auto-detects existing installations and offers to update
-curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitclaw/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/install.sh | bash
 
 # Or manually
-npm update -g gitclaw
+npm update -g gitagent
 ```
 
 ---
@@ -94,16 +94,16 @@ npm update -g gitclaw
 
 ```bash
 # Launch voice/web UI
-gitclaw --voice --dir ~/assistant
+gitagent --voice --dir ~/assistant
 
 # Single-shot query (no REPL)
-gitclaw --dir ~/assistant "Build a REST API for user management"
+gitagent --dir ~/assistant "Build a REST API for user management"
 
 # Interactive REPL
-gitclaw --dir ~/assistant
+gitagent --dir ~/assistant
 
 # With specific model
-gitclaw --model anthropic:claude-opus-4-6 --voice --dir ~/assistant
+gitagent --model anthropic:claude-opus-4-6 --voice --dir ~/assistant
 ```
 
 ### Flags
@@ -137,20 +137,20 @@ gitclaw --model anthropic:claude-opus-4-6 --voice --dir ~/assistant
 ### Plugin CLI
 
 ```bash
-gitclaw plugin install https://github.com/user/plugin-repo
-gitclaw plugin install ./local/path --name my-plugin --force
-gitclaw plugin list --dir ~/assistant
-gitclaw plugin enable my-plugin --dir ~/assistant
-gitclaw plugin disable my-plugin --dir ~/assistant
-gitclaw plugin remove my-plugin --dir ~/assistant
-gitclaw plugin init my-plugin --dir ~/assistant
+gitagent plugin install https://github.com/user/plugin-repo
+gitagent plugin install ./local/path --name my-plugin --force
+gitagent plugin list --dir ~/assistant
+gitagent plugin enable my-plugin --dir ~/assistant
+gitagent plugin disable my-plugin --dir ~/assistant
+gitagent plugin remove my-plugin --dir ~/assistant
+gitagent plugin init my-plugin --dir ~/assistant
 ```
 
 ---
 
 ## Agent Configuration
 
-GitClaw agents are configured via `agent.yaml` in the agent directory.
+GitAgent agents are configured via `agent.yaml` in the agent directory.
 
 ### Full Schema
 
@@ -258,7 +258,7 @@ serve:
 
 ### Supported Providers
 
-GitClaw supports any model from the following providers out of the box:
+GitAgent supports any model from the following providers out of the box:
 
 | Provider | Format | API Key Env Var |
 |----------|--------|-----------------|
@@ -281,13 +281,13 @@ Any endpoint that implements the OpenAI Chat Completions API:
 
 **Inline URL:**
 ```bash
-gitclaw --model "ollama:llama3@http://localhost:11434/v1" --voice --dir ~/assistant
+gitagent --model "ollama:llama3@http://localhost:11434/v1" --voice --dir ~/assistant
 ```
 
 **Environment variable:**
 ```bash
-export GITCLAW_MODEL_BASE_URL=http://localhost:11434/v1
-gitclaw --model "ollama:llama3" --voice --dir ~/assistant
+export GITAGENT_MODEL_BASE_URL=http://localhost:11434/v1
+gitagent --model "ollama:llama3" --voice --dir ~/assistant
 ```
 
 **In agent.yaml:**
@@ -306,11 +306,11 @@ model:
 
 ### Lyzr Integration
 
-GitClaw integrates with [Lyzr AI Studio](https://studio.lyzr.ai) as an agent brain. The Lyzr completions endpoint is fully OpenAI-compatible.
+GitAgent integrates with [Lyzr AI Studio](https://studio.lyzr.ai) as an agent brain. The Lyzr completions endpoint is fully OpenAI-compatible.
 
 **Via installer (easiest):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitclaw/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/install.sh | bash
 # Pick option 1: "Install with LYZR"
 # Enter your Lyzr API key — agent is created automatically
 ```
@@ -318,12 +318,12 @@ curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitclaw/main/install.
 **Via CLI flag:**
 ```bash
 export OPENAI_API_KEY="your-lyzr-api-key"   # Lyzr uses standard Bearer auth
-gitclaw --model "lyzr:<agent-id>@https://agent-prod.studio.lyzr.ai/v4" --voice --dir ~/assistant
+gitagent --model "lyzr:<agent-id>@https://agent-prod.studio.lyzr.ai/v4" --voice --dir ~/assistant
 ```
 
 **Via SDK (programmatic):**
 ```typescript
-import { query } from "gitclaw";
+import { query } from "gitagent";
 
 // Set OPENAI_API_KEY to your Lyzr API key (uses standard Bearer auth)
 process.env.OPENAI_API_KEY = process.env.LYZR_API_KEY;
@@ -350,7 +350,7 @@ for await (const msg of result) {
 
 ## Voice Mode
 
-GitClaw supports real-time bidirectional voice via two adapters:
+GitAgent supports real-time bidirectional voice via two adapters:
 
 ### OpenAI Realtime (default)
 
@@ -368,15 +368,15 @@ GitClaw supports real-time bidirectional voice via two adapters:
 
 ```bash
 # OpenAI voice (default)
-gitclaw --voice --dir ~/assistant
+gitagent --voice --dir ~/assistant
 
 # Gemini voice
-gitclaw --voice gemini --dir ~/assistant
+gitagent --voice gemini --dir ~/assistant
 ```
 
 ### Text-Only Fallback
 
-If no voice API key is set, GitClaw still starts the web UI server but with voice disabled. A warning banner appears in the UI, mic/camera/speaker buttons are hidden, and text input routes directly to the agent via `query()`.
+If no voice API key is set, GitAgent still starts the web UI server but with voice disabled. A warning banner appears in the UI, mic/camera/speaker buttons are hidden, and text input routes directly to the agent via `query()`.
 
 ### Camera
 
@@ -676,7 +676,7 @@ const result = query({
 
 ## Plugins
 
-Plugins extend GitClaw with tools, skills, hooks, memory layers, and prompt additions.
+Plugins extend GitAgent with tools, skills, hooks, memory layers, and prompt additions.
 
 ### Plugin Manifest
 
@@ -722,17 +722,17 @@ plugins/my-plugin/
 ### Plugin Management
 
 ```bash
-gitclaw plugin install https://github.com/user/plugin
-gitclaw plugin list
-gitclaw plugin remove my-plugin
-gitclaw plugin init my-plugin  # scaffold a new plugin
+gitagent plugin install https://github.com/user/plugin
+gitagent plugin list
+gitagent plugin remove my-plugin
+gitagent plugin init my-plugin  # scaffold a new plugin
 ```
 
 ---
 
 ## Memory System
 
-GitClaw's memory is git-native — all memory changes are committed, versioned, and auditable.
+GitAgent's memory is git-native — all memory changes are committed, versioned, and auditable.
 
 ### Memory File
 
@@ -892,18 +892,18 @@ When `audit_logging: true`, all actions are logged to `.gitagent/audit.jsonl`:
 
 ## SDK
 
-GitClaw can be used programmatically as an npm package.
+GitAgent can be used programmatically as an npm package.
 
 ### Installation
 
 ```bash
-npm install gitclaw
+npm install gitagent
 ```
 
 ### Basic Usage
 
 ```typescript
-import { query } from "gitclaw";
+import { query } from "gitagent";
 
 const result = query({
   prompt: "Create a Python script that sorts a CSV file by the 'date' column",
@@ -926,7 +926,7 @@ console.log(result.costs());
 ### Custom Tools
 
 ```typescript
-import { query, tool } from "gitclaw";
+import { query, tool } from "gitagent";
 
 const weatherTool = tool(
   "get_weather",
@@ -948,7 +948,7 @@ const result = query({
 ### buildTool Factory
 
 ```typescript
-import { buildTool } from "gitclaw";
+import { buildTool } from "gitagent";
 
 const myTool = buildTool({
   name: "search_docs",
@@ -1019,7 +1019,7 @@ query({
 Utilities for managing context window limits in long conversations.
 
 ```typescript
-import { estimateTokens, estimateMessageTokens, needsCompaction, truncateToolResults, buildCompactPrompt } from "gitclaw";
+import { estimateTokens, estimateMessageTokens, needsCompaction, truncateToolResults, buildCompactPrompt } from "gitagent";
 
 // Estimate tokens
 const tokens = estimateTokens("Hello world");  // ~3
@@ -1041,7 +1041,7 @@ const prompt = buildCompactPrompt(messages);
 Track token usage and costs per model across sessions.
 
 ```typescript
-import { CostTracker } from "gitclaw";
+import { CostTracker } from "gitagent";
 
 const tracker = new CostTracker();
 
@@ -1067,10 +1067,10 @@ const costs = result.costs();
 
 ### Password Protection
 
-Set `GITCLAW_PASSWORD` to require authentication for the web UI:
+Set `GITAGENT_PASSWORD` to require authentication for the web UI:
 
 ```bash
-GITCLAW_PASSWORD=mysecret gitclaw --voice --dir ~/assistant
+GITAGENT_PASSWORD=mysecret gitagent --voice --dir ~/assistant
 ```
 
 When set:
@@ -1083,7 +1083,7 @@ When set:
 ### Best Practices
 
 - Use HTTPS in production (via nginx, Caddy, or Cloudflare Tunnel)
-- Set `GITCLAW_PASSWORD` when exposing to a network
+- Set `GITAGENT_PASSWORD` when exposing to a network
 - Use OpenShell for kernel-level sandboxing in enterprise deployments
 - Enable audit logging for compliance (`compliance.recordkeeping.audit_logging: true`)
 
@@ -1162,10 +1162,10 @@ When set:
 | `COMPOSIO_API_KEY` | Composio integrations | Optional |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token | Optional |
 | `LYZR_API_KEY` | Lyzr AI Studio key | For Lyzr setup |
-| `GITCLAW_LYZR_AGENT_ID` | Lyzr agent ID (auto-created) | For Lyzr setup |
-| `GITCLAW_MODEL_BASE_URL` | Custom LLM endpoint URL | Optional |
-| `GITCLAW_PASSWORD` | Password-protect the web UI | Optional |
-| `GITCLAW_ENV` | Environment name (loads config/<env>.yaml) | Optional |
+| `GITAGENT_LYZR_AGENT_ID` | Lyzr agent ID (auto-created) | For Lyzr setup |
+| `GITAGENT_MODEL_BASE_URL` | Custom LLM endpoint URL | Optional |
+| `GITAGENT_PASSWORD` | Password-protect the web UI | Optional |
+| `GITAGENT_ENV` | Environment name (loads config/<env>.yaml) | Optional |
 | `GROQ_API_KEY` | Groq API key | For Groq models |
 | `XAI_API_KEY` | xAI/Grok key | For xAI models |
 | `MISTRAL_API_KEY` | Mistral key | For Mistral models |
@@ -1176,4 +1176,4 @@ When set:
 
 ---
 
-*Built with love by the GitClaw team. MIT License.*
+*Built with love by the GitAgent team. MIT License.*

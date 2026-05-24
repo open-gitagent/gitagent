@@ -91,6 +91,6 @@ export function formatSubAgentsForPrompt(agents: SubAgentMetadata[]): string {
 ${entries}
 </available_agents>
 
-To delegate to a sub-agent, use the \`cli\` tool to run: \`gitclaw --dir ${"{agent_path}"} -p "task description"\`
+To delegate to a sub-agent, use the \`cli\` tool to run: \`gitagent --dir ${"{agent_path}"} -p "task description"\`
 For file-based agents, use the \`read\` tool to load their instructions.`;
 }

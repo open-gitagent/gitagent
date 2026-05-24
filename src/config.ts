@@ -38,11 +38,11 @@ async function loadYamlFile(path: string): Promise<Record<string, any>> {
 /**
  * Load environment configuration.
  * Loads config/default.yaml, then merges config/<env>.yaml on top.
- * Env is determined by --env flag or GITCLAW_ENV environment variable.
+ * Env is determined by --env flag or GITAGENT_ENV environment variable.
  */
 export async function loadEnvConfig(agentDir: string, env?: string): Promise<EnvConfig> {
 	const configDir = join(agentDir, "config");
-	const envName = env || process.env.GITCLAW_ENV;
+	const envName = env || process.env.GITAGENT_ENV;
 
 	const base = await loadYamlFile(join(configDir, "default.yaml"));
 

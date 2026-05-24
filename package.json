@@ -1,14 +1,14 @@
 {
-  "name": "gitclaw",
+  "name": "gitagent",
   "version": "1.5.0",
   "description": "A universal git-native multimodal always learning AI Agent (TinyHuman)",
   "author": "shreyaskapale",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/open-gitagent/gitclaw"
+    "url": "https://github.com/open-gitagent/gitagent"
   },
-  "homepage": "https://github.com/open-gitagent/gitclaw",
+  "homepage": "https://github.com/open-gitagent/gitagent",
   "keywords": [
     "ai",
     "agent",
@@ -25,7 +25,7 @@
   "main": "./dist/exports.js",
   "types": "./dist/exports.d.ts",
   "bin": {
-    "gitclaw": "./dist/index.js"
+    "gitagent": "./dist/index.js"
   },
   "exports": {
     ".": {

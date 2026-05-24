@@ -43,7 +43,7 @@ export { startVoiceServer } from "./voice/server.js";
 
 // Plugin types
 export type { PluginManifest, PluginConfig, LoadedPlugin } from "./plugin-types.js";
-export type { GitclawPluginApi } from "./plugin-sdk.js";
+export type { GitagentPluginApi } from "./plugin-sdk.js";
 export { createPluginApi } from "./plugin-sdk.js";
 
 // Tool factory (Claude Code buildTool pattern)

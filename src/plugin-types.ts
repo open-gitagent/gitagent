@@ -35,7 +35,7 @@ export interface PluginManifest {
 		required?: string[];
 	};
 	entry?: string; // optional programmatic entry point (e.g., index.ts)
-	engine?: string; // min gitclaw version (e.g., ">=0.3.0")
+	engine?: string; // min gitagent version (e.g., ">=0.3.0")
 }
 
 // ── Plugin config in agent.yaml ────────────────────────────────────────

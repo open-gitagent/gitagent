@@ -1,5 +1,5 @@
 spec_version: "0.1.0"
-name: gitclaw
+name: gitagent
 version: 0.1.0
 description: A universal git-native agent powered by pi-agent-core
 model:

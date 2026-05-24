@@ -1,5 +1,5 @@
 /**
- * Example: Using GitClaw SDK with Lyzr AI Studio
+ * Example: Using GitAgent SDK with Lyzr AI Studio
  *
  * Prerequisites:
  *   1. Set your Lyzr API key: export LYZR_API_KEY="sk-default-..."
@@ -24,10 +24,10 @@ if (!process.env.OPENAI_API_KEY) {
 }
 
 // Your Lyzr agent ID (created via studio.lyzr.ai or the install.sh setup)
-const LYZR_AGENT_ID = process.env.GITCLAW_LYZR_AGENT_ID || "your-agent-id-here";
+const LYZR_AGENT_ID = process.env.GITAGENT_LYZR_AGENT_ID || "your-agent-id-here";
 
 async function main() {
-	console.log("Starting GitClaw with Lyzr backend...\n");
+	console.log("Starting GitAgent with Lyzr backend...\n");
 
 	const result = query({
 		prompt: "Hello! What can you help me with today?",

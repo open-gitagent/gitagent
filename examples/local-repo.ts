@@ -26,7 +26,7 @@ async function main() {
 			url: REPO_URL,
 			token: TOKEN,
 			// dir: "/tmp/my-custom-dir",  // optional — defaults to cwd
-			// session: "gitclaw/session-abc123",  // resume an existing session
+			// session: "gitagent/session-abc123",  // resume an existing session
 		},
 	});
 

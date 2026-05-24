@@ -4,7 +4,7 @@ import { query, tool } from "../dist/exports.js";
 const greet = tool("greet", "Greet someone by name", {
 	properties: { name: { type: "string", description: "Name to greet" } },
 	required: ["name"],
-}, async (args) => `Hello, ${args.name}! Welcome to Gitclaw.`);
+}, async (args) => `Hello, ${args.name}! Welcome to Gitagent.`);
 
 async function main() {
 	console.log("Starting SDK demo...\n");

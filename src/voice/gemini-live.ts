@@ -204,7 +204,7 @@ export class GeminiLiveAdapter implements MultimodalAdapter {
 				tools: [{
 					functionDeclarations: [{
 						name: "run_agent",
-						description: "Execute any request through the gitclaw agent. It has full access to the terminal (can run any shell command, open apps, install packages), file system (read/write/create files), git operations, and persistent memory. Use this for ALL actionable requests. IMPORTANT: If the user uploaded a file, always include the file path (from the '[File saved to: ...]' annotation) in the query.",
+						description: "Execute any request through the gitagent agent. It has full access to the terminal (can run any shell command, open apps, install packages), file system (read/write/create files), git operations, and persistent memory. Use this for ALL actionable requests. IMPORTANT: If the user uploaded a file, always include the file path (from the '[File saved to: ...]' annotation) in the query.",
 						parameters: {
 							type: "OBJECT",
 							properties: {

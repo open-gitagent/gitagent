@@ -1,14 +1,14 @@
-# Contributing to GitClaw
+# Contributing to GitAgent
 
-Thanks for your interest in contributing to GitClaw! Here's how to get started.
+Thanks for your interest in contributing to GitAgent! Here's how to get started.
 
 ## Getting Started
 
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/<your-username>/gitclaw.git
-   cd gitclaw
+   git clone https://github.com/<your-username>/gitagent.git
+   cd gitagent
    ```
 3. Install dependencies:
    ```bash

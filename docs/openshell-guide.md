@@ -1,4 +1,4 @@
-# Running GitClaw inside NVIDIA OpenShell
+# Running GitAgent inside NVIDIA OpenShell
 
 ## The Problem: AI Agents Are Powerful — And That's Scary
 
@@ -6,17 +6,17 @@ AI agents today can read your files, write code, run shell commands, send messag
 
 In March 2026, NVIDIA released [OpenShell](https://github.com/NVIDIA/OpenShell) — an open-source sandboxed runtime designed specifically for AI agents. Think of it as a secure container that wraps around an agent and controls exactly what it can and can't do: which files it reads, which APIs it calls, what privileges it has, and whether it gets GPU access. Everything is defined in a simple YAML configuration file, and every blocked action is logged.
 
-OpenShell already ships with support for several agents, including OpenClaw (the viral general-purpose agent with 250K+ GitHub stars). But here's the thing — **OpenClaw has serious security problems**, and GitClaw was purpose-built to avoid them.
+OpenShell already ships with support for several agents, including OpenClaw (the viral general-purpose agent with 250K+ GitHub stars). But here's the thing — **OpenClaw has serious security problems**, and GitAgent was purpose-built to avoid them.
 
-## Why GitClaw over OpenClaw?
+## Why GitAgent over OpenClaw?
 
 OpenClaw is impressive in breadth. It connects to 20+ messaging channels, has 13,700+ community skills, and can orchestrate almost anything. But that breadth comes with significant trade-offs:
 
 **Security is OpenClaw's Achilles' heel.** Authentication is disabled by default. Credentials are stored in plaintext config files. The ClawHub skills marketplace has been found to contain malicious payloads in up to 20% of listed skills — credential theft, data exfiltration, backdoors. Microsoft, Cisco, Kaspersky, and multiple universities have published security advisories warning against running it on standard workstations. A high-severity CVE (CVE-2026-25253, CVSS 8.8) showed the Control UI auto-transmitting auth tokens to attacker-controlled WebSocket URLs. Prompt injection is described as an architectural vulnerability that "cannot be fully solved" in OpenClaw's design.
 
-**GitClaw takes a different approach.** It's built as a focused, git-native agent — not a general-purpose life assistant. Here's how they compare:
+**GitAgent takes a different approach.** It's built as a focused, git-native agent — not a general-purpose life assistant. Here's how they compare:
 
-| | GitClaw | OpenClaw |
+| | GitAgent | OpenClaw |
 |---|---|---|
 | **Primary purpose** | Autonomous coding & project agent | General-purpose life/work assistant |
 | **Security model** | Git-native (all changes tracked, reversible), sandboxed CLI tool execution, auditable | Auth disabled by default, plaintext credentials, vulnerable skill marketplace |
@@ -27,30 +27,30 @@ OpenClaw is impressive in breadth. It connects to 20+ messaging channels, has 13
 | **Agent brain** | Pluggable (Claude, GPT, Gemini, Ollama, etc.) | Pluggable (similar range) |
 | **Architecture** | Single focused process, SDK for embedding | Gateway + multiple services |
 
-GitClaw is narrower in scope but deeper in execution. It won't manage your Slack DMs or order you coffee, but it will autonomously write, test, and ship code — with every change committed to git, every tool call hookable, and every action auditable.
+GitAgent is narrower in scope but deeper in execution. It won't manage your Slack DMs or order you coffee, but it will autonomously write, test, and ship code — with every change committed to git, every tool call hookable, and every action auditable.
 
-## Why GitClaw + OpenShell?
+## Why GitAgent + OpenShell?
 
-Even though GitClaw is already more security-conscious than OpenClaw, adding OpenShell on top gives you defense-in-depth:
+Even though GitAgent is already more security-conscious than OpenClaw, adding OpenShell on top gives you defense-in-depth:
 
-- **Network isolation.** GitClaw only reaches the APIs you explicitly allow — Anthropic for reasoning, OpenAI for voice, nothing else. Default-deny networking at the kernel level.
+- **Network isolation.** GitAgent only reaches the APIs you explicitly allow — Anthropic for reasoning, OpenAI for voice, nothing else. Default-deny networking at the kernel level.
 - **Filesystem boundaries.** The agent can read and write your project folder. It cannot touch anything else on the machine. Enforced via Linux Landlock LSM and seccomp, not just application-level checks.
 - **Non-root execution.** The agent runs as a sandboxed user, never as administrator. Even if something goes wrong, it can't escalate privileges.
 - **Hot-reloadable policies.** Tighten or loosen the rules while the agent is running. Start permissive (audit mode), then lock down once you're confident.
 - **Full audit trail.** Every blocked action is logged with the exact binary, target, and reason. Compliance teams and security reviewers can see precisely what happened.
 
-This matters for enterprise teams deploying GitClaw across developers, regulated industries (banking, healthcare, government) that need clear access boundaries, multi-tenant setups where each user gets an isolated instance, and CI/CD pipelines where agents run unattended.
+This matters for enterprise teams deploying GitAgent across developers, regulated industries (banking, healthcare, government) that need clear access boundaries, multi-tenant setups where each user gets an isolated instance, and CI/CD pipelines where agents run unattended.
 
-OpenShell turns GitClaw from "an AI that can do a lot on your machine" into "an AI that can do exactly what you've approved, and nothing else."
+OpenShell turns GitAgent from "an AI that can do a lot on your machine" into "an AI that can do exactly what you've approved, and nothing else."
 
 ## What We'll Set Up
 
 This guide walks through everything step by step:
 
 1. **Install OpenShell** on your machine (it runs on top of Docker)
-2. **Build a sandbox** — a secure container with GitClaw pre-installed
-3. **Write a security policy** — the rules controlling what GitClaw can and can't do
-4. **Launch GitClaw in the sandbox** — with voice mode, port forwarding, and API access
+2. **Build a sandbox** — a secure container with GitAgent pre-installed
+3. **Write a security policy** — the rules controlling what GitAgent can and can't do
+4. **Launch GitAgent in the sandbox** — with voice mode, port forwarding, and API access
 5. **Monitor and adjust** — view logs, check blocked actions, and tweak the policy
 
 No prior experience with Docker or security tooling is required — every command is included below.
@@ -69,11 +69,11 @@ No prior experience with Docker or security tooling is required — every comman
 ```bash
 # Create sandbox from a local directory with port forwarding for voice
 openshell sandbox create \
-  --from ./sandboxes/gitclaw \
-  --policy ./sandboxes/gitclaw/policy.yaml \
+  --from ./sandboxes/gitagent \
+  --policy ./sandboxes/gitagent/policy.yaml \
   --forward 3333 \
-  --name gitclaw-dev \
-  -- gitclaw --voice --dir /sandbox/project
+  --name gitagent-dev \
+  -- gitagent --voice --dir /sandbox/project
 
 # Open the voice UI
 open http://localhost:3333
@@ -84,7 +84,7 @@ open http://localhost:3333
 Create the following directory:
 
 ```
-sandboxes/gitclaw/
+sandboxes/gitagent/
   Dockerfile
   policy.yaml
 ```
@@ -97,8 +97,8 @@ FROM ${BASE_IMAGE}
 
 USER root
 
-# Install gitclaw globally
-RUN npm install -g gitclaw@latest
+# Install gitagent globally
+RUN npm install -g gitagent@latest
 
 # Create workspace
 RUN mkdir -p /sandbox/project && chown -R sandbox:sandbox /sandbox
@@ -189,32 +189,32 @@ network_policies:
 
 ```bash
 # Upload an existing agent directory into the sandbox
-openshell sandbox upload gitclaw-dev ./my-agent /sandbox/project
+openshell sandbox upload gitagent-dev ./my-agent /sandbox/project
 
 # Or create a fresh agent inside the sandbox
-openshell sandbox connect gitclaw-dev
-# Then inside: gitclaw --voice --dir /sandbox/project
+openshell sandbox connect gitagent-dev
+# Then inside: gitagent --voice --dir /sandbox/project
 ```
 
 ## Port Forwarding (Voice Mode)
 
-GitClaw's voice server runs on port 3333. Forward it to your host:
+GitAgent's voice server runs on port 3333. Forward it to your host:
 
 ```bash
 # At creation time (shown in Quick Start above)
 openshell sandbox create --forward 3333 ...
 
 # Or add forwarding to a running sandbox
-openshell forward start 3333 gitclaw-dev
+openshell forward start 3333 gitagent-dev
 
 # Background mode
-openshell forward start 3333 gitclaw-dev -d
+openshell forward start 3333 gitagent-dev -d
 
 # List active forwards
 openshell forward list
 
 # Stop
-openshell forward stop 3333 gitclaw-dev
+openshell forward stop 3333 gitagent-dev
 ```
 
 Then open `http://localhost:3333` in your browser.
@@ -225,21 +225,21 @@ Pass API keys when creating the sandbox:
 
 ```bash
 openshell sandbox create \
-  --from ./sandboxes/gitclaw \
+  --from ./sandboxes/gitagent \
   --env OPENAI_API_KEY="sk-..." \
   --env ANTHROPIC_API_KEY="sk-ant-..." \
   --forward 3333 \
-  --name gitclaw-dev
+  --name gitagent-dev
 ```
 
-Or place a `.env` file in the project directory before uploading — GitClaw's `install.sh` and `server.ts` will pick it up automatically.
+Or place a `.env` file in the project directory before uploading — GitAgent's `install.sh` and `server.ts` will pick it up automatically.
 
 ## GPU Passthrough
 
 If running local inference (e.g., Ollama models instead of API calls):
 
 ```bash
-openshell sandbox create --gpu --from ./sandboxes/gitclaw --name gitclaw-gpu
+openshell sandbox create --gpu --from ./sandboxes/gitagent --name gitagent-gpu
 ```
 
 Add Ollama to the policy if needed:
@@ -261,10 +261,10 @@ Add Ollama to the policy if needed:
 
 ```bash
 # Stream sandbox logs
-openshell logs gitclaw-dev --tail --source sandbox
+openshell logs gitagent-dev --tail --source sandbox
 
 # Check for policy denials
-openshell logs gitclaw-dev --level warn --since 5m
+openshell logs gitagent-dev --level warn --since 5m
 
 # Open the TUI dashboard (k9s-style)
 openshell term
@@ -278,12 +278,12 @@ Adjust the network policy on a running sandbox without restarting:
 
 ```bash
 # Export current policy
-openshell policy get gitclaw-dev --full > current.yaml
+openshell policy get gitagent-dev --full > current.yaml
 
 # Edit current.yaml (e.g., add a new API endpoint)
 
 # Apply
-openshell policy set gitclaw-dev --policy current.yaml --wait
+openshell policy set gitagent-dev --policy current.yaml --wait
 ```
 
 Use `enforcement: audit` during initial setup to log violations without blocking:
@@ -316,12 +316,12 @@ If using Composio (Gmail, Calendar, Slack, GitHub integrations), add its endpoin
       - path: /usr/local/bin/node
 ```
 
-Similarly for Telegram, WhatsApp, or any other integration GitClaw supports — add the relevant API hosts to `network_policies`.
+Similarly for Telegram, WhatsApp, or any other integration GitAgent supports — add the relevant API hosts to `network_policies`.
 
 ## Download Results
 
 Pull generated files (workspace output, memory, photos) back to your host:
 
 ```bash
-openshell sandbox download gitclaw-dev /sandbox/project/workspace ./output
+openshell sandbox download gitagent-dev /sandbox/project/workspace ./output
 ```

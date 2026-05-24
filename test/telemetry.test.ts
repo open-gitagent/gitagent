@@ -39,7 +39,7 @@ async function withTelemetry(
 	fn: (exporter: InMemorySpanExporter) => Promise<void> | void,
 ): Promise<void> {
 	const { exporter, provider } = freshExporter();
-	await initTelemetry({ serviceName: "gitclaw-test", _testProvider: provider });
+	await initTelemetry({ serviceName: "gitagent-test", _testProvider: provider });
 	try {
 		await fn(exporter);
 	} finally {
@@ -55,7 +55,7 @@ async function withTelemetry(
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
-test("wrapToolWithOtel happy path produces gitclaw.tool.execute span with status=ok", async () => {
+test("wrapToolWithOtel happy path produces gitagent.tool.execute span with status=ok", async () => {
 	await withTelemetry(async (exporter) => {
 		const tool: any = {
 			name: "echo",
@@ -68,8 +68,8 @@ test("wrapToolWithOtel happy path produces gitclaw.tool.execute span with status
 		assert.equal(result, "hello world");
 
 		const spans = exporter.getFinishedSpans();
-		const toolSpan = spans.find((s) => s.name === "gitclaw.tool.execute");
-		assert.ok(toolSpan, "expected gitclaw.tool.execute span");
+		const toolSpan = spans.find((s) => s.name === "gitagent.tool.execute");
+		assert.ok(toolSpan, "expected gitagent.tool.execute span");
 		assert.equal(toolSpan!.attributes["tool.name"], "echo");
 		assert.equal(toolSpan!.attributes["tool.status"], "ok");
 	});
@@ -91,7 +91,7 @@ test("wrapToolWithOtel error path sets status=error and records error message", 
 			/kaboom/,
 		);
 		const spans = exporter.getFinishedSpans();
-		const toolSpan = spans.find((s) => s.name === "gitclaw.tool.execute");
+		const toolSpan = spans.find((s) => s.name === "gitagent.tool.execute");
 		assert.ok(toolSpan);
 		assert.equal(toolSpan!.attributes["tool.status"], "error");
 		assert.equal(toolSpan!.attributes["tool.error_message"], "kaboom");
@@ -103,8 +103,8 @@ test("wrapToolWithOtel error path sets status=error and records error message", 
 test("startSessionSpan + child tool span produce a parent/child relationship", async () => {
 	const { context: otelContext } = await import("@opentelemetry/api");
 	await withTelemetry(async (exporter) => {
-		const session = startSessionSpan("gitclaw.agent.session", {
-			"gitclaw.entry": "test",
+		const session = startSessionSpan("gitagent.agent.session", {
+			"gitagent.entry": "test",
 		});
 		const tool: any = {
 			name: "child",
@@ -119,12 +119,12 @@ test("startSessionSpan + child tool span produce a parent/child relationship", a
 		session.end();
 
 		const spans = exporter.getFinishedSpans();
-		const parent = spans.find((s) => s.name === "gitclaw.agent.session");
-		const child = spans.find((s) => s.name === "gitclaw.tool.execute");
+		const parent = spans.find((s) => s.name === "gitagent.agent.session");
+		const child = spans.find((s) => s.name === "gitagent.tool.execute");
 		assert.ok(parent && child);
-		assert.equal(parent!.attributes["gitclaw.entry"], "test");
+		assert.equal(parent!.attributes["gitagent.entry"], "test");
 		assert.ok(
-			typeof parent!.attributes["gitclaw.session.duration_ms"] === "number",
+			typeof parent!.attributes["gitagent.session.duration_ms"] === "number",
 			"session duration recorded",
 		);
 		// Strong assertion: child must hang off the session span.
@@ -141,15 +141,15 @@ test("startSessionSpan + child tool span produce a parent/child relationship", a
 
 test("startSessionSpan end() is idempotent — calling twice records only one span", async () => {
 	await withTelemetry(async (exporter) => {
-		const session = startSessionSpan("gitclaw.agent.session", {
-			"gitclaw.entry": "test",
+		const session = startSessionSpan("gitagent.agent.session", {
+			"gitagent.entry": "test",
 		});
 		session.end();
 		session.end(); // second call must be a no-op
 
 		const sessions = exporter
 			.getFinishedSpans()
-			.filter((s) => s.name === "gitclaw.agent.session");
+			.filter((s) => s.name === "gitagent.agent.session");
 		assert.equal(sessions.length, 1, "session span must appear exactly once");
 	});
 });
@@ -177,7 +177,7 @@ test("recordGenAiCall emits gen_ai.chat span with the documented attributes", as
 		assert.equal(span!.attributes["gen_ai.request.model"], "gpt-4o");
 		assert.equal(span!.attributes["gen_ai.usage.input_tokens"], 100);
 		assert.equal(span!.attributes["gen_ai.usage.output_tokens"], 50);
-		assert.equal(span!.attributes["gitclaw.cost_usd"], 0.0042);
+		assert.equal(span!.attributes["gitagent.cost_usd"], 0.0042);
 		assert.deepEqual(
 			span!.attributes["gen_ai.response.finish_reasons"],
 			["stop"],
@@ -233,15 +233,15 @@ test("no-ops without init: no spans emitted, no throws", async () => {
 	);
 
 	// startSessionSpan returns a no-op handle
-	const handle = startSessionSpan("gitclaw.agent.session", {
-		"gitclaw.entry": "none",
+	const handle = startSessionSpan("gitagent.agent.session", {
+		"gitagent.entry": "none",
 	});
 	assert.doesNotThrow(() => handle.end());
 });
 
 test("initTelemetry is idempotent — second call is a no-op", async () => {
 	const { exporter, provider } = freshExporter();
-	await initTelemetry({ serviceName: "gitclaw-test", _testProvider: provider });
+	await initTelemetry({ serviceName: "gitagent-test", _testProvider: provider });
 	const enabledAfterFirst = isTelemetryEnabled();
 
 	try {
@@ -263,7 +263,7 @@ test("initTelemetry is idempotent — second call is a no-op", async () => {
 		await (wrapped as any).execute({});
 
 		const spans = exporter.getFinishedSpans();
-		assert.ok(spans.find((s) => s.name === "gitclaw.tool.execute"));
+		assert.ok(spans.find((s) => s.name === "gitagent.tool.execute"));
 	} finally {
 		await shutdownTelemetry();
 		try {

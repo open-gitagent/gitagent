@@ -17,7 +17,7 @@ import { discoverSkills } from "./skills.js";
 import type { SkillMetadata } from "./skills.js";
 
 const require = createRequire(import.meta.url);
-const { version: GITCLAW_VERSION } = require("../package.json");
+const { version: GITAGENT_VERSION } = require("../package.json");
 
 const KEBAB_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -186,8 +186,8 @@ async function loadPlugin(
 	if (!validatePluginManifest(manifest, pluginDir)) return null;
 
 	// Check engine compatibility
-	if (manifest.engine && !satisfiesEngine(manifest.engine, GITCLAW_VERSION)) {
-		console.warn(`Plugin "${manifest.id}": requires engine ${manifest.engine}, current is ${GITCLAW_VERSION}`);
+	if (manifest.engine && !satisfiesEngine(manifest.engine, GITAGENT_VERSION)) {
+		console.warn(`Plugin "${manifest.id}": requires engine ${manifest.engine}, current is ${GITAGENT_VERSION}`);
 		return null;
 	}
 
@@ -295,8 +295,8 @@ async function discoverPluginDirs(
 	const localDir = join(agentDir, "plugins", pluginName);
 	if (await dirExists(localDir)) return localDir;
 
-	// 2. Global: ~/.gitclaw/plugins/<name>/
-	const globalDir = join(homedir(), ".gitclaw", "plugins", pluginName);
+	// 2. Global: ~/.gitagent/plugins/<name>/
+	const globalDir = join(homedir(), ".gitagent", "plugins", pluginName);
 	if (await dirExists(globalDir)) return globalDir;
 
 	// 3. Installed: <agent-dir>/.gitagent/plugins/<name>/
@@ -413,7 +413,7 @@ export async function listAllPlugins(
 
 	const scopes: Array<{ dir: string; scope: "local" | "global" | "installed" }> = [
 		{ dir: join(agentDir, "plugins"), scope: "local" },
-		{ dir: join(homedir(), ".gitclaw", "plugins"), scope: "global" },
+		{ dir: join(homedir(), ".gitagent", "plugins"), scope: "global" },
 		{ dir: join(gitagentDir, "plugins"), scope: "installed" },
 	];
 

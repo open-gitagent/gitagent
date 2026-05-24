@@ -1,11 +1,11 @@
 ---
 name: example-skill
-description: Example skill that demonstrates the gitclaw skills system. Use this to test skill loading and script execution.
+description: Example skill that demonstrates the gitagent skills system. Use this to test skill loading and script execution.
 ---
 
 # Example Skill
 
-This is a demo skill showing how gitclaw skills work.
+This is a demo skill showing how gitagent skills work.
 
 ## Usage
 

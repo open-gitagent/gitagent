@@ -7,7 +7,7 @@ import type { MemoryLayerDef } from "./plugin-types.js";
 type HookEvent = "on_session_start" | "pre_tool_use" | "post_response" | "on_error";
 type HookHandler = (ctx: Record<string, any>) => Promise<HookResult> | HookResult;
 
-export interface GitclawPluginApi {
+export interface GitagentPluginApi {
 	/** Plugin identifier */
 	pluginId: string;
 	/** Plugin directory path */
@@ -37,7 +37,7 @@ export interface GitclawPluginApi {
 
 // ── Internal API implementation ────────────────────────────────────────
 
-interface InternalPluginApi extends GitclawPluginApi {
+interface InternalPluginApi extends GitagentPluginApi {
 	getTools(): GCToolDefinition[];
 	getHooks(): Record<HookEvent, HookDefinition[]> | null;
 	getPrompt(): string;

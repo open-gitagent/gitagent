@@ -247,7 +247,7 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 			'spec_version: "0.1.0"',
 			`name: ${agentName}`,
 			"version: 0.1.0",
-			`description: Gitclaw agent for ${agentName}`,
+			`description: Gitagent agent for ${agentName}`,
 			"model:",
 			`  preferred: "${defaultModel}"`,
 			"  fallback: []",
@@ -289,7 +289,7 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 
 	// Stage new scaffolded files
 	try {
-		execSync("git add -A && git diff --cached --quiet || git commit -m 'Scaffold gitclaw agent'", {
+		execSync("git add -A && git diff --cached --quiet || git commit -m 'Scaffold gitagent agent'", {
 			cwd: absDir,
 			stdio: "pipe",
 		});
@@ -301,7 +301,7 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-	// Handle plugin subcommand: gitclaw plugin <install|list|remove|...>
+	// Handle plugin subcommand: gitagent plugin <install|list|remove|...>
 	if (process.argv[2] === "plugin") {
 		const allArgs = process.argv.slice(3);
 		let agentDir = process.cwd();
@@ -336,10 +336,10 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 
-		// Default dir: /tmp/gitclaw/<repo-name> if no --dir given
+		// Default dir: /tmp/gitagent/<repo-name> if no --dir given
 		if (dir === process.cwd()) {
 			const repoName = repo.split("/").pop()?.replace(/\.git$/, "") || "repo";
-			dir = resolve(`/tmp/gitclaw/${repoName}`);
+			dir = resolve(`/tmp/gitagent/${repoName}`);
 		}
 
 		localSession = initLocalSession({
@@ -366,7 +366,7 @@ async function main(): Promise<void> {
 		console.log(dim(`Sandbox ready (repo: ${sandboxCtx.repoPath})`));
 	}
 
-	// Ensure the target is a valid gitclaw repo (skip in sandbox/local-repo mode)
+	// Ensure the target is a valid gitagent repo (skip in sandbox/local-repo mode)
 	if (localSession) {
 		// Already cloned and scaffolded by initLocalSession
 	} else if (!useSandbox) {
@@ -391,7 +391,7 @@ async function main(): Promise<void> {
 	}
 
 	// Auto-init telemetry after .env is loaded so OTEL_* vars set in .env are picked up.
-	if ((process.env.OTEL_EXPORTER_OTLP_ENDPOINT || process.env.OTEL_TRACES_EXPORTER === "console") && process.env.GITCLAW_OTEL_ENABLED !== "false") {
+	if ((process.env.OTEL_EXPORTER_OTLP_ENDPOINT || process.env.OTEL_TRACES_EXPORTER === "console") && process.env.GITAGENT_OTEL_ENABLED !== "false") {
 		await initTelemetry({});
 	}
 
@@ -555,8 +555,8 @@ async function main(): Promise<void> {
 	}
 
 	// OpenTelemetry session span — covers the whole CLI lifetime.
-	const _session = startSessionSpan("gitclaw.agent.session", {
-		"gitclaw.entry": "cli",
+	const _session = startSessionSpan("gitagent.agent.session", {
+		"gitagent.entry": "cli",
 	});
 	let _llmCallStart = 0;
 	let _totalCostUsd = 0;
@@ -635,7 +635,7 @@ async function main(): Promise<void> {
 				await sandboxCtx.gitMachine.stop();
 			}
 			try {
-				_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+				_session.end({ "gitagent.cost_usd": _totalCostUsd });
 			} catch {
 				/* ignore */
 			}
@@ -666,7 +666,7 @@ async function main(): Promise<void> {
 				}
 				await stopSandbox();
 				try {
-					_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+					_session.end({ "gitagent.cost_usd": _totalCostUsd });
 				} catch {
 					/* ignore */
 				}
@@ -809,7 +809,7 @@ async function main(): Promise<void> {
 				try { localSession.finalize(); } catch { /* best-effort */ }
 			}
 			try {
-				_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+				_session.end({ "gitagent.cost_usd": _totalCostUsd });
 			} catch { /* ignore */ }
 			stopSandbox().finally(() => process.exit(0));
 		}

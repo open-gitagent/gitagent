@@ -41,7 +41,7 @@ async function ensureGitagentDir(agentDir: string): Promise<string> {
 async function handleInstall(agentDir: string, args: string[]): Promise<void> {
 	const source = args[0];
 	if (!source || source.startsWith("--")) {
-		console.error(red("Usage: gitclaw plugin install <source> [--name <name>] [--force] [--no-enable]"));
+		console.error(red("Usage: gitagent plugin install <source> [--name <name>] [--force] [--no-enable]"));
 		console.error(dim("  source: git URL or local path"));
 		process.exit(1);
 	}
@@ -132,7 +132,7 @@ async function handleList(agentDir: string): Promise<void> {
 async function handleRemove(agentDir: string, args: string[]): Promise<void> {
 	const name = args[0];
 	if (!name) {
-		console.error(red("Usage: gitclaw plugin remove <name>"));
+		console.error(red("Usage: gitagent plugin remove <name>"));
 		process.exit(1);
 	}
 
@@ -165,7 +165,7 @@ async function handleRemove(agentDir: string, args: string[]): Promise<void> {
 async function handleToggle(agentDir: string, args: string[], enabled: boolean): Promise<void> {
 	const name = args[0];
 	if (!name) {
-		console.error(red(`Usage: gitclaw plugin ${enabled ? "enable" : "disable"} <name>`));
+		console.error(red(`Usage: gitagent plugin ${enabled ? "enable" : "disable"} <name>`));
 		process.exit(1);
 	}
 
@@ -179,7 +179,7 @@ async function handleToggle(agentDir: string, args: string[], enabled: boolean):
 async function handleInit(agentDir: string, args: string[]): Promise<void> {
 	const name = args[0];
 	if (!name) {
-		console.error(red("Usage: gitclaw plugin init <name>"));
+		console.error(red("Usage: gitagent plugin init <name>"));
 		process.exit(1);
 	}
 
@@ -203,7 +203,7 @@ async function handleInit(agentDir: string, args: string[]): Promise<void> {
 		`id: ${name}`,
 		`name: ${name}`,
 		"version: 0.1.0",
-		`description: A gitclaw plugin`,
+		`description: A gitagent plugin`,
 		"",
 		"provides:",
 		"  tools: true",
@@ -225,7 +225,7 @@ async function handleInit(agentDir: string, args: string[]): Promise<void> {
 	].join("\n");
 
 	await writeFile(join(pluginDir, "plugin.yaml"), manifest, "utf-8");
-	await writeFile(join(pluginDir, "README.md"), `# ${name}\n\nA gitclaw plugin.\n`, "utf-8");
+	await writeFile(join(pluginDir, "README.md"), `# ${name}\n\nA gitagent plugin.\n`, "utf-8");
 
 	console.log(green(`Created plugin "${name}" at ${pluginDir}`));
 	console.log(dim("Files:"));
@@ -318,7 +318,7 @@ export async function handlePluginCommand(agentDir: string, args: string[]): Pro
 			await handleInit(agentDir, subArgs);
 			break;
 		default:
-			console.log(bold("gitclaw plugin") + " — Plugin management\n");
+			console.log(bold("gitagent plugin") + " — Plugin management\n");
 			console.log("Commands:");
 			console.log(`  ${bold("install")} <source>    Install a plugin (git URL or local path)`);
 			console.log(`  ${bold("list")}               List all discovered plugins`);

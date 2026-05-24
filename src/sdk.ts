@@ -113,8 +113,8 @@ export function query(options: QueryOptions): Query {
 	// load + prompt + cleanup. Closed in the IIFE's finally so every exit
 	// path (success, hook-block early-return, thrown error) ends it exactly
 	// once.
-	const _session = startSessionSpan("gitclaw.agent.session", {
-		"gitclaw.entry": "sdk",
+	const _session = startSessionSpan("gitagent.agent.session", {
+		"gitagent.entry": "sdk",
 	});
 	let _llmCallStart = 0;
 	let _totalCostUsd = 0;
@@ -460,8 +460,8 @@ export function query(options: QueryOptions): Query {
 		});
 
 		// 10. Send prompt — run inside the session span's context so that
-		// gen_ai.chat and gitclaw.tool.execute spans become children of
-		// gitclaw.agent.session.
+		// gen_ai.chat and gitagent.tool.execute spans become children of
+		// gitagent.agent.session.
 		if (typeof options.prompt === "string") {
 			await otelContext.with(_session.ctx, () =>
 				agent.prompt(options.prompt as string),
@@ -493,7 +493,7 @@ export function query(options: QueryOptions): Query {
 			// early-return, and the .catch() handler below (rethrow so this
 			// runs first).
 			try {
-				_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+				_session.end({ "gitagent.cost_usd": _totalCostUsd });
 			} catch {
 				/* ignore */
 			}

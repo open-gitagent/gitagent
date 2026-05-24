@@ -79,7 +79,7 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 	if (session) {
 		// Resume existing session
 		branch = session;
-		sessionId = branch.replace(/^gitclaw\/session-/, "") || branch;
+		sessionId = branch.replace(/^gitagent\/session-/, "") || branch;
 
 		// Try local checkout first, fall back to remote tracking
 		try {
@@ -92,7 +92,7 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 	} else {
 		// New session — branch off latest default branch
 		sessionId = randomBytes(4).toString("hex"); // 8-char hex
-		branch = `gitclaw/session-${sessionId}`;
+		branch = `gitagent/session-${sessionId}`;
 		git(`checkout -b ${branch}`, dir);
 	}
 
@@ -104,7 +104,7 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 			'spec_version: "0.1.0"',
 			`name: ${name}`,
 			"version: 0.1.0",
-			`description: Gitclaw agent for ${name}`,
+			`description: Gitagent agent for ${name}`,
 			"model:",
 			'  preferred: "openai:gpt-4o-mini"',
 			"  fallback: []",
@@ -134,7 +134,7 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 				// Nothing staged — skip
 			} catch {
 				// There are staged changes
-				const commitMsg = msg || `gitclaw: auto-commit (${branch})`;
+				const commitMsg = msg || `gitagent: auto-commit (${branch})`;
 				git(`commit -m "${commitMsg}"`, dir);
 			}
 		},
