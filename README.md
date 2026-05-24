@@ -733,11 +733,11 @@ Contributions are welcome! Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for g
 
 ### General
 
-**What is Gitclaw?**
-Gitclaw (formerly GitAgent) is a git-native AI agent framework where the agent IS a git repository. Identity, rules, memory, tools, and skills are all version-controlled files, enabling "agents as repos" paradigm.
+**What is Gitagent?**
+GitAgent (formerly Gitclaw) is a git-native AI agent framework where the agent IS a git repository. Identity, rules, memory, tools, and skills are all version-controlled files, enabling "agents as repos" paradigm.
 
-**How does Gitclaw differ from other agent frameworks?**
-Unlike frameworks that scatter configuration across application code, Gitclaw makes the agent itself a git repo:
+**How does Gitagent differ from other agent frameworks?**
+Unlike frameworks that scatter configuration across application code, Gitagent makes the agent itself a git repo:
 - Fork an agent → inherit personality, rules, tools
 - Branch → create alternate personality versions
 - `git log` → see agent's memory evolution
@@ -756,7 +756,7 @@ Your agent lives in a git repository with structured files:
 ### Installation & Setup
 
 **What are the requirements?**
-Node.js 18+ (or 20+ recommended), npm, and git. Install globally with `npm install -g gitclaw`.
+Node.js 18+ (or 20+ recommended), npm, and git. Install globally with `npm install -g gitagent`.
 
 **How do I set up API keys?**
 Run the installer for guided setup:
@@ -773,14 +773,14 @@ export OPENAI_API_KEY="sk-..."
 - Anthropic (Claude models via native SDK)
 - Any OpenAI-compatible provider
 
-Use `--model` flag to override: `gitclaw --model anthropic:claude-sonnet-4-5-20250929`
+Use `--model` flag to override: `gitagent --model anthropic:claude-sonnet-4-5-20250929`
 
 ### Core Concepts
 
 **What is the SDK and how do I use it?**
 The SDK provides programmatic access via `query()` function that streams agent events:
 ```typescript
-import { query } from "gitclaw";
+import { query } from "gitagent";
 for await (const msg of query({ prompt: "hello", model: "openai:gpt-4o-mini" })) {
   if (msg.type === "delta") process.stdout.write(msg.content);
 }
@@ -789,9 +789,9 @@ for await (const msg of query({ prompt: "hello", model: "openai:gpt-4o-mini" }))
 **How do local repo mode sessions work?**
 Clone a GitHub repo, run an agent on it, auto-commit to a session branch:
 ```bash
-gitclaw --repo https://github.com/org/repo --pat ghp_xxx "Fix the bug"
+gitagent --repo https://github.com/org/repo --pat ghp_xxx "Fix the bug"
 ```
-Resume with: `gitclaw --repo URL --session gitclaw/session-xxx "Continue"`
+Resume with: `gitagent --repo URL --session gitagent/session-xxx "Continue"`
 
 **What hooks are available?**
 Hooks are lifecycle scripts or programmatic handlers in `hooks/` directory. They trigger on agent events like tool execution, session start/end, or memory updates.
@@ -819,7 +819,7 @@ OpenTelemetry integration for observability:
 - Check `agent.yaml` model configuration
 
 **How do I debug agent behavior?**
-- Use console exporter: `OTEL_TRACES_EXPORTER=console gitclaw -p "test"`
+- Use console exporter: `OTEL_TRACES_EXPORTER=console gitagent -p "test"`
 - Check spans in Jaeger: `docker run -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one`
 - Inspect `memory/` directory for agent state
 
