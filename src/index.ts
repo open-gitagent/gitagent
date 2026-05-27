@@ -379,14 +379,18 @@ async function main(): Promise<void> {
 	const envPath = resolve(dir, ".env");
 	if (existsSync(envPath)) {
 		const envContent = readFileSync(envPath, "utf-8");
-		for (const line of envContent.split("\n")) {
+		for (const rawLine of envContent.split("\n")) {
+			const line = rawLine.trim();
+			if (!line || line.startsWith("#")) continue;
 			const eq = line.indexOf("=");
 			if (eq <= 0) continue;
 			const key = line.slice(0, eq).trim();
-			const val = line.slice(eq + 1).trim();
-			if (!process.env[key]) {
-				process.env[key] = val;
+			let val = line.slice(eq + 1).trim();
+			if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+				val = val.slice(1, -1);
 			}
+			// Agent .env wins over inherited env (e.g. a placeholder OPENAI_API_KEY in ~/.zshrc).
+			process.env[key] = val;
 		}
 	}
 

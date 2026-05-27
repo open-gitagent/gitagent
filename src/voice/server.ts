@@ -595,9 +595,9 @@ function loadEnvFile(dir: string) {
 			if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
 				val = val.slice(1, -1);
 			}
-			if (!process.env[key]) {
-				process.env[key] = val;
-			}
+			// Agent .env takes precedence over inherited env (e.g. shell placeholders
+			// like a stray OPENAI_API_KEY="your-...-here" in ~/.zshrc).
+			process.env[key] = val;
 		}
 	} catch {
 		// No .env file — that's fine

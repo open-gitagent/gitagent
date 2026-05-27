@@ -44,7 +44,6 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 			await this.connectWs(url, {
 				headers: {
 					Authorization: `Bearer ${this.config.apiKey}`,
-					"OpenAI-Beta": "realtime=v1",
 				},
 			});
 			return;
@@ -83,7 +82,6 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 		await this.connectWs(url, {
 			headers: {
 				Authorization: `Bearer ${ephemeralKey}`,
-				"OpenAI-Beta": "realtime=v1",
 			},
 		});
 	}
@@ -147,17 +145,26 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 		const payload = {
 			type: "session.update",
 			session: {
+				type: "realtime",
+				output_modalities: ["audio"],
 				instructions,
-				voice: this.config.voice || "ash",
-				modalities: ["text", "audio"],
-				turn_detection: {
-					type: "server_vad",
-					threshold: 0.6,
-					prefix_padding_ms: 400,
-					silence_duration_ms: 800,
-					create_response: true,
+				audio: {
+					input: {
+						format: { type: "audio/pcm", rate: 24000 },
+						turn_detection: {
+							type: "server_vad",
+							threshold: 0.6,
+							prefix_padding_ms: 400,
+							silence_duration_ms: 800,
+							create_response: true,
+						},
+						transcription: { model: "whisper-1" },
+					},
+					output: {
+						format: { type: "audio/pcm", rate: 24000 },
+						voice: this.config.voice || "ash",
+					},
 				},
-				input_audio_transcription: { model: "whisper-1" },
 				tool_choice: "auto",
 				tools: [
 					{
@@ -285,7 +292,6 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 				await this.connectWs(url, {
 					headers: {
 						Authorization: `Bearer ${this.config.apiKey}`,
-						"OpenAI-Beta": "realtime=v1",
 					},
 				});
 			} catch (err: any) {
@@ -302,7 +308,6 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 				const ephemeralKey = session.client_secret?.value;
 				if (!ephemeralKey) throw new Error("No ephemeral key on refresh");
 				await this.connectWs(url, {
-					headers: { Authorization: `Bearer ${ephemeralKey}`, "OpenAI-Beta": "realtime=v1" },
 				});
 			}
 			console.log(dim("[voice] Session refreshed"));
@@ -388,17 +393,21 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 				this.interrupted = false;
 				break;
 
+			// GA event names are response.output_audio*; keep the beta aliases too.
 			case "response.audio.delta":
+			case "response.output_audio.delta":
 				if (event.delta && !this.interrupted) {
 					this.emit({ type: "audio_delta", audio: event.delta });
 				}
 				break;
 
 			case "response.audio_transcript.delta":
+			case "response.output_audio_transcript.delta":
 				this.emit({ type: "transcript", role: "assistant", text: event.delta || "", partial: true });
 				break;
 
 			case "response.audio_transcript.done":
+			case "response.output_audio_transcript.done":
 				if (event.transcript) {
 					this.emit({ type: "transcript", role: "assistant", text: event.transcript });
 				}
