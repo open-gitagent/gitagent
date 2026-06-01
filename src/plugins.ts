@@ -376,14 +376,17 @@ export function mergeHooksConfigs(
 		hooks: {
 			on_session_start: [...(base?.hooks.on_session_start || [])],
 			pre_tool_use: [...(base?.hooks.pre_tool_use || [])],
+			post_tool_failure: [...(base?.hooks.post_tool_failure || [])],
 			post_response: [...(base?.hooks.post_response || [])],
+			pre_query: [...(base?.hooks.pre_query || [])],
+			file_changed: [...(base?.hooks.file_changed || [])],
 			on_error: [...(base?.hooks.on_error || [])],
 		},
 	};
 
 	for (const plugin of plugins) {
 		if (!plugin.hooks) continue;
-		for (const event of ["on_session_start", "pre_tool_use", "post_response", "on_error"] as const) {
+		for (const event of ["on_session_start", "pre_tool_use", "post_tool_failure", "post_response", "pre_query", "file_changed", "on_error"] as const) {
 			const pluginHooks = plugin.hooks.hooks[event];
 			if (pluginHooks) {
 				merged.hooks[event] = [...(merged.hooks[event] || []), ...pluginHooks];

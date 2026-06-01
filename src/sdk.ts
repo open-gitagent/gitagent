@@ -99,6 +99,9 @@ export function query(options: QueryOptions): Query {
 	let accText = "";
 	let accThinking = "";
 
+	// Track tool args by toolCallId so file_changed hook can access them
+	const toolArgsMap = new Map<string, any>();
+
 	function pushMsg(msg: GCMessage) {
 		collectedMessages.push(msg);
 		channel.push(msg);
@@ -427,6 +430,7 @@ export function query(options: QueryOptions): Query {
 				}
 
 				case "tool_execution_start":
+					toolArgsMap.set(event.toolCallId, event.args ?? {});
 					pushMsg({
 						type: "tool_use",
 						toolCallId: event.toolCallId,
@@ -444,6 +448,29 @@ export function query(options: QueryOptions): Query {
 						content: text,
 						isError: event.isError,
 					});
+
+					// Fire post_tool_failure hooks
+					if (event.isError && hooksConfig?.hooks.post_tool_failure) {
+						runHooks(hooksConfig.hooks.post_tool_failure, loaded.agentDir, {
+							event: "post_tool_failure",
+							session_id: _sessionId,
+							tool: event.toolName,
+							error: text,
+						}).catch(() => {});
+					}
+
+					// Fire file_changed hooks for write/edit tools
+					if (!event.isError && hooksConfig?.hooks.file_changed &&
+						(event.toolName === "write" || event.toolName === "edit")) {
+						const toolArgs = toolArgsMap.get(event.toolCallId) ?? {};
+						runHooks(hooksConfig.hooks.file_changed, loaded.agentDir, {
+							event: "file_changed",
+							session_id: _sessionId,
+							tool: event.toolName,
+							file_path: toolArgs.path ?? "",
+						}).catch(() => {});
+					}
+					toolArgsMap.delete(event.toolCallId);
 					break;
 				}
 
@@ -463,6 +490,23 @@ export function query(options: QueryOptions): Query {
 		// gen_ai.chat and gitagent.tool.execute spans become children of
 		// gitagent.agent.session.
 		if (typeof options.prompt === "string") {
+			// Fire pre_query hook before sending to LLM
+			if (hooksConfig?.hooks.pre_query) {
+				const result = await runHooks(hooksConfig.hooks.pre_query, loaded.agentDir, {
+					event: "pre_query",
+					session_id: _sessionId,
+					prompt: options.prompt,
+				});
+				if (result.action === "block") {
+					pushMsg({
+						type: "system",
+						subtype: "hook_blocked",
+						content: `Query blocked by hook: ${result.reason || "no reason given"}`,
+					});
+					channel.finish();
+					return;
+				}
+			}
 			await otelContext.with(_session.ctx, () =>
 				agent.prompt(options.prompt as string),
 			);
@@ -470,6 +514,23 @@ export function query(options: QueryOptions): Query {
 			// Multi-turn: iterate the async iterable
 			for await (const userMsg of options.prompt) {
 				pushMsg({ type: "user", content: userMsg.content });
+				// Fire pre_query hook for each turn
+				if (hooksConfig?.hooks.pre_query) {
+					const result = await runHooks(hooksConfig.hooks.pre_query, loaded.agentDir, {
+						event: "pre_query",
+						session_id: _sessionId,
+						prompt: userMsg.content,
+					});
+					if (result.action === "block") {
+						pushMsg({
+							type: "system",
+							subtype: "hook_blocked",
+							content: `Query blocked by hook: ${result.reason || "no reason given"}`,
+						});
+						channel.finish();
+						return;
+					}
+				}
 				await otelContext.with(_session.ctx, () =>
 					agent.prompt(userMsg.content),
 				);
