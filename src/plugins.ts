@@ -204,7 +204,7 @@ async function loadPlugin(
 	let hooks: HooksConfig | null = null;
 	if (manifest.provides?.hooks) {
 		const hooksDef: HooksConfig["hooks"] = {};
-		for (const event of ["on_session_start", "pre_tool_use", "post_response", "on_error"] as const) {
+		for (const event of ["on_session_start", "pre_tool_use", "post_tool_failure", "post_response", "pre_query", "file_changed", "on_error"] as const) {
 			const entries = manifest.provides.hooks[event];
 			if (entries && Array.isArray(entries)) {
 				hooksDef[event] = entries.map((e: any) => ({
