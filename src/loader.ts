@@ -42,6 +42,12 @@ export interface AgentManifest {
 			top_k?: number;
 			stop_sequences?: string[];
 		};
+		routing?: {
+			enabled?: boolean;
+			lightweight?: string;
+			reasoning?: string;
+			rules?: Array<{ tier: "lightweight" | "reasoning"; match: string[] }>;
+		};
 	};
 	tools: string[];
 	skills?: string[];
