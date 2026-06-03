@@ -141,6 +141,17 @@ PROJECT_DIR="${HOME}/assistant"
 if [ -d "$PROJECT_DIR" ] && [ -f "$PROJECT_DIR/agent.yaml" ]; then
   echo -e "  ${GREEN}✓${NC} Found existing assistant at ${DIM}${PROJECT_DIR}${NC}"
 
+  # Load global ~/.gitagent/.env first as a fallback, then project .env (project wins).
+  # Mirrors the server's loader precedence so keys behave the same way here as at runtime.
+  GLOBAL_ENV="${HOME}/.gitagent/.env"
+  if [ -f "$GLOBAL_ENV" ]; then
+    sed -i.bak 's/\r$//' "$GLOBAL_ENV" && rm -f "$GLOBAL_ENV.bak"
+    set -a
+    source "$GLOBAL_ENV"
+    set +a
+    echo -e "  ${GREEN}✓${NC} Loaded keys from ${DIM}${GLOBAL_ENV}${NC}"
+  fi
+
   # Re-export .env keys into current shell (strip Windows \r line endings)
   if [ -f "$PROJECT_DIR/.env" ]; then
     sed -i.bak 's/\r$//' "$PROJECT_DIR/.env" && rm -f "$PROJECT_DIR/.env.bak"

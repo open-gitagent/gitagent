@@ -3038,13 +3038,22 @@ function saveSettings(){
     .then(function(res){
       document.getElementById('settingsSaving').style.display='none';
       if(res.ok){
-        showSettingsStatus('Settings saved. Changes take effect on next query.','success');
-        // Clear password fields and refresh placeholders
+        // Clear password fields immediately (don't leave secrets in the form)
         document.getElementById('settingsOpenaiKey').value='';
         document.getElementById('settingsAnthropicKey').value='';
         document.getElementById('settingsGeminiKey').value='';
         document.getElementById('settingsComposioKey').value='';
-        settingsLoaded=false;loadSettings();settingsLoaded=true;
+        // Voice adapter is created per-WebSocket connection from process.env at connect time.
+        // If keys changed, reload so the next connection picks up the new keys and voice works
+        // without a manual restart.
+        var hasKeyChange=!!(payload.keys && Object.keys(payload.keys).length);
+        if(hasKeyChange){
+          showSettingsStatus('Settings saved — reloading to apply new keys…','success');
+          setTimeout(function(){window.location.reload();},900);
+        }else{
+          showSettingsStatus('Settings saved.','success');
+          settingsLoaded=false;loadSettings();settingsLoaded=true;
+        }
       }else{
         showSettingsStatus(res.data.error||'Failed to save','error');
       }

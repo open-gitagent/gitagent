@@ -17,6 +17,7 @@ import { formatComplianceWarnings } from "./compliance.js";
 import { readFile, mkdir, writeFile, stat, access } from "fs/promises";
 import { existsSync, readFileSync } from "fs";
 import { join, resolve } from "path";
+import { homedir } from "os";
 import { execSync } from "child_process";
 import { initLocalSession } from "./session.js";
 import type { LocalSession } from "./session.js";
@@ -375,9 +376,10 @@ async function main(): Promise<void> {
 		dir = resolve(dir);
 	}
 
-	// Load .env from agent directory so API keys are available before voice init
-	const envPath = resolve(dir, ".env");
-	if (existsSync(envPath)) {
+	// Env precedence (lowest → highest): inherited env → ~/.gitagent/.env (global fallback) → agent-dir .env (winner).
+	// loadEnvPath is called in that order so the LAST source wins; agent .env still beats a shell placeholder.
+	const loadEnvPath = (envPath: string): void => {
+		if (!existsSync(envPath)) return;
 		const envContent = readFileSync(envPath, "utf-8");
 		for (const rawLine of envContent.split("\n")) {
 			const line = rawLine.trim();
@@ -389,10 +391,11 @@ async function main(): Promise<void> {
 			if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
 				val = val.slice(1, -1);
 			}
-			// Agent .env wins over inherited env (e.g. a placeholder OPENAI_API_KEY in ~/.zshrc).
 			process.env[key] = val;
 		}
-	}
+	};
+	loadEnvPath(join(homedir(), ".gitagent", ".env"));
+	loadEnvPath(resolve(dir, ".env"));
 
 	// Auto-init telemetry after .env is loaded so OTEL_* vars set in .env are picked up.
 	if ((process.env.OTEL_EXPORTER_OTLP_ENDPOINT || process.env.OTEL_TRACES_EXPORTER === "console") && process.env.GITAGENT_OTEL_ENABLED !== "false") {

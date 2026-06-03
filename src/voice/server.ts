@@ -7,6 +7,7 @@ import { execSync } from "child_process";
 import { join, dirname, resolve, relative } from "path";
 import { writeFile, readFile, mkdir, stat } from "fs/promises";
 import { fileURLToPath } from "url";
+import { homedir } from "os";
 import { OpenAIRealtimeAdapter } from "./openai-realtime.js";
 import { GeminiLiveAdapter } from "./gemini-live.js";
 import { ComposioAdapter } from "../composio/index.js";
@@ -633,7 +634,9 @@ function loadUIHtml(): string {
 }
 
 export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => Promise<void>> {
-	// Load .env from agent directory (won't overwrite existing env vars)
+	// Env precedence (lowest → highest): inherited env → ~/.gitagent/.env (global fallback) → agent-dir .env (winner).
+	// Each loader call overrides whatever's already in process.env, so the LAST load wins.
+	loadEnvFile(join(homedir(), ".gitagent"));
 	loadEnvFile(resolve(opts.agentDir));
 
 	const port = opts.port || 3333;
