@@ -111,10 +111,6 @@ gitagent --repo https://github.com/org/repo "Add unit tests"
 
 ### SDK
 
-```bash
-npm install gitagent
-```
-
 ```typescript
 import { query } from "gitagent";
 
