@@ -91,8 +91,8 @@ check_cmd npm
 check_cmd git
 
 NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
-if [ "$NODE_VERSION" -lt 18 ]; then
-  echo -e "  ${RED}✗ Node.js 18+ required (found $(node -v))${NC}"
+if [ "$NODE_VERSION" -lt 20 ]; then
+  echo -e "  ${RED}✗ Node.js 20+ required (found $(node -v))${NC}"
   exit 1
 fi
 

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/npm/v/gitagent?style=flat-square&color=blue" alt="npm version" />
+  <img src="https://img.shields.io/npm/v/@open-gitagent/gitagent?style=flat-square&color=blue" alt="npm version" />
   <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen?style=flat-square" alt="node version" />
   <img src="https://img.shields.io/github/license/open-gitagent/gitagent?style=flat-square" alt="license" />
   <img src="https://img.shields.io/badge/TypeScript-5.7-blue?style=flat-square&logo=typescript&logoColor=white" alt="typescript" />
@@ -56,7 +56,7 @@ This will:
 - Walk you through API key setup (Quick or Advanced mode)
 - Launch the voice UI in your browser at `http://localhost:3333`
 
-> **Requirements:** Node.js 18+, npm, git
+> **Requirements:** Node.js 20+, npm, git
 
 ### Or install manually:
 
@@ -752,7 +752,7 @@ Your agent lives in a git repository with structured files:
 ### Installation & Setup
 
 **What are the requirements?**
-Node.js 18+ (or 20+ recommended), npm, and git. Install globally with `npm install -g @open-gitagent/gitagent`.
+Node.js 20+, npm, and git. Install globally with `npm install -g @open-gitagent/gitagent`.
 
 **How do I set up API keys?**
 Run the installer for guided setup:
