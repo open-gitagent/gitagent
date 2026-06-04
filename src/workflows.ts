@@ -7,6 +7,7 @@ export interface SkillFlowStep {
 	skill: string;
 	prompt: string;
 	channel?: string;
+	model?: string;
 }
 
 export interface SkillFlowDefinition {
@@ -68,6 +69,7 @@ export async function discoverWorkflows(agentDir: string): Promise<WorkflowMetad
 								skill: String(s.skill || ""),
 								prompt: String(s.prompt || ""),
 								...(s.channel ? { channel: String(s.channel) } : {}),
+								...(s.model ? { model: String(s.model) } : {}),
 							})),
 						} : { type: "basic" as const }),
 					});
@@ -113,6 +115,7 @@ export async function loadFlowDefinition(filePath: string): Promise<SkillFlowDef
 			skill: String(s.skill || ""),
 			prompt: String(s.prompt || ""),
 			...(s.channel ? { channel: String(s.channel) } : {}),
+			...(s.model ? { model: String(s.model) } : {}),
 		})),
 	};
 }
@@ -130,7 +133,7 @@ export async function saveFlowDefinition(agentDir: string, flow: SkillFlowDefini
 	const content = yaml.dump({
 		name: flow.name,
 		description: flow.description || "",
-		steps: flow.steps.map((s) => ({ skill: s.skill, prompt: s.prompt, ...(s.channel ? { channel: s.channel } : {}) })),
+		steps: flow.steps.map((s) => ({ skill: s.skill, prompt: s.prompt, ...(s.channel ? { channel: s.channel } : {}), ...(s.model ? { model: s.model } : {}) })),
 	}, { lineWidth: 120 });
 	await writeFile(filePath, content, "utf-8");
 	return filePath;

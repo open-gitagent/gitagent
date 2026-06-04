@@ -19,6 +19,8 @@ import { discoverWorkflows, loadFlowDefinition, saveFlowDefinition, deleteFlowDe
 import { discoverSchedules, saveSchedule, deleteSchedule, updateScheduleMeta } from "../schedules.js";
 import { startScheduler, stopScheduler, reloadSchedules, executeScheduledJob } from "../schedule-runner.js";
 import cron from "node-cron";
+import yaml from "js-yaml";
+import { resolveRoutedModel, type RoutingConfig } from "../model-routing.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -641,10 +643,16 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 
 	const port = opts.port || 3333;
 	let agentName = "GitAgent";
+	// Auto Model Routing config from agent.yaml (model.routing). Issue #48.
+	let modelRouting: RoutingConfig | undefined;
 	try {
 		const yamlRaw = readFileSync(join(resolve(opts.agentDir), "agent.yaml"), "utf-8");
 		const m = yamlRaw.match(/^name:\s*(.+)$/m);
 		if (m) agentName = m[1].trim();
+		const parsed = yaml.load(yamlRaw) as any;
+		if (parsed?.model?.routing && typeof parsed.model.routing === "object") {
+			modelRouting = parsed.model.routing as RoutingConfig;
+		}
 	} catch { /* fallback to default */ }
 	// Re-read on every request so `npm run build` is picked up live without a server restart.
 	// The file sits in the OS page cache, so the per-request cost is negligible.
@@ -833,7 +841,18 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 		sendToBrowser({ type: "transcript", role: "assistant",
 			text: `Running flow: ${flow.name} (${flow.steps.length} steps)` });
 
+		// Per-skill default model from each skill's SKILL.md frontmatter (`model:`).
+		// Used as a fallback when a step doesn't set its own `model`.
+		const skillModels = new Map<string, string>();
+		for (const s of await discoverSkills(opts.agentDir)) {
+			if (s.model) skillModels.set(s.name, s.model);
+		}
+
 		let runningContext = userContext;
+
+		// Observability for auto model routing (issue #48): per-step model
+		// selection plus token/cost totals, summarized in the execution log.
+		const routeLog: Array<{ step: number; skill: string; model: string; tier: string; source: string; tokens: number; costUsd: number }> = [];
 
 		for (let i = 0; i < flow.steps.length; i++) {
 			const step = flow.steps[i];
@@ -862,7 +881,22 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 				continue;
 			}
 
-			sendToBrowser({ type: "agent_working" as any, query: `Step ${i + 1}/${flow.steps.length}: ${step.skill}` } as any);
+			// Auto model routing (issue #48): classify the task by complexity and
+			// route it to the appropriate model. Explicit per-step model wins, then
+			// the skill's declared default, then automatic classification, then the
+			// primary model as fallback.
+			const route = resolveRoutedModel({
+				stepModel: step.model,
+				skillModel: skillModels.get(step.skill),
+				classifyText: `${step.skill} ${step.prompt}`,
+				routing: modelRouting,
+				primaryModel: opts.model,
+			});
+			const stepModel = route.model;
+			const routeNote = route.source === "auto" ? `auto/${route.tier}` : route.source;
+
+			sendToBrowser({ type: "agent_working" as any,
+				query: `Step ${i + 1}/${flow.steps.length}: ${step.skill}${stepModel ? ` (${stepModel} · ${routeNote})` : ""}` } as any);
 
 			const prompt = `Use the skill "${step.skill}" (load it with /skill:${step.skill}).
 ${step.prompt.replace(/\{input\}/g, userContext)}
@@ -873,22 +907,50 @@ ${runningContext}`;
 			const result = query({
 				prompt,
 				dir: opts.agentDir,
-				model: opts.model,
+				model: stepModel,
 				env: opts.env,
 			});
 
 			let stepOutput = "";
+			let stepTokens = 0;
+			let stepCost = 0;
 			for await (const msg of result) {
 				if (msg.type === "assistant" && msg.content) stepOutput += msg.content;
+				if (msg.type === "assistant" && msg.usage) {
+					stepTokens += msg.usage.totalTokens ?? 0;
+					stepCost += msg.usage.costUsd ?? 0;
+				}
 				if (msg.type === "tool_use") sendToBrowser({ type: "tool_call", toolName: msg.toolName, args: msg.args } as any);
 				if (msg.type === "tool_result") sendToBrowser({ type: "tool_result", toolName: msg.toolName, content: msg.content, isError: msg.isError } as any);
 			}
+
+			routeLog.push({
+				step: i + 1, skill: step.skill, model: stepModel ?? "(default)",
+				tier: route.tier ?? "-", source: route.source, tokens: stepTokens, costUsd: stepCost,
+			});
 
 			runningContext += `\n\n[Step ${i + 1} result (${step.skill})]: ${stepOutput}`;
 			sendToBrowser({ type: "agent_done" as any, result: `Step ${i + 1} complete` } as any);
 		}
 
-		sendToBrowser({ type: "transcript", role: "assistant", text: `Flow "${flow.name}" completed.` });
+		// Routing summary — model selected per task plus token/cost totals (issue #48).
+		if (routeLog.length > 0) {
+			const totalTokens = routeLog.reduce((a, r) => a + r.tokens, 0);
+			const totalCost = routeLog.reduce((a, r) => a + r.costUsd, 0);
+			const autoSteps = routeLog.filter((r) => r.source === "auto");
+			const lightCount = autoSteps.filter((r) => r.tier === "lightweight").length;
+			console.log(dim(`[routing] Flow "${flow.name}" summary — ${routeLog.length} steps, ${totalTokens} tokens, $${totalCost.toFixed(4)}`));
+			for (const r of routeLog) {
+				console.log(dim(`[routing]   step ${r.step} ${r.skill}: ${r.model} [${r.source}${r.tier !== "-" ? "/" + r.tier : ""}] ${r.tokens} tok $${r.costUsd.toFixed(4)}`));
+			}
+			const autoNote = autoSteps.length > 0
+				? ` · auto-routed ${autoSteps.length} (${lightCount} → lightweight)`
+				: "";
+			sendToBrowser({ type: "transcript", role: "assistant",
+				text: `Flow "${flow.name}" completed. ${routeLog.length} steps · ${totalTokens} tokens · $${totalCost.toFixed(4)}${autoNote}` });
+		} else {
+			sendToBrowser({ type: "transcript", role: "assistant", text: `Flow "${flow.name}" completed.` });
+		}
 	}
 
 	// ── File API helpers ────────────────────────────────────────────────
@@ -2558,7 +2620,7 @@ return false;
 
 		} else if (url.pathname === "/api/flows/save" && req.method === "POST") {
 			const body = await readBody(req);
-			let parsed: { name: string; description: string; steps: { skill: string; prompt: string; channel?: string }[] };
+			let parsed: { name: string; description: string; steps: { skill: string; prompt: string; channel?: string; model?: string }[] };
 			try { parsed = JSON.parse(body); } catch { return jsonReply(res, 400, { error: "Invalid JSON" }); }
 			if (!parsed.name || !parsed.steps?.length) return jsonReply(res, 400, { error: "Missing name or steps" });
 			try {
