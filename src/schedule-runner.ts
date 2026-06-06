@@ -2,7 +2,7 @@ import cron, { type ScheduledTask } from "node-cron";
 import { discoverSchedules, updateScheduleMeta, type ScheduleDefinition } from "./schedules.js";
 import { mkdirSync, appendFileSync } from "fs";
 import { join } from "path";
-import type { ServerMessage } from "./voice/adapter.js";
+import type { ServerMessage } from "./adapter.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 

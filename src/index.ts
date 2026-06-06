@@ -21,7 +21,9 @@ import { homedir } from "os";
 import { execSync } from "child_process";
 import { initLocalSession } from "./session.js";
 import type { LocalSession } from "./session.js";
-import { startVoiceServer } from "./voice/server.js";
+// Voice mode is shipped as an optional sibling package (@open-gitagent/voice).
+// Imported dynamically below so the slim core has no static dependency on it —
+// users without voice get a clean install + a clear error if they try --voice.
 import { handlePluginCommand } from "./plugin-cli.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
@@ -402,8 +404,24 @@ async function main(): Promise<void> {
 		await initTelemetry({});
 	}
 
-	// Voice mode
+	// Voice mode — dynamically load the @open-gitagent/voice package.
+	// Core ships without voice so the published tarball stays slim and supply-chain
+	// scanners don't reject it. If the user passes --voice without voice installed,
+	// we print an install hint and exit cleanly.
 	if (voice) {
+		let voiceMod: { startVoiceServer: (opts: any) => Promise<() => Promise<void>> };
+		try {
+			// @ts-ignore — peer/optional package, not in core's dependencies
+			voiceMod = await import("@open-gitagent/voice");
+		} catch {
+			console.error(red("\nVoice mode lives in a separate optional package."));
+			console.error("Install it once globally:\n");
+			console.error("  " + bold("npm install -g @open-gitagent/voice") + "\n");
+			console.error(dim("Then rerun: gitagent --voice -d <agent-dir>"));
+			console.error(dim("Or use install.sh, which installs both packages by default."));
+			process.exit(1);
+		}
+
 		let adapterBackend: "openai-realtime" | "gemini-live";
 		let apiKey: string | undefined;
 
@@ -421,7 +439,7 @@ async function main(): Promise<void> {
 			}
 		}
 
-		const cleanup = await startVoiceServer({
+		const cleanup = await voiceMod.startVoiceServer({
 			adapter: adapterBackend,
 			adapterConfig: { apiKey },
 			agentDir: dir,
