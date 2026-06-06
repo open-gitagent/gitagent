@@ -106,17 +106,28 @@ if [ "$(uname)" != "Darwin" ] && ! npm root -g 2>/dev/null | grep -q "$HOME"; th
   NPM_CMD="sudo npm"
 fi
 
+# v2.0+ ships voice as a separate optional package. We install both by default
+# so the curl-bash UX is unchanged. Set GITAGENT_SLIM=1 before the install
+# (e.g. in sandboxed/CI environments where the voice package's larger surface
+# could trip supply-chain scanners) to install the core only.
+NPM_PACKAGES="@open-gitagent/gitagent@latest"
+VOICE_LABEL="(core only — GITAGENT_SLIM=1)"
+if [ "${GITAGENT_SLIM:-}" != "1" ]; then
+  NPM_PACKAGES="$NPM_PACKAGES @open-gitagent/voice@latest"
+  VOICE_LABEL="(core + voice)"
+fi
+
 if command -v gitagent &>/dev/null; then
   INSTALLED_VER="$(npm ls -g @open-gitagent/gitagent --depth=0 --json 2>/dev/null | node -pe "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).dependencies?.['@open-gitagent/gitagent']?.version || ''" 2>/dev/null || echo "")"
   LATEST_VER="$(npm view @open-gitagent/gitagent version 2>/dev/null || echo "")"
 
   if [ -n "$INSTALLED_VER" ] && [ -n "$LATEST_VER" ] && [ "$INSTALLED_VER" != "$LATEST_VER" ]; then
-    echo -e "  ${YELLOW}⬆${NC}  gitagent ${DIM}v${INSTALLED_VER}${NC} installed — ${GREEN}v${LATEST_VER}${NC} available"
+    echo -e "  ${YELLOW}⬆${NC}  gitagent ${DIM}v${INSTALLED_VER}${NC} installed — ${GREEN}v${LATEST_VER}${NC} available ${DIM}${VOICE_LABEL}${NC}"
     read -rp "  Update to v${LATEST_VER}? [Y/n]: " UPDATE_CHOICE
     UPDATE_CHOICE="${UPDATE_CHOICE:-Y}"
     if [[ "$UPDATE_CHOICE" =~ ^[Yy] ]]; then
       echo -e "  ${BOLD}Updating gitagent...${NC}"
-      $NPM_CMD install -g @open-gitagent/gitagent@latest 2>&1 | tail -2
+      $NPM_CMD install -g $NPM_PACKAGES 2>&1 | tail -2
       echo -e "  ${GREEN}✓${NC} gitagent updated to v${LATEST_VER}"
     else
       echo -e "  ${DIM}  keeping v${INSTALLED_VER}${NC}"
@@ -125,13 +136,13 @@ if command -v gitagent &>/dev/null; then
     echo -e "  ${GREEN}✓${NC} gitagent v${INSTALLED_VER:-latest} ${DIM}(up to date)${NC}"
   fi
 else
-  echo -e "  ${BOLD}Installing gitagent...${NC}"
+  echo -e "  ${BOLD}Installing gitagent...${NC} ${DIM}${VOICE_LABEL}${NC}"
   # Remove corrupted partial installs that cause ENOTDIR
   NPM_GLOBAL_DIR="$(npm root -g 2>/dev/null || echo "")"
   if [ -n "$NPM_GLOBAL_DIR" ] && [ -d "${NPM_GLOBAL_DIR}/@open-gitagent/gitagent" ] && [ ! -f "${NPM_GLOBAL_DIR}/@open-gitagent/gitagent/package.json" ]; then
     $NPM_CMD rm -rf "${NPM_GLOBAL_DIR}/@open-gitagent/gitagent" 2>/dev/null
   fi
-  $NPM_CMD install -g @open-gitagent/gitagent@latest 2>&1 | tail -2
+  $NPM_CMD install -g $NPM_PACKAGES 2>&1 | tail -2
   echo -e "  ${GREEN}✓${NC} gitagent installed"
 fi
 echo ""
