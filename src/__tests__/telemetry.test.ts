@@ -32,6 +32,9 @@ afterEach(async () => {
 	// Always clean up telemetry after each test to avoid cross-test
 	// contamination from global state.
 	await shutdownTelemetry();
+	// trace.disable() unregisters the global tracer provider and
+	// installs a no-op ProxyTracerProvider, preventing stale spans
+	// from a previous test's provider leaking into the next test.
 	try {
 		trace.disable();
 	} catch {
@@ -55,6 +58,7 @@ describe("telemetry", () => {
 	it("initTelemetry without OTLP endpoint does not throw and leaves module in a consistent state", async () => {
 		// Ensure the env var is not set for this test
 		const saved = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+		const wasSet = "OTEL_EXPORTER_OTLP_ENDPOINT" in process.env;
 		delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
 
 		try {
@@ -66,8 +70,10 @@ describe("telemetry", () => {
 				"initTelemetry must never throw, even without an endpoint",
 			);
 		} finally {
-			if (saved !== undefined) {
+			if (wasSet) {
 				process.env.OTEL_EXPORTER_OTLP_ENDPOINT = saved;
+			} else {
+				delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
 			}
 		}
 	});
