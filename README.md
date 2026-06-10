@@ -61,8 +61,36 @@ This will:
 ### Or install manually:
 
 ```bash
+# Slim CLI + SDK (recommended in sandboxed/CI environments where supply-chain
+# scanners reject larger bundles)
 npm install -g @open-gitagent/gitagent
+
+# Add voice mode + web UI (the same web UI install.sh launches at :3333)
+npm install -g @open-gitagent/voice
 ```
+
+`install.sh` installs both packages by default. Set `GITAGENT_SLIM=1` before
+the curl-bash to skip voice.
+
+## Migrating from 1.x → 2.0
+
+Voice mode lives in `@open-gitagent/voice` now. The reason: as a single bundle,
+the package was being blocked by some supply-chain scanners that flagged its
+3,800-line `dist/voice/ui.html` and the unused `baileys` dependency. Splitting
+voice out drops the slim-core tarball from ~180 kB to ~85 kB and removes the
+scanner triggers entirely.
+
+```bash
+# If you were on v1.x and used voice:
+npm install -g @open-gitagent/gitagent@latest @open-gitagent/voice
+
+# If you only use the SDK / non-voice CLI:
+npm install -g @open-gitagent/gitagent@latest
+```
+
+The `gitagent` command and `@open-gitagent/gitagent` SDK exports are unchanged.
+`gitagent --voice` dynamically loads `@open-gitagent/voice`; without it
+installed, it prints a one-line install hint and exits cleanly.
 
 ## Quick Start
 
@@ -752,7 +780,7 @@ Your agent lives in a git repository with structured files:
 ### Installation & Setup
 
 **What are the requirements?**
-Node.js 20+, npm, and git. Install globally with `npm install -g @open-gitagent/gitagent`.
+Node.js 20+, npm, and git. Install globally with `npm install -g @open-gitagent/gitagent` (slim CLI + SDK). Add `@open-gitagent/voice` for voice mode + the web UI.
 
 **How do I set up API keys?**
 Run the installer for guided setup:

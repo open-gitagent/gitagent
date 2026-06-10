@@ -37,9 +37,70 @@ export { createSandboxContext } from "./sandbox.js";
 export type { LocalSession } from "./session.js";
 export { initLocalSession } from "./session.js";
 
-// Voice
-export type { VoiceAdapter, VoiceAdapterConfig, VoiceServerOptions } from "./voice/adapter.js";
-export { startVoiceServer } from "./voice/server.js";
+// Voice — startVoiceServer moved to the optional @open-gitagent/voice package
+// in v2.0.0. The message-type protocol below stays in core because chat history
+// and the standalone scheduler persist and emit these types.
+
+// Multimodal adapter protocol types (web-UI client/server message bus)
+export type {
+	AdapterBackend,
+	ClientMessage,
+	ClientAudioMessage,
+	ClientVideoFrameMessage,
+	ClientTextMessage,
+	ClientFileMessage,
+	ServerMessage,
+	ServerAudioDelta,
+	ServerTranscript,
+	ServerAgentWorking,
+	ServerAgentDone,
+	ServerToolCall,
+	ServerToolResult,
+	ServerAgentThinking,
+	ServerError,
+	ServerInterrupt,
+	ServerFilesChanged,
+	ServerMemorySaving,
+	ServerLogEntry,
+	MultimodalAdapter,
+	MultimodalAdapterConfig,
+	VoiceServerOptions,
+	VoiceAdapter,
+	VoiceAdapterConfig,
+} from "./adapter.js";
+export { DEFAULT_VOICE_INSTRUCTIONS } from "./adapter.js";
+
+// Chat history persistence (used by voice and by any non-voice consumer)
+export {
+	appendMessage,
+	loadHistory,
+	deleteHistory,
+	summarizeHistory,
+} from "./chat-history.js";
+
+// Symbols re-exported for @open-gitagent/voice (consumed via peer dependency).
+// These are stable enough for the voice package to depend on; flagged here so
+// future renames know they're part of the public-ish surface.
+export { getVoiceContext, getAgentContext } from "./context.js";
+export { discoverSkills } from "./skills.js";
+export {
+	discoverWorkflows,
+	loadFlowDefinition,
+	saveFlowDefinition,
+	deleteFlowDefinition,
+} from "./workflows.js";
+export {
+	discoverSchedules,
+	saveSchedule,
+	deleteSchedule,
+	updateScheduleMeta,
+} from "./schedules.js";
+export {
+	startScheduler,
+	stopScheduler,
+	reloadSchedules,
+	executeScheduledJob,
+} from "./schedule-runner.js";
 
 // Plugin types
 export type { PluginManifest, PluginConfig, LoadedPlugin } from "./plugin-types.js";
