@@ -12,10 +12,10 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { execSync } from "child_process";
 
-let createMemoryTool: typeof import("../../../dist/tools/memory.js").createMemoryTool;
+let createMemoryTool: typeof import("../memory.ts").createMemoryTool;
 
 before(async () => {
-	const mod = await import("../../../dist/tools/memory.js");
+	const mod = await import("../memory.ts");
 	createMemoryTool = mod.createMemoryTool;
 });
 
@@ -25,8 +25,8 @@ describe("memory tool", () => {
 		const dir = await mkdtemp(join(tmpdir(), "gitagent-memory-test-"));
 		execSync("git init -q", { cwd: dir });
 		// Configure git user for commits
-		execSync('git config user.email "test@gitagent.test"', { cwd: dir });
-		execSync('git config user.name "Test Agent"', { cwd: dir });
+		execSync('git config --local user.email "test@gitagent.test"', { cwd: dir });
+		execSync('git config --local user.name "Test Agent"', { cwd: dir });
 		return dir;
 	}
 
