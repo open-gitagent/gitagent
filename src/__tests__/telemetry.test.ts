@@ -11,9 +11,11 @@ import assert from "node:assert/strict";
 import { trace } from "@opentelemetry/api";
 import {
 	NodeTracerProvider,
+} from "@opentelemetry/sdk-trace-node";
+import {
 	InMemorySpanExporter,
 	SimpleSpanProcessor,
-} from "@opentelemetry/sdk-trace-node";
+} from "@opentelemetry/sdk-trace-base";
 
 let initTelemetry: typeof import("../telemetry.ts").initTelemetry;
 let shutdownTelemetry: typeof import("../telemetry.ts").shutdownTelemetry;
@@ -97,7 +99,9 @@ describe("telemetry", () => {
 			const span = tracer.startSpan("test-span");
 			span.end();
 
-			// Force flush by shutting down (which is handled by afterEach)
+			// Force flush so the span lands in the in-memory exporter
+			// before we read it back.
+			await provider.forceFlush();
 			const spans = exporter.getFinishedSpans();
 			assert.equal(spans.length, 1, "span should be exported");
 			assert.equal(spans[0].name, "test-span");
