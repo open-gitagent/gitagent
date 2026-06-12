@@ -1,7 +1,7 @@
 # GitAgent Documentation
 
 > **GitAgent** — A universal git-native multimodal always-learning AI Agent
-> Version 1.3.3 | MIT License | [github.com/open-gitagent/gitagent](https://github.com/open-gitagent/gitagent)
+> Version 1.5.2 | MIT License | [github.com/open-gitagent/gitagent](https://github.com/open-gitagent/gitagent)
 
 ---
 
@@ -83,7 +83,7 @@ The installer offers four options:
 curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/install.sh | bash
 
 # Or manually
-npm update -g gitagent
+npm update -g @open-gitagent/gitagent
 ```
 
 ---
