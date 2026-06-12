@@ -12,30 +12,25 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { execSync } from "child_process";
 
-let createMemoryTool: typeof import("../memory.ts").createMemoryTool;
+let createMemoryTool: typeof import("../src/tools/memory.ts").createMemoryTool;
 
 before(async () => {
-	const mod = await import("../memory.ts");
+	const mod = await import("../src/tools/memory.ts");
 	createMemoryTool = mod.createMemoryTool;
 });
 
 describe("memory tool", () => {
-	/** Create a temporary directory with git init and return the path. */
 	async function setupRepo(): Promise<string> {
 		const dir = await mkdtemp(join(tmpdir(), "gitagent-memory-test-"));
 		execSync("git init -q", { cwd: dir });
-		// Configure git user for commits
 		execSync('git config --local user.email "test@gitagent.test"', { cwd: dir });
 		execSync('git config --local user.name "Test Agent"', { cwd: dir });
 		return dir;
 	}
 
-	/** Clean up a temp directory. */
 	async function cleanup(dir: string): Promise<void> {
 		await rm(dir, { recursive: true, force: true }).catch(() => {});
 	}
-
-	// ── load ─────────────────────────────────────────────────────────
 
 	describe("load", () => {
 		it("returns stored memory content", async () => {
@@ -43,14 +38,12 @@ describe("memory tool", () => {
 			try {
 				const tool = createMemoryTool(dir);
 
-				// First, save some memory content
 				await tool.execute("call-1", {
 					action: "save",
 					content: "# Memory\n\n- Remember to buy milk\n- Project uses TypeScript",
 					message: "Initial memory",
 				});
 
-				// Now load it
 				const result = await tool.execute("call-2", { action: "load" });
 
 				assert.ok(result.content);
@@ -67,7 +60,6 @@ describe("memory tool", () => {
 			try {
 				const tool = createMemoryTool(dir);
 
-				// Load from a repo with no memory file
 				const result = await tool.execute("call-1", { action: "load" });
 
 				assert.equal(result.content[0].text, "No memories yet.");
@@ -79,7 +71,6 @@ describe("memory tool", () => {
 		it("returns 'No memories yet.' when memory file has only heading", async () => {
 			const dir = await setupRepo();
 			try {
-				// Write the default heading-only memory file
 				await mkdir(join(dir, "memory"), { recursive: true });
 				await writeFile(join(dir, "memory", "MEMORY.md"), "# Memory", "utf-8");
 
@@ -92,8 +83,6 @@ describe("memory tool", () => {
 			}
 		});
 	});
-
-	// ── save ─────────────────────────────────────────────────────────
 
 	describe("save", () => {
 		it("writes content and commits to git", async () => {
@@ -113,7 +102,6 @@ describe("memory tool", () => {
 				);
 				assert.ok(result.content[0].text.includes("First save"));
 
-				// Verify the file was written
 				const { readFile } = await import("fs/promises");
 				const fileContent = await readFile(
 					join(dir, "memory", "MEMORY.md"),
@@ -121,7 +109,6 @@ describe("memory tool", () => {
 				);
 				assert.ok(fileContent.includes("Saved entry one"));
 
-				// Verify the git commit exists
 				const log = execSync("git log --oneline", {
 					cwd: dir,
 					encoding: "utf-8",
@@ -164,7 +151,6 @@ describe("memory tool", () => {
 					() =>
 						tool.execute("call-1", {
 							action: "save",
-							// content intentionally omitted
 						}),
 					/content is required for save action/,
 				);
@@ -173,8 +159,6 @@ describe("memory tool", () => {
 			}
 		});
 	});
-
-	// ── abort signal ─────────────────────────────────────────────────
 
 	describe("abort signal", () => {
 		it("throws when signal is already aborted", async () => {
