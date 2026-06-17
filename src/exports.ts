@@ -23,6 +23,7 @@ export type {
 
 // Internal types (for advanced usage)
 export type { AgentManifest, LoadedAgent } from "./loader.js";
+export type { McpServerConfig } from "./mcp/types.js";
 export type { SkillMetadata } from "./skills.js";
 export type { WorkflowMetadata } from "./workflows.js";
 export type { SubAgentMetadata } from "./agents.js";

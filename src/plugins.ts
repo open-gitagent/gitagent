@@ -4,6 +4,7 @@ import { execFileSync } from "child_process";
 import { createRequire } from "module";
 import { homedir } from "os";
 import yaml from "js-yaml";
+import { interpolateEnvString } from "./env-utils.js";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type {
 	PluginManifest,
@@ -73,7 +74,7 @@ function resolvePluginConfig(
 			let value = userConfig[key];
 			// Resolve ${ENV_VAR} syntax
 			if (typeof value === "string") {
-				value = value.replace(/\$\{(\w+)\}/g, (_, envName) => process.env[envName] || "");
+				value = interpolateEnvString(value);
 			}
 			resolved[key] = value;
 		} else if (prop.env && process.env[prop.env]) {

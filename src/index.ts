@@ -11,6 +11,7 @@ import { expandSkillCommand, refreshSkills } from "./skills.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import type { HooksConfig } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
+import { setupMcp } from "./mcp/manager.js";
 import { toAgentTool } from "./tool-utils.js";
 import { AuditLogger, isAuditEnabled } from "./audit.js";
 import { formatComplianceWarnings } from "./compliance.js";
@@ -541,6 +542,10 @@ async function main(): Promise<void> {
 		}
 	}
 
+	// MCP tools (manifest-declared servers)
+	const mcpSetup = await setupMcp(manifest.mcp_servers, existingToolNames);
+	tools.push(...mcpSetup.tools);
+
 	// Wrap with hooks if configured
 	if (hooksConfig) {
 		tools = tools.map((t) => wrapToolWithHooks(t, hooksConfig, agentDir, sessionId));
@@ -633,6 +638,7 @@ async function main(): Promise<void> {
 			}
 			throw err;
 		} finally {
+			await mcpSetup.cleanup().catch(() => {});
 			if (localSession) {
 				console.log(dim("Finalizing session..."));
 				localSession.finalize();
@@ -667,6 +673,7 @@ async function main(): Promise<void> {
 
 			if (trimmed === "/quit" || trimmed === "/exit") {
 				rl.close();
+				await mcpSetup.cleanup().catch(() => {});
 				if (localSession) {
 					console.log(dim("Finalizing session..."));
 					localSession.finalize();
@@ -818,7 +825,7 @@ async function main(): Promise<void> {
 			try {
 				_session.end({ "gitagent.cost_usd": _totalCostUsd });
 			} catch { /* ignore */ }
-			stopSandbox().finally(() => process.exit(0));
+			Promise.all([mcpSetup.cleanup(), stopSandbox()]).finally(() => process.exit(0));
 		}
 	});
 
