@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { loadHistory } from "./voice/chat-history.js";
-import type { ServerMessage } from "./voice/adapter.js";
+import { loadHistory } from "./chat-history.js";
+import type { ServerMessage } from "./adapter.js";
 
 /** Token estimate: ~4 chars per token */
 function estimateTokens(text: string): number {

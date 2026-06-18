@@ -60,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/install
 
 **Manual install:**
 ```bash
-npm install -g @open-gitagent/gitagent
+npm install -g @open-gitagent/gitagent @open-gitagent/voice   # omit @open-gitagent/voice for slim CLI/SDK only
 mkdir ~/assistant && cd ~/assistant && git init
 gitagent --voice --dir .
 ```

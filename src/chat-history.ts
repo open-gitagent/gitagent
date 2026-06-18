@@ -1,7 +1,7 @@
 import { appendFileSync, readFileSync, unlinkSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import type { ServerMessage } from "./adapter.js";
-import { query } from "../sdk.js";
+import { query } from "./sdk.js";
 
 /** Types we skip — too large or ephemeral */
 const SKIP_TYPES = new Set(["audio_delta", "agent_thinking"]);
