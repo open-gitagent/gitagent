@@ -19,6 +19,7 @@
 - [Workflows & SkillFlows](#workflows--skillflows)
 - [Hooks](#hooks)
 - [Plugins](#plugins)
+- [A2A Client](#a2a-client)
 - [Memory System](#memory-system)
 - [Schedules & Cron](#schedules--cron)
 - [Integrations](#integrations)
@@ -214,6 +215,11 @@ plugins:
     enabled: true
     config:
       api_key: "${MY_PLUGIN_KEY}"
+
+# A2A agents (optional) — remote agents gitagent may call (see "A2A Client")
+a2a_agents:
+  research-agent:
+    url: https://research.example.com
 
 # Compliance (optional — for enterprise)
 compliance:
@@ -727,6 +733,66 @@ gitagent plugin list
 gitagent plugin remove my-plugin
 gitagent plugin init my-plugin  # scaffold a new plugin
 ```
+
+---
+
+## A2A Client
+
+The **A2A client** lets gitagent call **other AI agents** that speak the
+[A2A (Agent2Agent) protocol](https://a2a-protocol.org) — the open interop standard maintained
+by the Linux Foundation. This is how gitagent talks to agents built on other frameworks
+(LangGraph, CrewAI, Google ADK, …): it delegates a task to a remote agent and folds the result
+back into its own reasoning.
+
+**It is outbound-only — gitagent does not run a server.** It connects out to a remote agent's
+Agent Card, just like any HTTP client. With no `a2a_agents` configured, nothing happens and no
+network calls are made; the default CLI behavior is unchanged.
+
+> A2A is complementary to local tools: tools give the agent *capabilities*, A2A gives it
+> *peers*. Each remote skill is exposed as a normal tool, so delegation looks identical to any
+> other tool call.
+
+### Configuration
+
+Add an `a2a_agents` map to `agent.yaml`:
+
+```yaml
+a2a_agents:
+  research-agent:
+    url: https://research.example.com        # base URL; Agent Card resolved from
+                                              # /.well-known/agent-card.json
+    headers:                                  # optional auth/headers; ${VAR} interpolated
+      Authorization: "Bearer ${RESEARCH_TOKEN}"
+    timeoutMs: 30000                          # optional; connect + per-call timeout (default 30000)
+    stream: true                              # optional; use SSE streaming when supported (default true)
+    cardPath: /.well-known/agent-card.json    # optional; override the Agent Card path
+```
+
+### How it works
+
+1. **Discovery (startup).** For each configured agent, gitagent fetches its **Agent Card** and
+   reads the agent's name, description, and skills.
+2. **Tools (startup).** Each skill becomes one tool named `<agent>__<skill>`
+   (e.g. `research-agent__web_search`). An agent that declares no skills becomes a single tool
+   named after the agent. Names that collide with an existing tool are skipped with a warning.
+3. **Delegation (runtime).** When the model calls one of these tools with a `message`, gitagent
+   sends it to the remote agent. If the agent supports streaming, partial output is shown live
+   (`message/stream` over SSE); otherwise it blocks until the task completes (`message/send`).
+   The remote agent's reply is returned as the tool result.
+
+### Behavior & errors
+
+- **Opt-in:** no `a2a_agents` → feature is inert, zero overhead.
+- **Non-fatal connections:** if an agent can't be reached at startup, it is skipped with a
+  warning and the rest of the session works normally.
+- **Per-call errors** are returned to the model as text (so it can react), not thrown.
+- **Auth:** put credentials in `headers` and reference environment variables with `${VAR}`.
+
+### Security note
+
+The A2A client makes **outbound** calls only — it opens no ports and exposes no server. Treat
+remote agents like any third-party service: only configure agents you trust, and supply
+credentials via environment variables rather than committing them to `agent.yaml`.
 
 ---
 
