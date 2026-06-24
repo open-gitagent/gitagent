@@ -196,8 +196,14 @@ export function query(options: QueryOptions): Query {
 		const declarativeTools = await loadDeclarativeTools(loaded.agentDir);
 		tools = [...tools, ...declarativeTools];
 
-		// A2A remote-agent tools (manifest-declared) — outbound only, opt-in.
-		const a2aSetup = await setupA2A(loaded.manifest.a2a_agents, new Set(tools.map((t) => t.name)));
+		// A2A remote-agent tools — outbound only, opt-in. Sourced from the
+		// manifest's `a2a_agents` and/or the `a2aAgents` option (option wins on
+		// key collision), so SDK users can define agents purely in code.
+		const a2aAgents =
+			loaded.manifest.a2a_agents || options.a2aAgents
+				? { ...loaded.manifest.a2a_agents, ...options.a2aAgents }
+				: undefined;
+		const a2aSetup = await setupA2A(a2aAgents, new Set(tools.map((t) => t.name)));
 		tools = [...tools, ...a2aSetup.tools];
 		a2aCleanup = a2aSetup.cleanup;
 

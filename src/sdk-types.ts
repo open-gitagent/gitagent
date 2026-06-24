@@ -1,5 +1,6 @@
 import type { AgentManifest } from "./loader.js";
 import type { SessionCosts } from "./cost-tracker.js";
+import type { A2AAgentConfig } from "./a2a/types.js";
 
 // ── Message types ──────────────────────────────────────────────────────
 
@@ -136,6 +137,12 @@ export interface QueryOptions {
 	systemPrompt?: string;
 	systemPromptSuffix?: string;
 	tools?: GCToolDefinition[];
+	/**
+	 * Remote A2A agents to connect to, defined in code. Merged on top of the
+	 * agent.yaml `a2a_agents` map (these win on key collision). Each remote skill
+	 * becomes a `<key>__<skill>` tool, same as the manifest-declared ones.
+	 */
+	a2aAgents?: Record<string, A2AAgentConfig>;
 	replaceBuiltinTools?: boolean;
 	allowedTools?: string[];
 	disallowedTools?: string[];
