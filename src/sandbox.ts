@@ -70,25 +70,39 @@ export async function createSandboxContext(
 		);
 	}
 
-	const gitMachine = new gitmachine.GitMachine({
-		provider: config.provider,
+	const apiKey = process.env.E2B_API_KEY;
+	if (!apiKey) {
+		throw new Error(
+			"Sandbox mode requires an E2B API key. Set E2B_API_KEY in your environment.\n" +
+			"Get one at https://e2b.dev (Dashboard → API Keys).",
+		);
+	}
+
+	// gitmachine splits VM creation (E2BMachine) from git lifecycle (GitMachine):
+	// build the provider machine first, then hand it to GitMachine. Note the key
+	// names differ between the two — E2BMachine uses `envs`, GitMachine uses `env`.
+	const machine = new gitmachine.E2BMachine({
+		apiKey,
 		template: config.template,
 		timeout: config.timeout,
+		envs: config.envs,
+	});
+
+	const gitMachine = new gitmachine.GitMachine({
+		machine,
 		repository,
 		token,
 		session: config.session,
 		autoCommit: config.autoCommit ?? true,
-		envs: config.envs,
+		env: config.envs,
 	});
 
-	// The repo path inside the sandbox is determined by gitmachine after start().
-	// Convention: /home/user/<repo-name>
-	const repoName = repository.split("/").pop()?.replace(/\.git$/, "") || "repo";
-	const repoPath = `/home/user/${repoName}`;
+	// gitmachine clones into a fixed path inside the VM (/home/user/repo).
+	const repoPath = "/home/user/repo";
 
 	return {
 		gitMachine,
-		machine: gitMachine.machine,
+		machine,
 		repoPath,
 	};
 }
