@@ -200,7 +200,7 @@ export function query(options: QueryOptions): Query {
 		// manifest's `a2a_agents` and/or the `a2aAgents` option (option wins on
 		// key collision), so SDK users can define agents purely in code.
 		const a2aAgents =
-			loaded.manifest.a2a_agents || options.a2aAgents
+			(loaded.manifest.a2a_agents || options.a2aAgents)
 				? { ...loaded.manifest.a2a_agents, ...options.a2aAgents }
 				: undefined;
 		const a2aSetup = await setupA2A(a2aAgents, new Set(tools.map((t) => t.name)));

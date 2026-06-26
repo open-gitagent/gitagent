@@ -46,8 +46,10 @@ const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
 let a2aCleanup: (() => Promise<void>) | null = null;
 const runA2ACleanup = async () => {
 	if (!a2aCleanup) return;
+	const fn = a2aCleanup;
+	a2aCleanup = null;
 	try {
-		await a2aCleanup();
+		await fn();
 	} catch {
 		/* best-effort — never block exit */
 	}
@@ -857,7 +859,9 @@ async function main(): Promise<void> {
 			try {
 				_session.end({ "gitagent.cost_usd": _totalCostUsd });
 			} catch { /* ignore */ }
-			runA2ACleanup().finally(() => stopSandbox().finally(() => process.exit(0)));
+			runA2ACleanup()
+				.finally(() => shutdownTelemetry().catch(() => {}))
+				.finally(() => stopSandbox().finally(() => process.exit(0)));
 		}
 	});
 
