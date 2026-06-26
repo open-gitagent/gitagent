@@ -91,15 +91,15 @@ describe("buildToolsForConnection", () => {
 
 		const echo = tools.find((t) => t.name === "srv__echo")!;
 		const res = await echo.execute("call-1", { msg: "hello" });
-		assert.equal(res.content[0].text, "hello");
+		assert.equal(res, "hello");
 
 		const boom = tools.find((t) => t.name === "srv__boom")!;
 		const boomRes = await boom.execute("call-2", {});
-		assert.match(boomRes.content[0].text, /^Error: /);
+		assert.match(boomRes, /^Error: /);
 
 		const pic = tools.find((t) => t.name === "srv__pic")!;
 		const picRes = await pic.execute("call-3", {});
-		assert.match(picRes.content[0].text, /\[image: image\/png/);
+		assert.match(picRes, /\[image: image\/png/);
 
 		await conn.close();
 	});
@@ -142,7 +142,7 @@ describe("buildToolsForConnection — pagination & name sanitization", () => {
 		};
 		const tools = await buildToolsForConnection({ name: "srv", client: mockClient, close: async () => {} });
 		const res = await tools[0].execute("c1", {});
-		assert.match((res.content[0] as any).text, /^Error: .*-32602/);
+		assert.match(res, /^Error: .*-32602/);
 	});
 });
 

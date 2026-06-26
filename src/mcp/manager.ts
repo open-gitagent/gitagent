@@ -1,8 +1,12 @@
+import { createRequire } from "node:module";
 import { buildTool } from "../tool-factory.js";
 import { interpolateEnv } from "../env-utils.js";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { McpServerConfig, McpStdioServerConfig, McpSetupResult } from "./types.js";
+
+const _require = createRequire(import.meta.url);
+const { version: PACKAGE_VERSION } = _require("../../package.json") as { version: string };
 
 const DEFAULT_TIMEOUT_MS = 30000;
 
@@ -14,12 +18,16 @@ interface McpConnection {
 }
 
 function withTimeout<T>(op: Promise<T>, ms: number, label: string): Promise<T> {
-	return Promise.race([
-		op,
-		new Promise<T>((_, reject) =>
-			setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
-		),
-	]);
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(
+			() => reject(new Error(`${label} timed out after ${ms}ms`)),
+			ms,
+		);
+		op.then(
+			(v) => { clearTimeout(timer); resolve(v); },
+			(e) => { clearTimeout(timer); reject(e); },
+		);
+	});
 }
 
 /**
@@ -165,7 +173,7 @@ async function connectServer(name: string, rawCfg: McpServerConfig): Promise<Mcp
 			});
 		}
 
-		const client = new Client({ name: "gitagent", version: "1.5.2" }, { capabilities: {} });
+		const client = new Client({ name: "gitagent", version: PACKAGE_VERSION }, { capabilities: {} });
 		try {
 			await withTimeout(client.connect(transport), timeoutMs, `[mcp:${name}] connect`);
 		} catch (connectErr) {

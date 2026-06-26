@@ -10,7 +10,12 @@
 const ENV_VAR_PATTERN = /\$\{(\w+)\}/g;
 
 export function interpolateEnvString(value: string): string {
-	return value.replace(ENV_VAR_PATTERN, (_, envName) => process.env[envName] || "");
+	return value.replace(ENV_VAR_PATTERN, (_, envName) => {
+		if (process.env[envName] === undefined) {
+			console.warn(`[mcp] env var ${envName} is not set; substituting empty string`);
+		}
+		return process.env[envName] ?? "";
+	});
 }
 
 export function interpolateEnv<T>(value: T): T {
