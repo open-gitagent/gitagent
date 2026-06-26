@@ -118,6 +118,19 @@ function createDeclarativeTool(
 
 					// Try parsing JSON output
 					let text = stdout.trim();
+
+					// Detect data URI — works regardless of field naming in user scripts
+					if (text.startsWith("data:image/") && text.includes(";base64,")) {
+						const commaIndex = text.indexOf(",");
+						const mimeType = text.slice(5, commaIndex).split(";")[0];
+						const data = text.slice(commaIndex + 1).replace(/\s/g, "");
+						resolve({
+							content: [{ type: "image", data, mimeType }],
+							details: undefined,
+						});
+						return;
+					}
+
 					try {
 						const parsed = JSON.parse(text);
 						if (parsed.text) text = parsed.text;
