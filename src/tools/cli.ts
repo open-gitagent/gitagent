@@ -1,6 +1,7 @@
 import { spawn } from "child_process";
 import type { AgentTool, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import { cliSchema, MAX_OUTPUT, DEFAULT_TIMEOUT } from "./shared.js";
+import { crushJson, isJson } from "../compression/index.js";
 
 export function createCliTool(cwd: string, defaultTimeout?: number): AgentTool<typeof cliSchema> {
 	const baseTimeout = defaultTimeout ?? DEFAULT_TIMEOUT;
@@ -89,6 +90,14 @@ export function createCliTool(cwd: string, defaultTimeout?: number): AgentTool<t
 
 					if (!text) {
 						text = "(no output)";
+					}
+
+					// Compress JSON output before the LLM sees it
+					if (isJson(text)) {
+						const { compressed, reductionPct } = crushJson(text);
+						if (reductionPct > 0) {
+							text = compressed + `\n\n[SmartCrusher: −${reductionPct}% tokens]`;
+						}
 					}
 
 					if (code !== 0 && code !== null) {

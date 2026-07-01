@@ -23,6 +23,7 @@ import type {
 	SandboxOptions,
 } from "./sdk-types.js";
 import { CostTracker } from "./cost-tracker.js";
+import { DocStore } from "./tools/doc-store.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	wrapToolWithOtel,
@@ -90,6 +91,7 @@ export function query(options: QueryOptions): Query {
 	const collectedMessages: GCMessage[] = [];
 	const ac = options.abortController ?? new AbortController();
 	const costTracker = new CostTracker();
+	const docStore = new DocStore();
 
 	// These are set once the agent is loaded (async init below)
 	let _sessionId = options.sessionId ?? "";
@@ -182,6 +184,8 @@ export function query(options: QueryOptions): Query {
 				sandbox: sandboxCtx,
 				gitagentDir: loaded.gitagentDir,
 				pluginMemoryLayers: pluginMemoryLayers.length > 0 ? pluginMemoryLayers : undefined,
+				costTracker,
+				docStore,
 			});
 		}
 

@@ -62,8 +62,13 @@
     "@opentelemetry/sdk-trace-node": "^2.7.0",
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "@sinclair/typebox": "^0.34.41",
+    "headroom-ai": "^0.22.4",
     "js-yaml": "^4.1.0",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.0",
     "node-cron": "^3.0.3",
+    "pdf-parse": "^2.4.5",
+    "xlsx": "^0.18.5",
     "yaml": "^2.8.2"
   },
   "peerDependencies": {
@@ -76,8 +81,10 @@
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
+    "@types/jszip": "^3.4.0",
     "@types/node": "^22.0.0",
     "@types/node-cron": "^3.0.11",
+    "@types/pdf-parse": "^1.1.5",
     "typescript": "^5.7.0"
   }
 }
