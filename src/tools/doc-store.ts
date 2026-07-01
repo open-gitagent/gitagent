@@ -11,19 +11,52 @@ export interface StoredDoc {
 	filePath: string;
 	totalChunks: number;
 	chunks: DocChunk[];
+	lastAccessed: number;
 }
+
+export interface FetchResult {
+	content: string;
+	tokens: number;
+	has_refs: string[];
+}
+
+// Soft cap: evict LRU docs when total in-memory chars exceeds this limit.
+// Prevents OOM in long sessions reading many large docs.
+const MAX_STORE_CHARS = 10 * 1024 * 1024; // 10 MB
 
 // Per-session in-memory store for CCR (reversible compression).
 // Keyed by file path — survives multiple read calls in a session.
 export class DocStore {
 	private docs = new Map<string, StoredDoc>();
+	private totalChars = 0;
 
 	store(filePath: string, chunks: DocChunk[]): void {
-		this.docs.set(filePath, { filePath, totalChunks: chunks.length, chunks });
+		// Evict existing entry's char count before overwriting
+		const existing = this.docs.get(filePath);
+		if (existing) {
+			this.totalChars -= existing.chunks.reduce((s, c) => s + c.content.length, 0);
+		}
+
+		const newChars = chunks.reduce((s, c) => s + c.content.length, 0);
+		this.docs.set(filePath, { filePath, totalChunks: chunks.length, chunks, lastAccessed: Date.now() });
+		this.totalChars += newChars;
+		this.evictIfNeeded();
 	}
 
-	getChunk(filePath: string, chunkId: string): DocChunk | null {
-		return this.docs.get(filePath)?.chunks.find((c) => c.id === chunkId) ?? null;
+	fetch(filePath: string, chunkId: string): FetchResult | null {
+		const doc = this.docs.get(filePath);
+		if (!doc) return null;
+		const chunk = doc.chunks.find((c) => c.id === chunkId);
+		if (!chunk) return null;
+
+		doc.lastAccessed = Date.now();
+
+		// Extract section IDs referenced in this chunk's content (e.g. "see s3" or "[s3]")
+		const has_refs = [...chunk.content.matchAll(/\[?(s\d+)\]?/g)]
+			.map((m) => m[1])
+			.filter((id) => id !== chunkId && doc.chunks.some((c) => c.id === id));
+
+		return { content: chunk.content, tokens: chunk.estimatedTokens, has_refs: [...new Set(has_refs)] };
 	}
 
 	getOutline(filePath: string): string | null {
@@ -31,7 +64,6 @@ export class DocStore {
 		if (!doc) return null;
 		return doc.chunks
 			.map((c) => {
-				// Add a short snippet so the LLM knows what each section contains
 				const snippet = c.content.split("\n").find((l) => l.trim().length > 20)?.trim() ?? "";
 				const preview = snippet.length > 80 ? snippet.slice(0, 77) + "…" : snippet;
 				return `[${c.id}] ${c.title} (~${c.estimatedTokens} tokens)${preview ? ` — "${preview}"` : ""}`;
@@ -41,6 +73,17 @@ export class DocStore {
 
 	has(filePath: string): boolean {
 		return this.docs.has(filePath);
+	}
+
+	private evictIfNeeded(): void {
+		if (this.totalChars <= MAX_STORE_CHARS) return;
+		// Evict least-recently-accessed docs until under the cap
+		const sorted = [...this.docs.entries()].sort((a, b) => a[1].lastAccessed - b[1].lastAccessed);
+		for (const [key, doc] of sorted) {
+			if (this.totalChars <= MAX_STORE_CHARS) break;
+			this.totalChars -= doc.chunks.reduce((s, c) => s + c.content.length, 0);
+			this.docs.delete(key);
+		}
 	}
 }
 

@@ -20,6 +20,7 @@ export const readSchema = Type.Object({
 	path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
 	offset: Type.Optional(Type.Number({ description: "Line number to start from (1-indexed)" })),
 	limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
+	mode: Type.Optional(Type.Literal("outline", { description: "Dry-run: return outline + token estimates without loading content. Use before read_doc_section to plan which sections to fetch." })),
 });
 
 export const writeSchema = Type.Object({

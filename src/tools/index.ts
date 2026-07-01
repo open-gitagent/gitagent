@@ -71,18 +71,19 @@ export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[]
 			},
 			execute: async (_toolCallId: string, params: unknown) => {
 				const { path, section_id } = params as { path: string; section_id: string };
-				const chunk = docStore.getChunk(path, section_id) ?? docStore.getChunk(
-					path.startsWith("/") ? path : `${config.dir}/${path}`.replace(/\\/g, "/"),
-					section_id,
-				);
-				if (!chunk) {
+				const altPath = path.startsWith("/") ? path : `${config.dir}/${path}`.replace(/\\/g, "/");
+				const result = docStore.fetch(path, section_id) ?? docStore.fetch(altPath, section_id);
+				if (!result) {
 					return {
 						content: [{ type: "text", text: `[No section "${section_id}" found for "${path}". Run read first.]` }],
 						details: undefined,
 					};
 				}
+				const refsNote = result.has_refs.length > 0
+					? `\n\n[References other sections: ${result.has_refs.join(", ")} — fetch them if needed]`
+					: "";
 				return {
-					content: [{ type: "text", text: `## ${chunk.title}\n\n${chunk.content}` }],
+					content: [{ type: "text", text: `${result.content}${refsNote}` }],
 					details: undefined,
 				};
 			},

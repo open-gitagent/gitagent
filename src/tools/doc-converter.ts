@@ -188,19 +188,28 @@ export function compressMarkdown(text: string): string {
 	return out;
 }
 
+export type ConversionError = { error: string };
+
+const MAX_FILE_SIZE_MB = 50;
+
 // ── Main entry point ───────────────────────────────────────────────────
 
 export async function convertToMarkdown(
 	filePath: string,
 	originalBuffer: Buffer,
-): Promise<ConversionResult | null> {
+): Promise<ConversionResult | ConversionError | null> {
 	if (!isConvertible(filePath)) return null;
 	if (process.env.DISABLE_DOC_CONVERSION === "1") return null;
 
-	try {
-		const ext = extname(filePath).toLowerCase();
-		let markdown = "";
+	const fileSizeMB = originalBuffer.length / (1024 * 1024);
+	if (fileSizeMB > MAX_FILE_SIZE_MB) {
+		return { error: `File too large for conversion (${fileSizeMB.toFixed(1)} MB > ${MAX_FILE_SIZE_MB} MB limit). Convert manually and provide a text or markdown version.` };
+	}
 
+	let markdown = "";
+	const ext = extname(filePath).toLowerCase();
+
+	try {
 		if (ext === ".pdf") {
 			markdown = await pdfToMarkdown(originalBuffer);
 		} else if (ext === ".docx" || ext === ".doc") {
@@ -212,20 +221,22 @@ export async function convertToMarkdown(
 		} else if (ext === ".html" || ext === ".htm") {
 			markdown = htmlToText(originalBuffer.toString("utf-8"));
 		}
-
-		if (!markdown) return null;
-
-		markdown = compressMarkdown(markdown);
-
-		const originalTokens = Math.ceil(originalBuffer.length / 4);
-		const convertedTokens = estimateTokens(markdown);
-		const savedTokens = Math.max(0, originalTokens - convertedTokens);
-		const savedPercent = originalTokens > 0
-			? Math.round((savedTokens / originalTokens) * 100)
-			: 0;
-
-		return { markdown, originalTokens, convertedTokens, savedTokens, savedPercent };
-	} catch {
-		return null;
+	} catch (err) {
+		return { error: `Conversion failed for ${basename(filePath)}: ${err instanceof Error ? err.message : String(err)}` };
 	}
+
+	if (!markdown.trim()) {
+		return { error: `Conversion produced no readable text for ${basename(filePath)}. The file may be scanned/image-only or corrupted.` };
+	}
+
+	markdown = compressMarkdown(markdown);
+
+	const originalTokens = Math.ceil(originalBuffer.length / 4);
+	const convertedTokens = estimateTokens(markdown);
+	const savedTokens = Math.max(0, originalTokens - convertedTokens);
+	const savedPercent = originalTokens > 0
+		? Math.round((savedTokens / originalTokens) * 100)
+		: 0;
+
+	return { markdown, originalTokens, convertedTokens, savedTokens, savedPercent };
 }

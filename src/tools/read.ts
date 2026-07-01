@@ -6,6 +6,7 @@ import { readSchema, MAX_LINES, paginateLines } from "./shared.js";
 import { crushJson, isJson, compressCode, isSourceFile } from "../compression/index.js";
 import { convertToMarkdown, isConvertible } from "./doc-converter.js";
 import { DocStore, chunkDocument } from "./doc-store.js";
+import type { ConversionError } from "./doc-converter.js";
 import type { CostTracker } from "../cost-tracker.js";
 
 const CCR_THRESHOLD_TOKENS = 8000;
@@ -44,7 +45,10 @@ async function loadFromCache(cwd: string, absolutePath: string): Promise<string 
 			stat(absolutePath).catch(() => null),
 		]);
 		if (!cacheStat || !sourceStat) return null;
-		// Invalidate if source is newer than cache
+		// Invalidate if source is newer than cache.
+		// Known edge case: a file replaced with identical content on some filesystems
+		// may share the same mtime but have a different inode — cache won't invalidate.
+		// Acceptable for v1; document-level GC handles stale entries.
 		if (sourceStat.mtimeMs > cacheStat.mtimeMs) return null;
 		return await readFile(cachePath, "utf-8");
 	} catch {
@@ -75,12 +79,29 @@ export function createReadTool(
 		parameters: readSchema,
 		execute: async (
 			_toolCallId: string,
-			{ path, offset, limit }: { path: string; offset?: number; limit?: number },
+			{ path, offset, limit, mode }: { path: string; offset?: number; limit?: number; mode?: "outline" },
 			signal?: AbortSignal,
 		) => {
 			if (signal?.aborted) throw new Error("Operation aborted");
 
 			const absolutePath = resolvePath(path, cwd);
+
+			// ── mode="outline": dry-run for CCR docs ──────────────────────
+			// Returns outline + token estimates without fetching content.
+			if (mode === "outline") {
+				if (docStore?.has(absolutePath)) {
+					const outline = docStore.getOutline(absolutePath)!;
+					return {
+						content: [{ type: "text", text: `[Outline for ${path}]\n\n${outline}` }],
+						details: undefined,
+					};
+				}
+				return {
+					content: [{ type: "text", text: `[No outline available for ${path} — read the file first to generate it]` }],
+					details: undefined,
+				};
+			}
+
 			const buffer = await readFile(absolutePath);
 
 			// ── Stage 1: Document conversion ──────────────────────────────
@@ -99,6 +120,12 @@ export function createReadTool(
 					if (!result) {
 						return {
 							content: [{ type: "text", text: `[Binary file: ${path} (${buffer.length} bytes) — conversion failed]` }],
+							details: undefined,
+						};
+					}
+					if ("error" in result) {
+						return {
+							content: [{ type: "text", text: `[doc-converter error: ${(result as ConversionError).error}]` }],
 							details: undefined,
 						};
 					}
