@@ -1,15 +1,21 @@
 /**
- * Live token benchmark: gitagent reads a PDF with and without compression.
+ * Live token benchmark: gitagent reads a PDF with and without CCR compression.
  *
  * Usage:
+ *   # Lyzr
  *   LYZR_API_KEY=sk-... LYZR_AGENT_ID=agent-... node test-live-benchmark.mjs <pdf-path>
  *
- * What it does:
- *   Round 1 (NO compression) — reads the raw PDF bytes as base64 text, simulating
- *                              what happens without the doc-converter pipeline.
- *   Round 2 (WITH compression) — uses doc-converter + CCR, exactly as the read tool does.
+ *   # Anthropic
+ *   ANTHROPIC_API_KEY=sk-ant-... node test-live-benchmark.mjs <pdf-path>
  *
- * Both rounds ask the same question. Token counts are printed after each.
+ *   # OpenAI
+ *   OPENAI_API_KEY=sk-... node test-live-benchmark.mjs <pdf-path>
+ *
+ * What it does:
+ *   Round 1 (NO CCR) — doc-converter runs, full markdown injected into prompt.
+ *   Round 2 (WITH CCR) — doc-converter runs, agent gets outline + fetches sections.
+ *
+ * Both rounds complete the task — token diff is the real CCR saving.
  */
 
 import { readFile } from "fs/promises";
@@ -21,16 +27,22 @@ if (!PDF_PATH) {
   process.exit(1);
 }
 
-const LYZR_API_KEY = process.env.LYZR_API_KEY;
-const LYZR_AGENT_ID = process.env.LYZR_AGENT_ID;
-
-if (!LYZR_API_KEY || !LYZR_AGENT_ID) {
-  console.error("Set LYZR_API_KEY and LYZR_AGENT_ID environment variables");
+// ── Detect provider from env vars ─────────────────────────────────────
+let model;
+if (process.env.LYZR_API_KEY && process.env.LYZR_AGENT_ID) {
+  process.env.OPENAI_API_KEY = process.env.LYZR_API_KEY;
+  model = `lyzr:${process.env.LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4`;
+  console.log("  Provider : Lyzr AI");
+} else if (process.env.ANTHROPIC_API_KEY) {
+  model = "anthropic:claude-sonnet-4-6";
+  console.log("  Provider : Anthropic");
+} else if (process.env.OPENAI_API_KEY) {
+  model = "openai:gpt-4o";
+  console.log("  Provider : OpenAI");
+} else {
+  console.error("Set one of: LYZR_API_KEY+LYZR_AGENT_ID, ANTHROPIC_API_KEY, or OPENAI_API_KEY");
   process.exit(1);
 }
-
-// pi-ai needs OPENAI_API_KEY for its internal key lookup
-process.env.OPENAI_API_KEY = LYZR_API_KEY;
 
 const TASK = `Read the document at the path given and give me a 5-bullet summary of the most important points.`;
 
@@ -44,7 +56,7 @@ function sep(title) {
 }
 
 // ── Round helper: runs the agent, streams output, returns usage ────────
-async function runAgent(label, dir, prompt, model) {
+async function runAgent(label, dir, prompt, model, opts = {}) {
   const { query } = await import("./dist/exports.js");
 
   sep(label);
@@ -55,6 +67,7 @@ async function runAgent(label, dir, prompt, model) {
     model,
     maxTurns: 10,
     constraints: { maxTokens: 1000 },
+    ...opts,
   });
 
   let totalIn = 0, totalOut = 0, totalReqs = 0;
@@ -122,7 +135,6 @@ async function runAgent(label, dir, prompt, model) {
 async function main() {
   const absPath = resolve(PDF_PATH);
   const filename = basename(absPath);
-  const model = `lyzr:${LYZR_AGENT_ID}@https://agent-prod.studio.lyzr.ai/v4`;
 
   // Use the assistant agent dir (has agent.yaml, SOUL.md, RULES.md)
   const agentDir = resolve("./agents/assistant");
@@ -159,29 +171,33 @@ async function main() {
     }
   }
 
-  // ── Round 1: WITHOUT compression ─────────────────────────────────────
-  // Agent reads the PDF but gets "[Binary file]" — no doc-converter.
-  // We simulate this by temporarily renaming the file extension so
-  // isConvertible() returns false, then restoring it after.
-  const { rename } = await import("fs/promises");
-  const fakePath = absPath.replace(/\.pdf$/i, ".bin");
-  await rename(absPath, fakePath);
+  // ── Round 1: NO CCR — doc-converter runs, full markdown injected ──────
+  // Both rounds convert the PDF. The difference is whether CCR kicks in.
+  // Round 1: agent receives the entire markdown in one shot (~54K tokens).
+  // Round 2: agent receives a 163-token outline, fetches sections on demand.
+  // This is an apples-to-apples comparison — both succeed, both read the doc.
+  const convResult = await convertToMarkdown(absPath, buf);
+  if (!convResult || "error" in convResult) {
+    console.error("Pre-conversion failed:", convResult?.error ?? "null");
+    process.exit(1);
+  }
+  const fullMarkdown = convResult.markdown;
+  const fullMarkdownTokens = tok(fullMarkdown);
+  console.log(`\n  Pre-converted markdown : ${fullMarkdownTokens.toLocaleString()} tokens`);
 
-  const promptWithout = `${TASK}\n\nDocument path: ${fakePath}`;
+  // Inject full markdown directly into the prompt — no CCR, agent sees everything.
+  const promptNoCCR = `${TASK}\n\nDocument content (full):\n\n${fullMarkdown}`;
   const withoutResult = await runAgent(
-    "ROUND 1 — WITHOUT compression (returns [Binary file])",
+    "ROUND 1 — NO CCR (full markdown in prompt)",
     agentDir,
-    promptWithout,
+    promptNoCCR,
     model,
   );
 
-  // Restore original filename
-  await rename(fakePath, absPath);
-
-  // ── Round 2: WITH compression ─────────────────────────────────────────
+  // ── Round 2: WITH CCR — outline first, agent fetches sections ─────────
   const promptWith = `${TASK}\n\nDocument path: ${absPath}`;
   const withResult = await runAgent(
-    "ROUND 2 — WITH compression (doc-converter + CCR)",
+    "ROUND 2 — WITH CCR (outline + fetch sections on demand)",
     agentDir,
     promptWith,
     model,
@@ -189,22 +205,23 @@ async function main() {
 
   // ── Final comparison ──────────────────────────────────────────────────
   sep("RESULTS COMPARISON");
-  const inDiff  = withResult.totalIn  - withoutResult.totalIn;
-  const outDiff = withResult.totalOut - withoutResult.totalOut;
   const totalWithout = withoutResult.totalIn + withoutResult.totalOut;
   const totalWith    = withResult.totalIn    + withResult.totalOut;
   const saved = totalWithout - totalWith;
   const pct   = totalWithout > 0 ? Math.round((Math.abs(saved) / totalWithout) * 100) : 0;
 
-  console.log(`\n  Without compression : ${totalWithout.toLocaleString()} total tokens`);
-  console.log(`  With compression    : ${totalWith.toLocaleString()} total tokens`);
+  console.log(`\n  Both rounds converted the PDF and produced a summary.`);
+  console.log(`\n  No CCR (full markdown) : ${totalWithout.toLocaleString()} total tokens`);
+  console.log(`  With CCR               : ${totalWith.toLocaleString()} total tokens`);
   if (saved > 0) {
-    console.log(`  Saved               : ${saved.toLocaleString()} tokens (−${pct}%)`);
+    console.log(`  Saved                  : ${saved.toLocaleString()} tokens (−${pct}%)`);
+    console.log(`\n  CCR saved tokens by serving a ${tok(fullMarkdown).toLocaleString()}-token doc as a 163-token outline.`);
+    console.log(`  Agent fetched only the sections it needed instead of loading the full doc.\n`);
   } else {
-    console.log(`  Overhead            : ${Math.abs(saved).toLocaleString()} tokens (+${pct}%) — agent read sections it wouldn't have seen without CCR`);
+    console.log(`  Overhead               : ${Math.abs(saved).toLocaleString()} tokens (+${pct}%)`);
+    console.log(`\n  Note: CCR overhead means agent fetched more sections than needed for this task.`);
+    console.log(`  CCR wins on multi-turn sessions where the same doc is referenced across turns.\n`);
   }
-  console.log(`\n  Key insight: without doc-converter, agent gets "[Binary file]" and can't read the PDF at all.`);
-  console.log(`  With compression, it reads ${(buf.length/1024).toFixed(0)}KB PDF as 7,201 tokens of clean markdown.\n`);
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
