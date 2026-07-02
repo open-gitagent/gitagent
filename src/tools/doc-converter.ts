@@ -13,10 +13,11 @@ export interface ConversionResult {
 	savedPercent: number;
 }
 
+// .doc and .ppt are legacy binary formats — mammoth/JSZip can't reliably parse them.
+// Only the modern XML-based formats (.docx, .xlsx, .pptx) are supported.
 const CONVERTIBLE = new Set([
-	".pdf", ".docx", ".doc",
-	".xlsx", ".xls",
-	".pptx", ".ppt",
+	".pdf",
+	".docx", ".xlsx", ".pptx",
 	".html", ".htm",
 ]);
 

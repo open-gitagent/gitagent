@@ -51,9 +51,10 @@ export class DocStore {
 
 		doc.lastAccessed = Date.now();
 
-		// Extract section IDs referenced in this chunk's content (e.g. "see s3" or "[s3]")
-		const has_refs = [...chunk.content.matchAll(/\[?(s\d+)\]?/g)]
-			.map((m) => m[1])
+		// Extract section IDs explicitly referenced as [sN] in this chunk's content.
+		// Require bracket syntax to avoid false positives from words like "session3".
+		const has_refs = [...chunk.content.matchAll(/\[s(\d+)\]/g)]
+			.map((m) => `s${m[1]}`)
 			.filter((id) => id !== chunkId && doc.chunks.some((c) => c.id === id));
 
 		return { content: chunk.content, tokens: chunk.estimatedTokens, has_refs: [...new Set(has_refs)] };

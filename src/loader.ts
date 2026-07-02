@@ -381,10 +381,12 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 	});
 
 	const efficiency = Math.round(cacheEfficiency(aligned) * 100);
-	console.error(
-		`[compression] System prompt: ${aligned.staticTokens + aligned.dynamicTokens} tokens` +
-		` | static prefix: ${aligned.staticTokens} tokens (${efficiency}% cache-eligible)`,
-	);
+	if (process.env.GITAGENT_DEBUG) {
+		console.error(
+			`[compression] System prompt: ${aligned.staticTokens + aligned.dynamicTokens} tokens` +
+			` | static prefix: ${aligned.staticTokens} tokens (${efficiency}% cache-eligible)`,
+		);
+	}
 
 	const systemPrompt = aligned.prompt;
 

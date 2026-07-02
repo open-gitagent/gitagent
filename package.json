@@ -62,7 +62,6 @@
     "@opentelemetry/sdk-trace-node": "^2.7.0",
     "@opentelemetry/semantic-conventions": "^1.40.0",
     "@sinclair/typebox": "^0.34.41",
-    "headroom-ai": "^0.22.4",
     "js-yaml": "^4.1.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.12.0",

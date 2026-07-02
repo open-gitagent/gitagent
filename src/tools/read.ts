@@ -33,7 +33,14 @@ function estimateTokens(s: string): number {
 }
 
 function cacheKey(absolutePath: string): string {
-	return absolutePath.replace(/[/\\:]/g, "_") + ".md";
+	// Use a hash to avoid collisions from paths that differ only in separators
+	// e.g. /tmp/a/b.pdf and /tmp/a_b.pdf would both map to _tmp_a_b.pdf
+	let hash = 0;
+	for (let i = 0; i < absolutePath.length; i++) {
+		hash = (Math.imul(31, hash) + absolutePath.charCodeAt(i)) >>> 0;
+	}
+	const safe = absolutePath.replace(/[/\\:.]/g, "_").slice(-60);
+	return `${safe}_${hash.toString(16)}.md`;
 }
 
 async function loadFromCache(cwd: string, absolutePath: string): Promise<string | null> {
@@ -87,17 +94,46 @@ export function createReadTool(
 			const absolutePath = resolvePath(path, cwd);
 
 			// ── mode="outline": dry-run for CCR docs ──────────────────────
-			// Returns outline + token estimates without fetching content.
+			// Returns outline + token estimates without loading content.
+			// If doc is already chunked in store, return cached outline.
+			// Otherwise convert and chunk now so the outline is accurate.
 			if (mode === "outline") {
 				if (docStore?.has(absolutePath)) {
-					const outline = docStore.getOutline(absolutePath)!;
 					return {
-						content: [{ type: "text", text: `[Outline for ${path}]\n\n${outline}` }],
+						content: [{ type: "text", text: `[Outline for ${path}]\n\n${docStore.getOutline(absolutePath)}` }],
+						details: undefined,
+					};
+				}
+				// Not yet in store — convert and chunk to produce the outline
+				const buf = await readFile(absolutePath);
+				if (isConvertible(path)) {
+					let markdown = await loadFromCache(cwd, absolutePath);
+					if (!markdown) {
+						const conv = await convertToMarkdown(absolutePath, buf);
+						if (!conv || "error" in conv) {
+							return {
+								content: [{ type: "text", text: `[Cannot produce outline: ${"error" in (conv ?? {}) ? (conv as any).error : "conversion failed"}]` }],
+								details: undefined,
+							};
+						}
+						markdown = conv.markdown;
+						await saveToCache(cwd, absolutePath, markdown);
+					}
+					if (docStore && estimateTokens(markdown) > CCR_THRESHOLD_TOKENS) {
+						const chunks = chunkDocument(markdown);
+						docStore.store(absolutePath, chunks);
+						return {
+							content: [{ type: "text", text: `[Outline for ${path}]\n\n${docStore.getOutline(absolutePath)}` }],
+							details: undefined,
+						};
+					}
+					return {
+						content: [{ type: "text", text: `[${path} is ${estimateTokens(markdown)} tokens — below CCR threshold, no outline needed]` }],
 						details: undefined,
 					};
 				}
 				return {
-					content: [{ type: "text", text: `[No outline available for ${path} — read the file first to generate it]` }],
+					content: [{ type: "text", text: `[${path} is not a convertible format — outline not available]` }],
 					details: undefined,
 				};
 			}

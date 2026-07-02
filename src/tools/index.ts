@@ -1,3 +1,4 @@
+import { resolve } from "path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { SandboxContext } from "../sandbox.js";
 import type { MemoryLayerDef } from "../plugin-types.js";
@@ -71,7 +72,7 @@ export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[]
 			},
 			execute: async (_toolCallId: string, params: unknown) => {
 				const { path, section_id } = params as { path: string; section_id: string };
-				const altPath = path.startsWith("/") ? path : `${config.dir}/${path}`.replace(/\\/g, "/");
+				const altPath = resolve(config.dir, path);
 				const result = docStore.fetch(path, section_id) ?? docStore.fetch(altPath, section_id);
 				if (!result) {
 					return {
