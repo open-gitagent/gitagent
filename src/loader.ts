@@ -55,6 +55,9 @@ export interface AgentManifest {
 	delegation?: { mode: "auto" | "explicit" | "router"; router?: string };
 	compliance?: Record<string, any>;
 	plugins?: Record<string, PluginConfig>;
+	brief?: {
+		model?: string;
+	};
 }
 
 async function readFileOr(path: string, fallback: string): Promise<string> {

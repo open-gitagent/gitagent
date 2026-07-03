@@ -1,6 +1,28 @@
 // SDK core
 export { query, tool } from "./sdk.js";
 
+// Agent Brief — pre-execution contract negotiation
+export { runBriefOrchestration, generateBrief } from "./brief/orchestrator.js";
+export type { GenerateBriefResult } from "./brief/orchestrator.js";
+export { loadBriefFromFile, listBriefs, findBrief, resolveBriefPath } from "./brief/storage.js";
+export { buildBriefSuffix } from "./brief/injector.js";
+export { runWithBrief } from "./brief/runner.js";
+export type {
+	Brief,
+	BriefDraft,
+	BriefAssertion,
+	BriefRubric,
+	BriefIssue,
+	BriefOptions,
+	BriefStatus,
+	EvaluatorVerdict,
+	AssertionCategory,
+	NegotiationResult,
+	AssertionResult,
+	OutputVerdict,
+	RunWithBriefOptions,
+} from "./brief/types.js";
+
 // SDK types
 export type {
 	Query,

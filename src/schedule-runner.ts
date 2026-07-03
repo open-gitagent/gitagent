@@ -3,6 +3,8 @@ import { discoverSchedules, updateScheduleMeta, type ScheduleDefinition } from "
 import { mkdirSync, appendFileSync } from "fs";
 import { join } from "path";
 import type { ServerMessage } from "./adapter.js";
+import { findBrief, isBriefStale } from "./brief/storage.js";
+import { buildBriefSuffix } from "./brief/injector.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 
@@ -10,7 +12,7 @@ export interface SchedulerOptions {
 	agentDir: string;
 	model?: string;
 	env?: string;
-	runPrompt: (prompt: string) => Promise<string>;
+	runPrompt: (prompt: string, briefSuffix?: string) => Promise<string>;
 	broadcastToBrowsers: (msg: ServerMessage) => void;
 	appendToHistory: (msg: any) => void;
 }
@@ -102,8 +104,27 @@ export async function executeScheduledJob(schedule: ScheduleDefinition, opts: Sc
 	let result = "";
 	let success = true;
 
+	// Look for an approved brief for this scheduled task and inject it
+	let briefSuffix: string | undefined;
 	try {
-		result = await opts.runPrompt(schedule.prompt);
+		const existing = await findBrief(opts.agentDir, schedule.prompt);
+		if (existing) {
+			const staleness = await isBriefStale(opts.agentDir, existing);
+			if (staleness.stale) {
+				console.log(dim(`[scheduler] ⚠ Brief for "${schedule.id}" may be stale: ${staleness.reason}`));
+			}
+			briefSuffix = buildBriefSuffix(existing);
+			console.log(dim(`[scheduler] Injecting brief "${existing.id}" into "${schedule.id}"`));
+		}
+	} catch {
+		// Brief lookup failure is non-fatal
+	}
+
+	try {
+		result = await opts.runPrompt(
+			briefSuffix ? `${schedule.prompt}\n\n[Brief context injected — see system prompt]` : schedule.prompt,
+			briefSuffix,
+		);
 	} catch (err: any) {
 		result = err.message || "Unknown error";
 		success = false;
