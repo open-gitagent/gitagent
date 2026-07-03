@@ -297,7 +297,7 @@ export async function runBriefOrchestration(opts: BriefOrchestrationOptions): Pr
 		currentNegotiation = renegotiation;
 		finalBrief = {
 			...finalBrief,
-			version: version + attempts,
+			version: await nextVersion(agentDir, id),
 			draft: renegotiation.draft,
 			negotiation_iterations: renegotiation.iterations,
 			created_at: new Date().toISOString(),

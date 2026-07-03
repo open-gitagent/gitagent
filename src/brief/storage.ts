@@ -61,11 +61,12 @@ function serializeBrief(brief: Brief): string {
 	].filter(Boolean).join("\n");
 
 	const draft = brief.draft;
+	const escapeCell = (s: string) => s.replace(/\|/g, "\\|");
 	const assertionTable = [
 		"| # | Category | Assertion | How to Verify |",
 		"|---|---|---|---|",
 		...draft.assertions.map(a =>
-			`| ${a.id} | ${a.category} | ${a.assertion} | ${a.test} |`,
+			`| ${a.id} | ${a.category} | ${escapeCell(a.assertion)} | ${escapeCell(a.test)} |`,
 		),
 	].join("\n");
 

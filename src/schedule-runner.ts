@@ -12,7 +12,7 @@ export interface SchedulerOptions {
 	agentDir: string;
 	model?: string;
 	env?: string;
-	runPrompt: (prompt: string, briefSuffix?: string) => Promise<string>;
+	runPrompt: (prompt: string) => Promise<string>;
 	broadcastToBrowsers: (msg: ServerMessage) => void;
 	appendToHistory: (msg: any) => void;
 }
@@ -104,8 +104,8 @@ export async function executeScheduledJob(schedule: ScheduleDefinition, opts: Sc
 	let result = "";
 	let success = true;
 
-	// Look for an approved brief for this scheduled task and inject it
-	let briefSuffix: string | undefined;
+	// Look for an approved brief for this scheduled task and fold it into the prompt
+	let promptToRun = schedule.prompt;
 	try {
 		const existing = await findBrief(opts.agentDir, schedule.prompt);
 		if (existing) {
@@ -113,7 +113,7 @@ export async function executeScheduledJob(schedule: ScheduleDefinition, opts: Sc
 			if (staleness.stale) {
 				console.log(dim(`[scheduler] ⚠ Brief for "${schedule.id}" may be stale: ${staleness.reason}`));
 			}
-			briefSuffix = buildBriefSuffix(existing);
+			promptToRun = `${schedule.prompt}\n\n${buildBriefSuffix(existing)}`;
 			console.log(dim(`[scheduler] Injecting brief "${existing.id}" into "${schedule.id}"`));
 		}
 	} catch {
@@ -121,10 +121,7 @@ export async function executeScheduledJob(schedule: ScheduleDefinition, opts: Sc
 	}
 
 	try {
-		result = await opts.runPrompt(
-			briefSuffix ? `${schedule.prompt}\n\n[Brief context injected — see system prompt]` : schedule.prompt,
-			briefSuffix,
-		);
+		result = await opts.runPrompt(promptToRun);
 	} catch (err: any) {
 		result = err.message || "Unknown error";
 		success = false;

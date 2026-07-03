@@ -1,6 +1,7 @@
 import { createInterface } from "readline";
 import type { Brief, EvaluatorVerdict, BriefIssue } from "./types.js";
 import type { StalenessReport } from "./stale.js";
+import { colorCategory } from "./colors.js";
 
 // ANSI helpers
 const isTTY  = Boolean(process.stdout.isTTY);
@@ -10,20 +11,6 @@ const yellow = (s: string) => isTTY ? `\x1b[33m${s}\x1b[0m` : s;
 const cyan   = (s: string) => isTTY ? `\x1b[36m${s}\x1b[0m` : s;
 const green  = (s: string) => isTTY ? `\x1b[32m${s}\x1b[0m` : s;
 const red    = (s: string) => isTTY ? `\x1b[31m${s}\x1b[0m` : s;
-
-const CATEGORY_COLORS: Record<string, (s: string) => string> = {
-	format:     (s) => `\x1b[34m${s}\x1b[0m`,
-	content:    (s) => `\x1b[32m${s}\x1b[0m`,
-	quality:    (s) => `\x1b[35m${s}\x1b[0m`,
-	constraint: (s) => `\x1b[31m${s}\x1b[0m`,
-	behavior:   (s) => `\x1b[36m${s}\x1b[0m`,
-	tone:       (s) => `\x1b[33m${s}\x1b[0m`,
-};
-
-function colorCategory(cat: string): string {
-	const fn = CATEGORY_COLORS[cat] ?? ((s: string) => s);
-	return fn(cat);
-}
 
 export type ApprovalDecision = "approve" | "edit" | "regenerate" | "skip";
 export type StaleDecision = "use" | "regenerate" | "skip";

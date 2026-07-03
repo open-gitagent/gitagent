@@ -1,23 +1,11 @@
 import type { OutputVerdict } from "./types.js";
+import { colorCategory } from "./colors.js";
 
 const isTTY = Boolean(process.stdout.isTTY);
 const dim   = (s: string) => isTTY ? `\x1b[2m${s}\x1b[0m` : s;
 const bold  = (s: string) => isTTY ? `\x1b[1m${s}\x1b[0m` : s;
 const green = (s: string) => isTTY ? `\x1b[32m${s}\x1b[0m` : s;
 const red   = (s: string) => isTTY ? `\x1b[31m${s}\x1b[0m` : s;
-
-const CATEGORY_COLORS: Record<string, (s: string) => string> = {
-	format:     (s) => `\x1b[34m${s}\x1b[0m`,
-	content:    (s) => `\x1b[32m${s}\x1b[0m`,
-	quality:    (s) => `\x1b[35m${s}\x1b[0m`,
-	constraint: (s) => `\x1b[31m${s}\x1b[0m`,
-	behavior:   (s) => `\x1b[36m${s}\x1b[0m`,
-	tone:       (s) => `\x1b[33m${s}\x1b[0m`,
-};
-
-function colorCategory(cat: string): string {
-	return (CATEGORY_COLORS[cat] ?? ((s: string) => s))(cat);
-}
 
 export function displayOutputReport(verdict: OutputVerdict, attempts: number): void {
 	const line = "─".repeat(50);
