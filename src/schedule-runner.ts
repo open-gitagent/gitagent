@@ -1,10 +1,12 @@
 import cron, { type ScheduledTask } from "node-cron";
 import { discoverSchedules, updateScheduleMeta, type ScheduleDefinition } from "./schedules.js";
 import { mkdirSync, appendFileSync } from "fs";
+import { access } from "fs/promises";
 import { join } from "path";
 import type { ServerMessage } from "./adapter.js";
-import { findBrief, isBriefStale } from "./brief/storage.js";
-import { buildBriefSuffix } from "./brief/injector.js";
+import { findBrief, resolveBriefPath } from "./brief/storage.js";
+import { runBriefOrchestration } from "./brief/orchestrator.js";
+import { runWithBrief } from "./brief/runner.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 
@@ -104,24 +106,59 @@ export async function executeScheduledJob(schedule: ScheduleDefinition, opts: Sc
 	let result = "";
 	let success = true;
 
-	// Look for an approved brief for this scheduled task and fold it into the prompt
-	let promptToRun = schedule.prompt;
-	try {
-		const existing = await findBrief(opts.agentDir, schedule.prompt);
-		if (existing) {
-			const staleness = await isBriefStale(opts.agentDir, existing);
-			if (staleness.stale) {
-				console.log(dim(`[scheduler] ⚠ Brief for "${schedule.id}" may be stale: ${staleness.reason}`));
+	// Resolve which brief file (if any) applies to this scheduled task.
+	// Explicit schedule.briefPath wins; missing file triggers auto-creation.
+	// Otherwise fall back to guessing by matching the task prompt.
+	let briefFilePath: string | undefined;
+	if (schedule.briefPath) {
+		const resolved = resolveBriefPath(opts.agentDir, schedule.briefPath);
+		try {
+			await access(resolved);
+			briefFilePath = resolved;
+		} catch {
+			console.log(dim(`[scheduler] ⚠ Brief "${schedule.briefPath}" not found for "${schedule.id}" — creating a new one`));
+			try {
+				const created = await runBriefOrchestration({
+					task: schedule.prompt,
+					agentDir: opts.agentDir,
+					model: opts.model,
+					options: { skipApproval: true },
+				});
+				if (!created.skipped) {
+					briefFilePath = created.brief.file_path;
+					console.log(dim(`[scheduler] Created brief for "${schedule.id}": ${briefFilePath}`));
+				}
+			} catch (err: any) {
+				console.log(dim(`[scheduler] ⚠ Failed to create brief for "${schedule.id}": ${err.message} — running without a brief`));
 			}
-			promptToRun = `${schedule.prompt}\n\n${buildBriefSuffix(existing)}`;
-			console.log(dim(`[scheduler] Injecting brief "${existing.id}" into "${schedule.id}"`));
 		}
-	} catch {
-		// Brief lookup failure is non-fatal
+	} else {
+		try {
+			const existing = await findBrief(opts.agentDir, schedule.prompt);
+			if (existing) briefFilePath = existing.file_path;
+		} catch {
+			// Brief lookup failure is non-fatal
+		}
 	}
 
 	try {
-		result = await opts.runPrompt(promptToRun);
+		if (briefFilePath) {
+			console.log(dim(`[scheduler] Running "${schedule.id}" with brief: ${briefFilePath}`));
+			let finalText = "";
+			for await (const msg of runWithBrief({
+				prompt: schedule.prompt,
+				dir: opts.agentDir,
+				model: opts.model,
+				env: opts.env,
+				brief: { briefPath: briefFilePath },
+				maxRetries: 2,
+			})) {
+				if (msg.type === "assistant") finalText = msg.content;
+			}
+			result = finalText;
+		} else {
+			result = await opts.runPrompt(schedule.prompt);
+		}
 	} catch (err: any) {
 		result = err.message || "Unknown error";
 		success = false;

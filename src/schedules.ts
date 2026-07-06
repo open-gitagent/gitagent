@@ -9,6 +9,7 @@ export interface ScheduleDefinition {
 	cron: string;
 	mode: "repeat" | "once";
 	runAt?: string; // ISO datetime for "once" mode (alternative to cron)
+	briefPath?: string; // explicit brief file to run with; auto-created if missing
 	enabled: boolean;
 	createdAt: string;
 	lastRunAt?: string;
@@ -46,6 +47,7 @@ export async function discoverSchedules(agentDir: string): Promise<ScheduleDefin
 					cron: String(data.cron || ""),
 					mode: data.mode === "once" ? "once" : "repeat",
 					...(data.runAt ? { runAt: String(data.runAt) } : {}),
+					...(data.briefPath ? { briefPath: String(data.briefPath) } : {}),
 					enabled: data.enabled !== false,
 					createdAt: String(data.createdAt || new Date().toISOString()),
 					...(data.lastRunAt ? { lastRunAt: String(data.lastRunAt) } : {}),
@@ -72,6 +74,7 @@ export async function loadSchedule(filePath: string): Promise<ScheduleDefinition
 		cron: String(data.cron || ""),
 		mode: data.mode === "once" ? "once" : "repeat",
 		...(data.runAt ? { runAt: String(data.runAt) } : {}),
+		...(data.briefPath ? { briefPath: String(data.briefPath) } : {}),
 		enabled: data.enabled !== false,
 		createdAt: String(data.createdAt || new Date().toISOString()),
 		...(data.lastRunAt ? { lastRunAt: String(data.lastRunAt) } : {}),
@@ -95,6 +98,7 @@ export async function saveSchedule(agentDir: string, schedule: ScheduleDefinitio
 		cron: schedule.cron || "",
 		mode: schedule.mode || "repeat",
 		...(schedule.runAt ? { runAt: schedule.runAt } : {}),
+		...(schedule.briefPath ? { briefPath: schedule.briefPath } : {}),
 		enabled: schedule.enabled,
 		createdAt: schedule.createdAt || new Date().toISOString(),
 		...(schedule.lastRunAt ? { lastRunAt: schedule.lastRunAt } : {}),
