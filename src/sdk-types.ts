@@ -52,7 +52,7 @@ export interface GCToolResultMessage {
 export interface GCSystemMessage {
 	type: "system";
 	subtype: "session_start" | "session_end" | "hook_blocked"
-		| "compliance_warning" | "error";
+		| "compliance_warning" | "error" | "fallback";
 	content: string;
 	metadata?: Record<string, any>;
 }

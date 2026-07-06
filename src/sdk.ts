@@ -23,6 +23,7 @@ import type {
 	SandboxOptions,
 } from "./sdk-types.js";
 import { CostTracker } from "./cost-tracker.js";
+import { isRetryableProviderError } from "./model-fallback.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	wrapToolWithOtel,
@@ -298,26 +299,45 @@ export function query(options: QueryOptions): Query {
 			modelOptions.maxTurns = options.maxTurns;
 		}
 
-		// 8. Create Agent
+		// 8. Fallback-aware agent runner.
+		// The manifest's preferred model plus any resolved fallbacks form an
+		// ordered candidate list. When a model fails with a retryable provider
+		// error before producing output (e.g. "credit balance too low"), the
+		// runner swaps the model on the same agent and retries (issue #24).
+		const candidateModels = [loaded.model, ...loaded.fallbackModels];
+
+		// Controller state shared across attempts.
+		let sessionStartEmitted = false;
+		interface AttemptState {
+			producedOutput: boolean;
+			error: { message?: string; provider?: string; model?: string; api?: string } | null;
+		}
+		let attempt: AttemptState = { producedOutput: false, error: null };
+
+		// 9. Build an Agent for a given model and wire event → GCMessage mapping.
+		const buildAgent = (model: typeof loaded.model): Agent => {
 		const agent = new Agent({
 			initialState: {
 				systemPrompt,
-				model: loaded.model,
+				model,
 				tools,
 				...modelOptions,
 			},
 		});
 
-		// 9. Subscribe to events and map to GCMessage
 		agent.subscribe((event: AgentEvent) => {
 			switch (event.type) {
 				case "agent_start":
-					pushMsg({
-						type: "system",
-						subtype: "session_start",
-						content: `Agent ${loaded.manifest.name} started`,
-						metadata: { sessionId: _sessionId },
-					});
+					// Emit once even across fallback attempts.
+					if (!sessionStartEmitted) {
+						sessionStartEmitted = true;
+						pushMsg({
+							type: "system",
+							subtype: "session_start",
+							content: `Agent ${loaded.manifest.name} started`,
+							metadata: { sessionId: _sessionId },
+						});
+					}
 					break;
 
 				case "message_update": {
@@ -329,6 +349,7 @@ export function query(options: QueryOptions): Query {
 						_llmCallStart = Date.now();
 					}
 					if (e.type === "text_delta") {
+						attempt.producedOutput = true;
 						accText += e.delta;
 						pushMsg({
 							type: "delta",
@@ -336,6 +357,7 @@ export function query(options: QueryOptions): Query {
 							content: e.delta,
 						});
 					} else if (e.type === "thinking_delta") {
+						attempt.producedOutput = true;
 						accThinking += e.delta;
 						pushMsg({
 							type: "delta",
@@ -353,19 +375,20 @@ export function query(options: QueryOptions): Query {
 
 					const msg = raw as AssistantMessage;
 
-					// Emit error system message if the LLM call failed
+					// Buffer a failed LLM call instead of emitting immediately — the
+					// fallback runner decides whether to retry on the next model or
+					// surface it. Only emitted (below, or by the runner) when terminal.
 					if (msg.stopReason === "error") {
-						pushMsg({
-							type: "system",
-							subtype: "error",
-							content: msg.errorMessage || "LLM request failed (unknown error)",
-							metadata: {
-								model: msg.model,
-								provider: msg.provider,
-								api: (msg as any).api,
-							},
-						});
-						// Still emit the assistant message so callers can inspect stopReason
+						attempt.error = {
+							message: msg.errorMessage || "LLM request failed (unknown error)",
+							model: msg.model,
+							provider: msg.provider,
+							api: (msg as any).api,
+						};
+						// Reset accumulators and skip cost tracking (usage is empty on error).
+						accText = "";
+						accThinking = "";
+						break;
 					}
 
 					const { text, thinking } = extractContent(msg);
@@ -430,6 +453,8 @@ export function query(options: QueryOptions): Query {
 				}
 
 				case "tool_execution_start":
+					// A tool ran, so the model committed to output — no safe retry.
+					attempt.producedOutput = true;
 					toolArgsMap.set(event.toolCallId, event.args ?? {});
 					pushMsg({
 						type: "tool_use",
@@ -474,17 +499,112 @@ export function query(options: QueryOptions): Query {
 					break;
 				}
 
-				case "agent_end":
-					pushMsg({
-						type: "system",
-						subtype: "session_end",
-						content: `Agent ${loaded.manifest.name} finished`,
-						metadata: { sessionId: _sessionId },
-					});
-					channel.finish();
+				case "agent_end": {
+					// A thrown provider error (network reset, immediate reject) is
+					// reported by pi-agent-core via handleRunFailure, which emits
+					// agent_end with a trailing errored assistant message and NO
+					// message_end. Capture that here so fallback still triggers.
+					if (!attempt.error) {
+						const last = event.messages?.[event.messages.length - 1] as any;
+						if (last?.role === "assistant" && last.stopReason === "error") {
+							attempt.error = {
+								message: last.errorMessage || "LLM request failed (unknown error)",
+								model: last.model,
+								provider: last.provider,
+								api: last.api,
+							};
+						}
+					}
+					// Do not finish the channel here — the fallback runner may start
+					// another attempt. session_end + finish happen once, after the
+					// runner settles (see finalizeRun()).
 					break;
+				}
 			}
 		});
+
+		return agent;
+		};
+
+		// Emit session_end once and close the stream. Called after all prompts
+		// (and any fallback retries) have settled.
+		let runFinalized = false;
+		const finalizeRun = () => {
+			if (runFinalized) return;
+			runFinalized = true;
+			pushMsg({
+				type: "system",
+				subtype: "session_end",
+				content: `Agent ${loaded.manifest.name} finished`,
+				metadata: { sessionId: _sessionId },
+			});
+			channel.finish();
+		};
+
+		// One persistent agent for the whole run so multi-turn conversation state
+		// survives across prompts. Fallback swaps the model on this same agent
+		// (and restores the pre-attempt transcript) rather than rebuilding it.
+		const agent = buildAgent(candidateModels[0]);
+		let activeModelIndex = 0;
+
+		// Run one prompt, falling back through candidate models when the current
+		// model fails with a retryable provider error before producing any output.
+		const runPrompt = async (promptText: string): Promise<void> => {
+			for (let i = activeModelIndex; i < candidateModels.length; i++) {
+				attempt = { producedOutput: false, error: null };
+				if (i !== activeModelIndex) {
+					agent.state.model = candidateModels[i];
+					activeModelIndex = i;
+				}
+				// Snapshot transcript so a failed attempt can be rolled back cleanly.
+				const snapshot = [...agent.state.messages];
+				await otelContext.with(_session.ctx, () => agent.prompt(promptText));
+
+				const err = attempt.error;
+				if (!err) return; // success — stay on this model for later turns
+
+				const hasNext = i < candidateModels.length - 1;
+				const canRetry =
+					hasNext && !attempt.producedOutput && isRetryableProviderError(err.message);
+
+				if (canRetry) {
+					const next = candidateModels[i + 1];
+					// Drop the failed user+assistant turn so the retry starts clean.
+					agent.state.messages = snapshot;
+					pushMsg({
+						type: "system",
+						subtype: "fallback",
+						content:
+							`Model ${err.provider ?? ""}:${err.model ?? ""} failed (${err.message}). ` +
+							`Falling back to ${next.provider}:${next.id}.`,
+						metadata: {
+							failedModel: `${err.provider ?? ""}:${err.model ?? ""}`,
+							nextModel: `${next.provider}:${next.id}`,
+						},
+					});
+					continue;
+				}
+
+				// Terminal failure — surface the error to the caller. Emit the
+				// system error plus an errored assistant message so callers that
+				// inspect messages() for stopReason still see it (original contract).
+				pushMsg({
+					type: "system",
+					subtype: "error",
+					content: err.message || "LLM request failed (unknown error)",
+					metadata: { model: err.model, provider: err.provider, api: err.api },
+				});
+				pushMsg({
+					type: "assistant",
+					content: "",
+					model: err.model ?? "unknown",
+					provider: err.provider ?? "unknown",
+					stopReason: "error",
+					errorMessage: err.message,
+				});
+				return;
+			}
+		};
 
 		// 10. Send prompt — run inside the session span's context so that
 		// gen_ai.chat and gitagent.tool.execute spans become children of
@@ -507,9 +627,7 @@ export function query(options: QueryOptions): Query {
 					return;
 				}
 			}
-			await otelContext.with(_session.ctx, () =>
-				agent.prompt(options.prompt as string),
-			);
+			await runPrompt(options.prompt as string);
 		} else {
 			// Multi-turn: iterate the async iterable
 			for await (const userMsg of options.prompt) {
@@ -531,11 +649,12 @@ export function query(options: QueryOptions): Query {
 						return;
 					}
 				}
-				await otelContext.with(_session.ctx, () =>
-					agent.prompt(userMsg.content),
-				);
+				await runPrompt(userMsg.content);
 			}
 		}
+
+		// Emit session_end and close the stream (once).
+		finalizeRun();
 
 		// Finalize local session if active
 		if (localSession) {

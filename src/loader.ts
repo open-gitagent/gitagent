@@ -97,6 +97,49 @@ function createCustomModel(provider: string, modelId: string, baseUrl: string): 
 	};
 }
 
+/**
+ * Resolve a "provider:model" string into a pi-ai Model, handling custom
+ * endpoints (`provider:model@base-url`), the GITAGENT_MODEL_BASE_URL override,
+ * and API-key normalization for non-built-in providers.
+ *
+ * Shared by the preferred model and every manifest fallback entry so all
+ * candidates resolve identically.
+ */
+export function resolveModel(modelStr: string): Model<any> {
+	const { provider, modelId } = parseModelString(modelStr);
+	const envBaseUrl = process.env.GITAGENT_MODEL_BASE_URL;
+
+	let model: Model<any>;
+	if (modelId.includes("@")) {
+		// Custom endpoint: provider:model-id@base-url
+		const atIndex = modelId.indexOf("@");
+		model = createCustomModel(provider, modelId.slice(0, atIndex), modelId.slice(atIndex + 1));
+	} else if (envBaseUrl) {
+		// Environment-specified base URL overrides all providers
+		model = createCustomModel(provider, modelId, envBaseUrl);
+	} else {
+		// Standard registered model
+		model = getModel(provider as any, modelId as any);
+	}
+
+	// For custom providers not in pi-ai's env key map, ensure an API key is available.
+	// pi-ai calls getEnvApiKey(model.provider) which only knows built-in providers.
+	// For unknown providers using openai-completions API, set provider to "openai" so
+	// pi-ai finds OPENAI_API_KEY. The actual auth happens via custom headers on the model.
+	const knownProviders = new Set(["openai", "anthropic", "google", "google-vertex", "groq", "cerebras", "xai", "openrouter", "mistral", "amazon-bedrock", "azure-openai-responses", "huggingface", "opencode", "kimi-coding", "github-copilot"]);
+	if (model.baseUrl && !knownProviders.has(provider)) {
+		// Use provider-specific key if available, otherwise use LYZR key or dummy
+		const providerKey = process.env[`${provider.toUpperCase()}_API_KEY`] || process.env.LYZR_API_KEY;
+		if (providerKey && !process.env.OPENAI_API_KEY) {
+			process.env.OPENAI_API_KEY = providerKey;
+		}
+		// Override provider to "openai" so pi-ai resolves the API key correctly
+		(model as any).provider = "openai";
+	}
+
+	return model;
+}
+
 async function ensureGitagentDir(agentDir: string): Promise<string> {
 	const gitagentDir = join(agentDir, ".gitagent");
 	await mkdir(gitagentDir, { recursive: true });
@@ -129,6 +172,9 @@ export interface LoadedAgent {
 	systemPrompt: string;
 	manifest: AgentManifest;
 	model: Model<any>;
+	/** Fallback models (resolved from manifest.model.fallback), tried in order
+	 *  when the primary fails with a retryable provider error. */
+	fallbackModels: Model<any>[];
 	skills: SkillMetadata[];
 	knowledge: LoadedKnowledge;
 	workflows: WorkflowMetadata[];
@@ -387,41 +433,26 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 		);
 	}
 
-	const { provider, modelId } = parseModelString(modelStr);
-	const envBaseUrl = process.env.GITAGENT_MODEL_BASE_URL;
+	const model = resolveModel(modelStr);
 
-	let model: Model<any>;
-	if (modelId.includes("@")) {
-		// Custom endpoint: provider:model-id@base-url
-		const atIndex = modelId.indexOf("@");
-		model = createCustomModel(provider, modelId.slice(0, atIndex), modelId.slice(atIndex + 1));
-	} else if (envBaseUrl) {
-		// Environment-specified base URL overrides all providers
-		model = createCustomModel(provider, modelId, envBaseUrl);
-	} else {
-		// Standard registered model
-		model = getModel(provider as any, modelId as any);
-	}
-
-	// For custom providers not in pi-ai's env key map, ensure an API key is available.
-	// pi-ai calls getEnvApiKey(model.provider) which only knows built-in providers.
-	// For unknown providers using openai-completions API, set provider to "openai" so
-	// pi-ai finds OPENAI_API_KEY. The actual auth happens via custom headers on the model.
-	const knownProviders = new Set(["openai", "anthropic", "google", "google-vertex", "groq", "cerebras", "xai", "openrouter", "mistral", "amazon-bedrock", "azure-openai-responses", "huggingface", "opencode", "kimi-coding", "github-copilot"]);
-	if (model.baseUrl && !knownProviders.has(provider)) {
-		// Use provider-specific key if available, otherwise use LYZR key or dummy
-		const providerKey = process.env[`${provider.toUpperCase()}_API_KEY`] || process.env.LYZR_API_KEY;
-		if (providerKey && !process.env.OPENAI_API_KEY) {
-			process.env.OPENAI_API_KEY = providerKey;
+	// Resolve fallback models declared in the manifest. Used at runtime when the
+	// primary provider fails with a retryable error (e.g. credit balance too low).
+	// Bad entries are skipped rather than failing the whole load.
+	const fallbackModels: Model<any>[] = [];
+	for (const fb of manifest.model.fallback ?? []) {
+		if (!fb || fb === modelStr) continue;
+		try {
+			fallbackModels.push(resolveModel(fb));
+		} catch {
+			// Skip unparseable fallback entries — they shouldn't break startup.
 		}
-		// Override provider to "openai" so pi-ai resolves the API key correctly
-		(model as any).provider = "openai";
 	}
 
 	return {
 		systemPrompt,
 		manifest,
 		model,
+		fallbackModels,
 		skills,
 		knowledge,
 		workflows,
