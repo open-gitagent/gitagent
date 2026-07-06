@@ -385,9 +385,11 @@ export function query(options: QueryOptions): Query {
 							provider: msg.provider,
 							api: (msg as any).api,
 						};
-						// Reset accumulators and skip cost tracking (usage is empty on error).
+						// Reset accumulators + LLM-call timer (a partial stream may have
+						// set it) and skip cost tracking (usage is empty on error).
 						accText = "";
 						accThinking = "";
+						_llmCallStart = 0;
 						break;
 					}
 

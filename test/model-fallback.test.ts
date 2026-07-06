@@ -1,4 +1,4 @@
-import { describe, it, before } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -67,6 +67,7 @@ describe("loadAgent fallback resolution", () => {
 			"  preferred: 'openai:gpt-4o-mini@https://example.com/v1'",
 			"  fallback:",
 			"    - 'anthropic:claude-3-5-sonnet@https://example.com/v1'",
+			"    - ' anthropic:claude-3-5-sonnet@https://example.com/v1 '", // whitespace dup → skipped
 			"    - 'openai:gpt-4o-mini@https://example.com/v1'", // dup of preferred → skipped
 			"    - ''", // empty → skipped
 			"tools: []",
@@ -77,11 +78,15 @@ describe("loadAgent fallback resolution", () => {
 		await writeFile(join(dir, "agent.yaml"), yaml, "utf-8");
 	});
 
-	it("resolves manifest fallback models, skipping dups and blanks", async () => {
+	after(async () => {
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("resolves manifest fallback models, trimming + de-duping and skipping blanks", async () => {
 		const loaded = await loadAgent(dir);
 		assert.equal(loaded.model.id, "gpt-4o-mini");
-		// Only the anthropic entry survives: the openai dup matches preferred and
-		// the empty string is skipped.
+		// Only one anthropic entry survives: the whitespace variant is a dup, the
+		// openai entry matches preferred, and the empty string is skipped.
 		assert.equal(loaded.fallbackModels.length, 1);
 		assert.equal(loaded.fallbackModels[0].id, "claude-3-5-sonnet");
 	});

@@ -437,10 +437,14 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 
 	// Resolve fallback models declared in the manifest. Used at runtime when the
 	// primary provider fails with a retryable error (e.g. credit balance too low).
-	// Bad entries are skipped rather than failing the whole load.
+	// Entries are trimmed and de-duplicated (including against the preferred
+	// model); blanks and unparseable entries are skipped rather than failing load.
 	const fallbackModels: Model<any>[] = [];
-	for (const fb of manifest.model.fallback ?? []) {
-		if (!fb || fb === modelStr) continue;
+	const seenModelStrings = new Set<string>([modelStr.trim()]);
+	for (const rawFb of manifest.model.fallback ?? []) {
+		const fb = (rawFb ?? "").trim();
+		if (!fb || seenModelStrings.has(fb)) continue;
+		seenModelStrings.add(fb);
 		try {
 			fallbackModels.push(resolveModel(fb));
 		} catch {
