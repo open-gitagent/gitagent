@@ -91,9 +91,9 @@ export interface AssertionResult {
 	assertion_id: number;
 	category: AssertionCategory;
 	assertion: string;
-	passed: boolean;
 	evidence: string;
 	notes?: string;
+	passed: boolean;
 }
 
 export interface OutputVerdict {

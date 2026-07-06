@@ -27,7 +27,10 @@ Be objective and evidence-based. Quote directly from the deliverable when citing
 Your output MUST be a single valid JSON object. No markdown. No code blocks. No explanation.
 Raw JSON only.
 
-Required JSON schema:
+Required JSON schema — fields are ordered deliberately: work out and write "evidence" and
+"notes" BEFORE deciding "passed". Reason first, then commit to the verdict based on what
+you just wrote. Never decide "passed" before "evidence" — a verdict written before its
+reasoning is exactly the mistake this ordering exists to prevent.
 {
   "all_passed": boolean,
   "passed_count": number,
@@ -37,9 +40,9 @@ Required JSON schema:
       "assertion_id": number,
       "category": string,
       "assertion": string,
-      "passed": boolean,
       "evidence": string,
-      "notes": string
+      "notes": string,
+      "passed": boolean
     }
   ],
   "summary": string
