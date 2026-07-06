@@ -302,9 +302,9 @@ export function query(options: QueryOptions): Query {
 		const DEFAULT_MAX_TURNS = 50;
 		const maxTurns =
 			options.maxTurns ?? loaded.manifest.runtime?.max_turns ?? DEFAULT_MAX_TURNS;
-		if (options.maxTurns !== undefined) {
-			modelOptions.maxTurns = options.maxTurns;
-		}
+		// Reflect the effective cap in agent state so telemetry/inspection shows
+		// the limit the loop guard actually enforces, not just when it was passed.
+		modelOptions.maxTurns = maxTurns;
 
 		// 8. Create Agent
 		const loopGuard = createLoopGuard({ maxTurns });

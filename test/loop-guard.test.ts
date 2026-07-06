@@ -9,12 +9,12 @@ before(async () => {
 
 // Build a minimal AfterToolCallContext. The guard only reads assistantMessage
 // (by reference), toolCall.name, args, and result.content.
-function ctx(turn: object, name: string, args: unknown) {
+function ctx(turn: object, name: string, args: unknown, details: unknown = undefined) {
 	return {
 		assistantMessage: turn as any,
 		toolCall: { type: "toolCall", id: "x", name, arguments: args as any },
 		args,
-		result: { content: [{ type: "text", text: "ok" }], details: undefined },
+		result: { content: [{ type: "text", text: "ok" }], details },
 		isError: false,
 		context: {} as any,
 	};
@@ -73,11 +73,12 @@ describe("createLoopGuard", () => {
 		assert.equal(r?.terminate, true);
 	});
 
-	it("preserves original tool output when terminating", async () => {
+	it("preserves original tool output (content + details) when terminating", async () => {
 		const guard = createLoopGuard({ maxTurns: 1, maxRepeats: 100 });
-		const r = await guard.afterToolCall(ctx({}, "read", { p: 1 }));
+		const r = await guard.afterToolCall(ctx({}, "read", { p: 1 }, { rows: 3 }));
 		assert.equal(r?.terminate, true);
 		assert.equal(r?.content?.[0]?.text, "ok");
 		assert.match(r?.content?.[1]?.text ?? "", /loop-guard/);
+		assert.deepEqual(r?.details, { rows: 3 });
 	});
 });
