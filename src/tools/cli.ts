@@ -24,6 +24,9 @@ export function createCliTool(cwd: string, defaultTimeout?: number): AgentTool<t
 					return;
 				}
 
+				// shell: true routes through cmd.exe on Windows and /bin/sh elsewhere.
+				// cmd.exe has different quoting/escaping rules than sh (e.g. &, |, ^, >,
+				// embedded quotes behave differently) — commands may need to account for this.
 				const child = spawn(command, {
 					cwd,
 					stdio: ["ignore", "pipe", "pipe"],
