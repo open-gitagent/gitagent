@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { readFile } from "fs/promises";
-import { join, resolve } from "path";
+import { join, resolve, relative, isAbsolute } from "path";
 import yaml from "js-yaml";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
@@ -66,7 +66,9 @@ async function executeHook(
 		// Path traversal guard: ensure script doesn't escape its base directory
 		const resolvedScript = resolve(scriptPath);
 		const allowedBase = resolve(baseDir);
-		if (!resolvedScript.startsWith(allowedBase + "/") && resolvedScript !== allowedBase) {
+		const rel = relative(allowedBase, resolvedScript);
+		const escapesBase = rel !== "" && (rel.startsWith("..") || isAbsolute(rel));
+		if (escapesBase) {
 			reject(new Error(`Hook "${hook.script}" escapes its base directory`));
 			return;
 		}
