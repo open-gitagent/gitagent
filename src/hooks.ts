@@ -97,8 +97,16 @@ async function executeHook(
 			reject(new Error(`Hook "${hook.script}" timed out after 10s`));
 		}, 10_000);
 
-		child.on("error", (err) => {
+		child.on("error", (err: any) => {
 			clearTimeout(timeout);
+			if (err.code === "ENOENT" && err.syscall === "spawn sh") {
+				reject(new Error(
+					`Hook "${hook.script}" could not run: no POSIX shell ("sh") found on this system. ` +
+					`Hook scripts require a POSIX shell — on Windows, run gitagent from Git Bash or WSL, ` +
+					`or ensure "sh" is on PATH.`,
+				));
+				return;
+			}
 			reject(new Error(`Hook "${hook.script}" failed to start: ${err.message}`));
 		});
 

@@ -24,10 +24,11 @@ export function createCliTool(cwd: string, defaultTimeout?: number): AgentTool<t
 					return;
 				}
 
-				const child = spawn("sh", ["-c", command], {
+				const child = spawn(command, {
 					cwd,
 					stdio: ["ignore", "pipe", "pipe"],
 					env: { ...process.env },
+					shell: true,
 				});
 
 				let output = "";
