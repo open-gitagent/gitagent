@@ -112,8 +112,8 @@ export { buildTool, getToolMetadata } from "./tool-factory.js";
 export type { ToolDefinition, ToolMetadata } from "./tool-factory.js";
 
 // Cost tracking
-export { CostTracker } from "./cost-tracker.js";
-export type { SessionCosts, ModelUsage } from "./cost-tracker.js";
+export { CostTracker, computeCostUsd } from "./cost-tracker.js";
+export type { SessionCosts, ModelUsage, ModelCostRates, TokenCounts } from "./cost-tracker.js";
 
 // Context compaction
 export { estimateTokens, estimateMessageTokens, needsCompaction, truncateToolResults, messagesToText, buildCompactPrompt } from "./compact.js";
