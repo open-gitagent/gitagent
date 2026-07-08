@@ -280,6 +280,9 @@ for await (const msg of query({
 | `maxTurns` | `number` | Max agent turns |
 | `abortController` | `AbortController` | Cancellation signal |
 | `constraints` | `object` | `temperature`, `maxTokens`, `topP`, `topK` |
+| `permissionMode` | `"default" \| "plan" \| "acceptEdits" \| "bypassPermissions"` | Tool permission mode (see below) |
+| `permissions` | `PermissionRules` | `allow` / `deny` / `ask` rules + `defaultMode` |
+| `canUseTool` | `CanUseTool` | Callback to resolve `ask` decisions |
 
 ### Message Types
 
@@ -289,8 +292,78 @@ for await (const msg of query({
 | `assistant` | Complete LLM response | `content`, `model`, `usage`, `stopReason` |
 | `tool_use` | Tool invocation | `toolName`, `args`, `toolCallId` |
 | `tool_result` | Tool output | `content`, `isError`, `toolCallId` |
-| `system` | Lifecycle events | `subtype`, `content`, `metadata` |
+| `system` | Lifecycle events (incl. `permission_denied`) | `subtype`, `content`, `metadata` |
 | `user` | User message (multi-turn) | `content` |
+| `plan_proposed` | Plan submitted via `exit_plan_mode` (plan mode) | `plan` |
+
+## Permissions & Plan Mode
+
+Gitagent gates every tool call through a permission layer (a port of Claude
+Code's permission model), driven entirely from the SDK. **It is opt-in** — a
+`query()` with none of `permissionMode` / `permissions` / `canUseTool` (and no
+`permissions:` block in `agent.yaml`) keeps the legacy ungated behavior.
+
+### Modes
+
+| Mode | Behavior |
+|---|---|
+| `default` | Read-only tools allowed; unmatched **mutating** tools call `canUseTool` (fail-closed deny if absent) |
+| `plan` | All mutating tools denied; the model researches read-only, then calls `exit_plan_mode` to propose a plan for approval |
+| `acceptEdits` | Auto-allow `write`/`edit`; still asks for other mutating tools |
+| `bypassPermissions` | Allow everything |
+
+### Rules
+
+`allow` / `deny` / `ask` accept `Tool(pattern)` strings (CC-compatible; `Bash`
+aliases to `cli`). `deny` beats `allow`. Patterns support `*` and the `:*` prefix
+form.
+
+```typescript
+query({
+  prompt: "tidy the repo",
+  permissions: {
+    deny:  ["Bash(rm *)", "Bash(git push:*)"],
+    allow: ["Bash(git status)", "Write(src/**)"],
+  },
+  canUseTool: async (name, args, ctx) => {
+    // resolve anything that falls through to "ask"
+    return ctx.isReadOnly ? { behavior: "allow" } : { behavior: "ask" };
+  },
+});
+```
+
+Rules can also live in `agent.yaml` (option values merge over / extend these):
+
+```yaml
+permissions:
+  defaultMode: default
+  deny:  ["Bash(rm *)"]
+  allow: ["Read", "Write(src/**)"]
+```
+
+### Plan mode (SDK)
+
+```typescript
+const q = query({ prompt: "refactor the auth module", permissionMode: "plan" });
+
+for await (const msg of q) {
+  if (msg.type === "plan_proposed") {
+    console.log(msg.plan);
+    q.approvePlan();              // → switches to acceptEdits and proceeds
+    // or: q.rejectPlan("split into smaller steps");  // stay in plan mode
+  }
+}
+```
+
+`Query` exposes `approvePlan({ mode? })`, `rejectPlan(feedback)`, and
+`setPermissionMode(mode)` for runtime control.
+
+### CLI
+
+`gitagent --permission-mode plan -d ./agent "…"` enables the gate from the CLI.
+In the REPL, `ask` decisions and plan approval prompt interactively; in
+single-shot (`-p`) mode the proposed plan is printed and execution stops
+(non-interactive).
 
 ## Architecture
 

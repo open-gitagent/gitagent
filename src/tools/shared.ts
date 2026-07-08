@@ -1,5 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import { homedir } from "os";
+import { resolve, relative, isAbsolute, sep } from "path";
 
 // ── Constants ───────────────────────────────────────────────────────────
 
@@ -111,6 +112,31 @@ export function paginateLines(
 		shownRange: [startLine + 1, endLine],
 		totalLines,
 	};
+}
+
+/**
+ * Resolve a user-supplied path (expanding `~` and relative paths against `cwd`).
+ * When `rootDir` is given, the resolved path is **jailed**: if it escapes
+ * `rootDir` the function throws. This confines file tools to a session folder
+ * (desktop app) and closes the `~`-expansion escape. Note: this is a lexical
+ * check (path.resolve/relative), not a realpath check — a symlink inside the
+ * root that points outside is a residual risk; the permission/plan gate remains
+ * the defense-in-depth control.
+ */
+export function resolveJailed(path: string, cwd: string, rootDir?: string): string {
+	let p = path;
+	if (p.startsWith("~/") || p === "~") {
+		p = homedir() + p.slice(1);
+	}
+	const abs = isAbsolute(p) ? resolve(p) : resolve(cwd, p);
+	if (rootDir) {
+		const root = resolve(rootDir);
+		const rel = relative(root, abs);
+		if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+			throw new Error(`Path "${path}" escapes the session folder (jailed to ${root})`);
+		}
+	}
+	return abs;
 }
 
 /** Resolve a path relative to a sandbox repo root. */

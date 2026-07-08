@@ -2,8 +2,13 @@ import { spawn } from "child_process";
 import type { AgentTool, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import { cliSchema, MAX_OUTPUT, DEFAULT_TIMEOUT } from "./shared.js";
 
-export function createCliTool(cwd: string, defaultTimeout?: number): AgentTool<typeof cliSchema> {
+export function createCliTool(cwd: string, defaultTimeout?: number, rootDir?: string): AgentTool<typeof cliSchema> {
 	const baseTimeout = defaultTimeout ?? DEFAULT_TIMEOUT;
+	// When jailed to a session folder, run commands with that folder as cwd so
+	// relative paths stay inside it. NOTE: a shell command can still reference
+	// absolute paths outside the root — cli is not fully sandboxed; the
+	// permission + plan-mode gate is the real control for shell execution.
+	const workingDir = rootDir ?? cwd;
 	return {
 		name: "cli",
 		label: "cli",
@@ -25,7 +30,7 @@ export function createCliTool(cwd: string, defaultTimeout?: number): AgentTool<t
 				}
 
 				const child = spawn("sh", ["-c", command], {
-					cwd,
+					cwd: workingDir,
 					stdio: ["ignore", "pipe", "pipe"],
 					env: { ...process.env },
 				});

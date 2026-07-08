@@ -1,0 +1,35 @@
+{
+  "name": "@open-gitagent/desktop",
+  "version": "0.1.0",
+  "description": "Cowork-style macOS desktop app for gitagent — local-folder sessions, model choice, streaming, plan approval.",
+  "author": "shreyaskapale",
+  "license": "MIT",
+  "private": true,
+  "main": "./out/main/index.mjs",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "dist": "electron-vite build && electron-builder --mac"
+  },
+  "dependencies": {
+    "@open-gitagent/gitagent": "file:..",
+    "highlight.js": "^11.10.0",
+    "react-markdown": "^9.0.1",
+    "rehype-highlight": "^7.0.0",
+    "remark-gfm": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^31.3.0",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.0",
+    "vite": "^5.4.0"
+  }
+}

@@ -1,0 +1,17 @@
+appId: ai.gitagent.desktop
+productName: Gitagent
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - "!**/*.map"
+# Bundle the in-process SDK (workspace dependency) into the app.
+asarUnpack:
+  - node_modules/@open-gitagent/gitagent/**
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+  # Set to your Developer ID to sign; unsigned builds run locally for dev.
+  identity: null

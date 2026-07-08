@@ -19,7 +19,18 @@ export type {
 	GCHookResult,
 	GCPreToolUseContext,
 	GCHookContext,
+	GCPlanProposed,
 } from "./sdk-types.js";
+
+// Permissions + plan mode
+export type {
+	PermissionMode,
+	PermissionRules,
+	PermissionDecision,
+	PermissionBehavior,
+	CanUseTool,
+	CanUseToolContext,
+} from "./permissions.js";
 
 // Internal types (for advanced usage)
 export type { AgentManifest, LoadedAgent } from "./loader.js";
@@ -34,8 +45,8 @@ export type { SandboxConfig, SandboxContext } from "./sandbox.js";
 export { createSandboxContext } from "./sandbox.js";
 
 // Session
-export type { LocalSession } from "./session.js";
-export { initLocalSession } from "./session.js";
+export type { LocalSession, LocalFolderOptions } from "./session.js";
+export { initLocalSession, initLocalFolderSession } from "./session.js";
 
 // Voice — startVoiceServer moved to the optional @open-gitagent/voice package
 // in v2.0.0. The message-type protocol below stays in core because chat history

@@ -10,6 +10,13 @@ import type { SandboxContext, SandboxConfig } from "./sandbox.js";
 import { expandSkillCommand, refreshSkills } from "./skills.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import type { HooksConfig } from "./hooks.js";
+import {
+	normalizeRules,
+	wrapToolWithPermissions,
+	PLAN_MODE_PROMPT,
+} from "./permissions.js";
+import type { PermissionState, PermissionMode, CanUseTool } from "./permissions.js";
+import { createExitPlanModeTool } from "./tools/exit-plan-mode.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
 import { toAgentTool } from "./tool-utils.js";
 import { AuditLogger, isAuditEnabled } from "./audit.js";
@@ -39,6 +46,7 @@ const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
+const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 
 interface ParsedArgs {
 	model?: string;
@@ -52,6 +60,7 @@ interface ParsedArgs {
 	pat?: string;
 	session?: string;
 	voice?: string;
+	permissionMode?: PermissionMode;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -67,6 +76,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 	let pat: string | undefined;
 	let session: string | undefined;
 	let voice: string | undefined;
+	let permissionMode: PermissionMode | undefined;
 
 	for (let i = 0; i < args.length; i++) {
 		switch (args[i]) {
@@ -106,6 +116,9 @@ function parseArgs(argv: string[]): ParsedArgs {
 			case "--session":
 				session = args[++i];
 				break;
+			case "--permission-mode":
+				permissionMode = args[++i] as PermissionMode;
+				break;
 			case "--voice":
 			case "-v":
 				// Accept optional backend name: --voice, --voice openai, --voice gemini
@@ -123,7 +136,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 		}
 	}
 
-	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken, repo, pat, session, voice };
+	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken, repo, pat, session, voice, permissionMode };
 }
 
 function handleEvent(
@@ -320,7 +333,7 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch, voice } = parseArgs(process.argv);
+	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch, voice, permissionMode } = parseArgs(process.argv);
 
 	// If --repo is given, derive a default dir from the repo URL (skip interactive prompt)
 	let dir = rawDir;
@@ -559,6 +572,63 @@ async function main(): Promise<void> {
 		}
 	}
 
+	// Permission gate (Phase 1). Enabled when --permission-mode is passed or the
+	// manifest declares a permissions block; otherwise legacy ungated behavior.
+	// Wrapped BEFORE hooks so a denial short-circuits before any hook/execution.
+	const manifestPerms = manifest.permissions;
+	const permEnabled = permissionMode !== undefined || manifestPerms !== undefined;
+	let effectiveSystemPrompt = systemPrompt;
+	let permState: PermissionState | null = null;
+	// Holder so approver closures can reach the agent (single-shot abort) and the
+	// REPL readline once they exist.
+	const cli: { agent: Agent | null; rl: ReturnType<typeof createInterface> | null } = { agent: null, rl: null };
+	if (permEnabled) {
+		const askLine = (q: string): Promise<string> =>
+			cli.rl ? new Promise<string>((res) => cli.rl!.question(q, res)) : Promise.resolve("");
+		const initialMode: PermissionMode =
+			permissionMode ?? (manifestPerms?.defaultMode as PermissionMode) ?? "default";
+		permState = {
+			mode: initialMode,
+			rules: normalizeRules({ allow: manifestPerms?.allow, deny: manifestPerms?.deny, ask: manifestPerms?.ask }),
+			canUseTool: async (name, _args, ctx) => {
+				if (!cli.rl) {
+					return {
+						behavior: "deny",
+						message: "Approval required but session is non-interactive (use --permission-mode bypassPermissions, an allow rule, or run without -p).",
+					};
+				}
+				const ans = (await askLine(yellow(`\nAllow ${name}(${ctx.target})? [y once / a always / N deny] `))).trim().toLowerCase();
+				if (ans === "a") { permState!.rules.allow.push(name); return { behavior: "allow" }; }
+				if (ans === "y" || ans === "yes") return { behavior: "allow" };
+				return { behavior: "deny", message: "Denied by user." };
+			},
+			sessionId,
+			agentName: manifest.name,
+			planDeferred: null,
+		};
+		if (initialMode === "plan") effectiveSystemPrompt += "\n\n" + PLAN_MODE_PROMPT;
+		const state = permState;
+		tools = [
+			...tools,
+			createExitPlanModeTool(state, async (plan) => {
+				process.stdout.write("\n" + bold("── Proposed plan ──") + "\n" + plan + "\n\n");
+				if (!cli.rl) { cli.agent?.abort(); return; }
+				const ans = (await askLine(yellow("Approve this plan? [y / N] "))).trim().toLowerCase();
+				if (ans === "y" || ans === "yes") {
+					state.planDeferred?.resolve({ approved: true, nextMode: "acceptEdits" });
+				} else {
+					const fb = await askLine("Feedback for revision (optional): ");
+					state.planDeferred?.resolve({ approved: false, feedback: fb });
+				}
+			}),
+		];
+		tools = tools.map((t) =>
+			wrapToolWithPermissions(t, state, (toolName, message) => {
+				process.stdout.write(red(`\n⛔ ${toolName} denied: ${message}\n`));
+			}),
+		);
+	}
+
 	// Wrap with hooks if configured
 	if (hooksConfig) {
 		tools = tools.map((t) => wrapToolWithHooks(t, hooksConfig, agentDir, sessionId));
@@ -588,12 +658,13 @@ async function main(): Promise<void> {
 
 	const agent = new Agent({
 		initialState: {
-			systemPrompt,
+			systemPrompt: effectiveSystemPrompt,
 			model: loaded.model,
 			tools,
 			...modelOptions,
 		},
 	});
+	cli.agent = agent;
 
 	agent.subscribe((event) => {
 		// Closure-capture _llmCallStart since handleEvent is module-scope.
@@ -673,6 +744,8 @@ async function main(): Promise<void> {
 		input: process.stdin,
 		output: process.stdout,
 	});
+	// Share with the permission approver (plan approval + ask prompts).
+	cli.rl = rl;
 
 	const ask = (): void => {
 		rl.question(green("→ "), async (input) => {

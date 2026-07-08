@@ -21,6 +21,12 @@ export interface BuiltinToolsConfig {
 	sandbox?: SandboxContext;
 	gitagentDir?: string;
 	pluginMemoryLayers?: MemoryLayerDef[];
+	/**
+	 * When set, the file tools (read/write/edit) are jailed to this directory —
+	 * any path that resolves outside it is rejected — and cli runs with it as
+	 * cwd. Used by the desktop app to confine a session to its granted folder.
+	 */
+	rootDir?: string;
 }
 
 /**
@@ -40,10 +46,10 @@ export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[]
 	}
 
 	const tools: AgentTool<any>[] = [
-		createCliTool(config.dir, config.timeout),
-		createReadTool(config.dir),
-		createWriteTool(config.dir),
-		createEditTool(config.dir),
+		createCliTool(config.dir, config.timeout, config.rootDir),
+		createReadTool(config.dir, config.rootDir),
+		createWriteTool(config.dir, config.rootDir),
+		createEditTool(config.dir, config.rootDir),
 		createMemoryTool(config.dir, config.pluginMemoryLayers),
 		createCapturePhotoTool(config.dir),
 	];

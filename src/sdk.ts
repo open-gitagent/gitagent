@@ -11,6 +11,13 @@ import { loadDeclarativeTools } from "./tool-loader.js";
 import { toAgentTool } from "./tool-utils.js";
 import { wrapToolWithProgrammaticHooks } from "./sdk-hooks.js";
 import { mergeHooksConfigs } from "./plugins.js";
+import {
+	normalizeRules,
+	wrapToolWithPermissions,
+	PLAN_MODE_PROMPT,
+} from "./permissions.js";
+import type { PermissionState, PermissionMode } from "./permissions.js";
+import { createExitPlanModeTool } from "./tools/exit-plan-mode.js";
 import { initLocalSession } from "./session.js";
 import type { LocalSession } from "./session.js";
 import type {
@@ -94,6 +101,9 @@ export function query(options: QueryOptions): Query {
 	// These are set once the agent is loaded (async init below)
 	let _sessionId = options.sessionId ?? "";
 	let _manifest: AgentManifest | null = null;
+	// Shared mutable permission state — null when permissions are not enabled.
+	// Referenced by the Query control methods (approvePlan/setPermissionMode).
+	let permState: PermissionState | null = null;
 
 	// Accumulate streaming deltas for the current message
 	let accText = "";
@@ -161,6 +171,41 @@ export function query(options: QueryOptions): Query {
 			systemPrompt += "\n\n" + options.systemPromptSuffix;
 		}
 
+		// 2b. Build permission state. Enabled only when the consumer opts in
+		// (any of permissionMode / permissions / canUseTool, or a manifest
+		// permissions block) — otherwise the legacy ungated behavior is kept.
+		const manifestPerms = loaded.manifest.permissions;
+		const permEnabled =
+			options.permissionMode !== undefined ||
+			options.permissions !== undefined ||
+			options.canUseTool !== undefined ||
+			manifestPerms !== undefined;
+		if (permEnabled) {
+			const initialMode: PermissionMode =
+				options.permissionMode ??
+				(options.permissions?.defaultMode as PermissionMode) ??
+				(manifestPerms?.defaultMode as PermissionMode) ??
+				"default";
+			// Merge manifest rules (base) with option rules (override/extend).
+			const mergedRules = normalizeRules({
+				allow: [...(manifestPerms?.allow ?? []), ...(options.permissions?.allow ?? [])],
+				deny: [...(manifestPerms?.deny ?? []), ...(options.permissions?.deny ?? [])],
+				ask: [...(manifestPerms?.ask ?? []), ...(options.permissions?.ask ?? [])],
+			});
+			permState = {
+				mode: initialMode,
+				rules: mergedRules,
+				canUseTool: options.canUseTool,
+				sessionId: _sessionId,
+				agentName: loaded.manifest.name,
+				planDeferred: null,
+			};
+			// Inject the plan-mode instruction when starting in plan mode.
+			if (initialMode === "plan") {
+				systemPrompt += "\n\n" + PLAN_MODE_PROMPT;
+			}
+		}
+
 		// 3. Build tools (with optional sandbox)
 		if (options.sandbox) {
 			const sandboxConfig: SandboxOptions = options.sandbox === true
@@ -182,6 +227,7 @@ export function query(options: QueryOptions): Query {
 				sandbox: sandboxCtx,
 				gitagentDir: loaded.gitagentDir,
 				pluginMemoryLayers: pluginMemoryLayers.length > 0 ? pluginMemoryLayers : undefined,
+				rootDir: options.rootDir,
 			});
 		}
 
@@ -220,6 +266,27 @@ export function query(options: QueryOptions): Query {
 		if (options.disallowedTools) {
 			const denied = new Set(options.disallowedTools);
 			tools = tools.filter((t) => !denied.has(t.name));
+		}
+
+		// 3b. Permission gate. Add exit_plan_mode (so the model can present a
+		// plan) and wrap every tool with the permission check BEFORE hooks, so
+		// a denial short-circuits before any hook or execution runs.
+		if (permState) {
+			const state = permState;
+			tools = [
+				...tools,
+				createExitPlanModeTool(state, (plan) => pushMsg({ type: "plan_proposed", plan })),
+			];
+			tools = tools.map((t) =>
+				wrapToolWithPermissions(t, state, (toolName, message) =>
+					pushMsg({
+						type: "system",
+						subtype: "permission_denied",
+						content: message,
+						metadata: { toolName },
+					}),
+				),
+			);
 		}
 
 		// 4. Wrap with script-based hooks (agent + plugin hooks merged)
@@ -594,6 +661,26 @@ export function query(options: QueryOptions): Query {
 		},
 
 		steer(_message: string) {
+		},
+
+		approvePlan(opts?: { mode?: PermissionMode }) {
+			if (!permState) return;
+			const nextMode = opts?.mode ?? "acceptEdits";
+			if (permState.planDeferred) {
+				permState.planDeferred.resolve({ approved: true, nextMode });
+			} else {
+				permState.mode = nextMode;
+			}
+		},
+
+		rejectPlan(feedback: string) {
+			if (permState?.planDeferred) {
+				permState.planDeferred.resolve({ approved: false, feedback });
+			}
+		},
+
+		setPermissionMode(mode: PermissionMode) {
+			if (permState) permState.mode = mode;
 		},
 
 		sessionId() {

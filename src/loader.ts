@@ -55,6 +55,13 @@ export interface AgentManifest {
 	delegation?: { mode: "auto" | "explicit" | "router"; router?: string };
 	compliance?: Record<string, any>;
 	plugins?: Record<string, PluginConfig>;
+	/** Permission rules + default mode (mirrors Claude Code settings.json). */
+	permissions?: {
+		allow?: string[];
+		deny?: string[];
+		ask?: string[];
+		defaultMode?: "default" | "plan" | "acceptEdits" | "bypassPermissions";
+	};
 }
 
 async function readFileOr(path: string, fallback: string): Promise<string> {

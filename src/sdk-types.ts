@@ -1,5 +1,6 @@
 import type { AgentManifest } from "./loader.js";
 import type { SessionCosts } from "./cost-tracker.js";
+import type { PermissionMode, PermissionRules, CanUseTool } from "./permissions.js";
 
 // ── Message types ──────────────────────────────────────────────────────
 
@@ -9,7 +10,8 @@ export type GCMessage =
 	| GCToolUseMessage
 	| GCToolResultMessage
 	| GCSystemMessage
-	| GCStreamDelta;
+	| GCStreamDelta
+	| GCPlanProposed;
 
 export interface GCAssistantMessage {
 	type: "assistant";
@@ -52,9 +54,18 @@ export interface GCToolResultMessage {
 export interface GCSystemMessage {
 	type: "system";
 	subtype: "session_start" | "session_end" | "hook_blocked"
-		| "compliance_warning" | "error";
+		| "compliance_warning" | "error" | "permission_denied";
 	content: string;
 	metadata?: Record<string, any>;
+}
+
+/**
+ * Emitted when the model calls exit_plan_mode in plan mode. The consumer
+ * reviews `plan` and resolves it via query.approvePlan() / query.rejectPlan().
+ */
+export interface GCPlanProposed {
+	type: "plan_proposed";
+	plan: string;
 }
 
 export interface GCStreamDelta {
@@ -151,6 +162,25 @@ export interface QueryOptions {
 		topP?: number;
 		topK?: number;
 	};
+	/**
+	 * Permission mode. "default" gates unmatched mutating tools via canUseTool;
+	 * "plan" denies all mutating tools until exit_plan_mode is approved;
+	 * "acceptEdits" auto-allows write/edit; "bypassPermissions" allows all.
+	 * Omitting this (and permissions/canUseTool) keeps the legacy ungated
+	 * behavior for backward compatibility.
+	 */
+	permissionMode?: PermissionMode;
+	/** allow/deny/ask rules ("Bash(git *)", "Write(src/**)"). */
+	permissions?: PermissionRules;
+	/** Host callback to resolve "ask" decisions. */
+	canUseTool?: CanUseTool;
+	/**
+	 * Confine the built-in file tools (read/write/edit) to this directory —
+	 * paths that resolve outside it are rejected — and run cli with it as cwd.
+	 * Opt-in; unset means no jail (legacy behavior). Used by the desktop app to
+	 * scope a session to its granted folder.
+	 */
+	rootDir?: string;
 }
 
 // ── Query interface (returned by query()) ──────────────────────────────
@@ -162,4 +192,14 @@ export interface Query extends AsyncGenerator<GCMessage, void, undefined> {
 	manifest(): AgentManifest;
 	messages(): GCMessage[];
 	costs(): SessionCosts;
+	/**
+	 * Approve a plan proposed via exit_plan_mode (resolves the pending plan and
+	 * switches permission mode, default "acceptEdits"). If no plan is pending,
+	 * just switches the mode.
+	 */
+	approvePlan(opts?: { mode?: PermissionMode }): void;
+	/** Reject a pending plan with feedback; the agent stays in plan mode. */
+	rejectPlan(feedback: string): void;
+	/** Change the permission mode at runtime. */
+	setPermissionMode(mode: PermissionMode): void;
 }

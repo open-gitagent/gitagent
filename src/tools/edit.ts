@@ -1,15 +1,6 @@
 import { readFile, writeFile } from "fs/promises";
-import { resolve } from "path";
-import { homedir } from "os";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { editSchema } from "./shared.js";
-
-function resolvePath(path: string, cwd: string): string {
-	if (path.startsWith("~/") || path === "~") {
-		path = homedir() + path.slice(1);
-	}
-	return path.startsWith("/") ? path : resolve(cwd, path);
-}
+import { editSchema, resolveJailed } from "./shared.js";
 
 function countOccurrences(haystack: string, needle: string): number {
 	if (!needle) return 0;
@@ -22,7 +13,7 @@ function countOccurrences(haystack: string, needle: string): number {
 	return count;
 }
 
-export function createEditTool(cwd: string): AgentTool<typeof editSchema> {
+export function createEditTool(cwd: string, rootDir?: string): AgentTool<typeof editSchema> {
 	return {
 		name: "edit",
 		label: "edit",
@@ -43,7 +34,7 @@ export function createEditTool(cwd: string): AgentTool<typeof editSchema> {
 		) => {
 			if (signal?.aborted) throw new Error("Operation aborted");
 
-			const absolutePath = resolvePath(path, cwd);
+			const absolutePath = resolveJailed(path, cwd, rootDir);
 			const original = await readFile(absolutePath, "utf-8");
 
 			if (old_string === new_string) {

@@ -1,17 +1,9 @@
 import { mkdir, writeFile } from "fs/promises";
-import { dirname, resolve } from "path";
-import { homedir } from "os";
+import { dirname } from "path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { writeSchema } from "./shared.js";
+import { writeSchema, resolveJailed } from "./shared.js";
 
-function resolvePath(path: string, cwd: string): string {
-	if (path.startsWith("~/") || path === "~") {
-		path = homedir() + path.slice(1);
-	}
-	return path.startsWith("/") ? path : resolve(cwd, path);
-}
-
-export function createWriteTool(cwd: string): AgentTool<typeof writeSchema> {
+export function createWriteTool(cwd: string, rootDir?: string): AgentTool<typeof writeSchema> {
 	return {
 		name: "write",
 		label: "write",
@@ -24,7 +16,7 @@ export function createWriteTool(cwd: string): AgentTool<typeof writeSchema> {
 		) => {
 			if (signal?.aborted) throw new Error("Operation aborted");
 
-			const absolutePath = resolvePath(path, cwd);
+			const absolutePath = resolveJailed(path, cwd, rootDir);
 
 			if (createDirs !== false) {
 				await mkdir(dirname(absolutePath), { recursive: true });

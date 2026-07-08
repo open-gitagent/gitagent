@@ -52,6 +52,32 @@ function getDefaultBranch(cwd: string): string {
 	}
 }
 
+/** Scaffold agent.yaml + memory/MEMORY.md in a session dir if missing. */
+function scaffoldAgentFiles(dir: string, name: string): void {
+	const agentYamlPath = `${dir}/agent.yaml`;
+	if (!existsSync(agentYamlPath)) {
+		writeFileSync(agentYamlPath, [
+			'spec_version: "0.1.0"',
+			`name: ${name}`,
+			"version: 0.1.0",
+			`description: Gitagent agent for ${name}`,
+			"model:",
+			'  preferred: "openai:gpt-4o-mini"',
+			"  fallback: []",
+			"tools: [cli, read, write, memory]",
+			"runtime:",
+			"  max_turns: 50",
+			"",
+		].join("\n"), "utf-8");
+	}
+
+	const memoryFile = `${dir}/memory/MEMORY.md`;
+	if (!existsSync(memoryFile)) {
+		mkdirSync(`${dir}/memory`, { recursive: true });
+		writeFileSync(memoryFile, "# Memory\n", "utf-8");
+	}
+}
+
 // ── initLocalSession ──────────────────────────────────────────────────
 
 export function initLocalSession(opts: LocalRepoOptions): LocalSession {
@@ -97,29 +123,8 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 	}
 
 	// Scaffold agent.yaml + memory if missing (on session branch only)
-	const agentYamlPath = `${dir}/agent.yaml`;
-	if (!existsSync(agentYamlPath)) {
-		const name = url.split("/").pop()?.replace(/\.git$/, "") || "agent";
-		writeFileSync(agentYamlPath, [
-			'spec_version: "0.1.0"',
-			`name: ${name}`,
-			"version: 0.1.0",
-			`description: Gitagent agent for ${name}`,
-			"model:",
-			'  preferred: "openai:gpt-4o-mini"',
-			"  fallback: []",
-			"tools: [cli, read, write, memory]",
-			"runtime:",
-			"  max_turns: 50",
-			"",
-		].join("\n"), "utf-8");
-	}
-
-	const memoryFile = `${dir}/memory/MEMORY.md`;
-	if (!existsSync(memoryFile)) {
-		mkdirSync(`${dir}/memory`, { recursive: true });
-		writeFileSync(memoryFile, "# Memory\n", "utf-8");
-	}
+	const name = url.split("/").pop()?.replace(/\.git$/, "") || "agent";
+	scaffoldAgentFiles(dir, name);
 
 	// Build session object
 	const localSession: LocalSession = {
@@ -148,6 +153,90 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 			localSession.push();
 			// Strip PAT from remote URL
 			git(`remote set-url origin ${cleanUrl(url)}`, dir);
+		},
+	};
+
+	return localSession;
+}
+
+// ── initLocalFolderSession (local-only, no GitHub) ────────────────────
+
+export interface LocalFolderOptions {
+	/** Resume an existing session branch instead of creating a new one. */
+	session?: string;
+}
+
+/**
+ * Cowork-style local session: attach to any local folder (no clone, no remote,
+ * no PAT). Inits a git repo if needed, creates/resumes a
+ * `gitagent/session-<hash>` branch, scaffolds agent.yaml + memory/, and
+ * auto-commits locally. `push()` is a no-op. Used by the desktop app.
+ */
+export function initLocalFolderSession(dir: string, opts: LocalFolderOptions = {}): LocalSession {
+	const resolved = resolve(dir);
+	if (!existsSync(resolved)) {
+		mkdirSync(resolved, { recursive: true });
+	}
+
+	// Ensure it's a git repo.
+	let isRepo = false;
+	try {
+		git("rev-parse --is-inside-work-tree", resolved);
+		isRepo = true;
+	} catch { /* not a repo yet */ }
+	if (!isRepo) {
+		git("init", resolved);
+	}
+
+	// Ensure a committer identity exists (fresh machines/CI may lack one).
+	try {
+		git("config user.email", resolved);
+	} catch {
+		git('config user.email "agent@gitagent.local"', resolved);
+		git('config user.name "gitagent"', resolved);
+	}
+
+	// Determine branch.
+	let branch: string;
+	let sessionId: string;
+	if (opts.session) {
+		branch = opts.session;
+		sessionId = branch.replace(/^gitagent\/session-/, "") || branch;
+		try {
+			git(`checkout ${branch}`, resolved);
+		} catch {
+			git(`checkout -b ${branch}`, resolved);
+		}
+	} else {
+		sessionId = randomBytes(4).toString("hex"); // 8-char hex
+		branch = `gitagent/session-${sessionId}`;
+		git(`checkout -b ${branch}`, resolved);
+	}
+
+	const name = resolved.split("/").filter(Boolean).pop() || "agent";
+	scaffoldAgentFiles(resolved, name);
+
+	const localSession: LocalSession = {
+		dir: resolved,
+		branch,
+		sessionId,
+
+		commitChanges(msg?: string) {
+			git("add -A", resolved);
+			try {
+				git("diff --cached --quiet", resolved);
+				// Nothing staged — skip
+			} catch {
+				const commitMsg = (msg || `gitagent: auto-commit (${branch})`).replace(/"/g, '\\"');
+				git(`commit -m "${commitMsg}"`, resolved);
+			}
+		},
+
+		// Local-only session — no remote to push to.
+		push() { /* no-op */ },
+
+		finalize() {
+			localSession.commitChanges();
 		},
 	};
 
