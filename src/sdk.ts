@@ -387,10 +387,14 @@ export function query(options: QueryOptions): Query {
 							cacheWriteTokens: msg.usage.cacheWrite ?? 0,
 						};
 						const providerCost = msg.usage.cost?.total ?? 0;
+						const rates = loaded.model.cost;
 						if (providerCost > 0) {
 							costUsd = providerCost;
+						} else if (!rates) {
+							// Model object carries no cost table at all — can't price it.
+							costResolved = false;
 						} else {
-							const computed = computeCostUsd(tokens, loaded.model.cost);
+							const computed = computeCostUsd(tokens, rates);
 							if (computed === null) {
 								costResolved = false; // tokens used, no pricing → unknown
 							} else {
