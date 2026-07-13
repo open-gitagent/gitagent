@@ -145,9 +145,9 @@ export async function installPlugin(
 
 	// Derive plugin name from source
 	const rawName = source.split("/").pop()?.replace(/\.git$/, "") || "plugin";
-	// Strip anything that isn't a safe identifier char — handles backslashes,
-	// "..", etc. that could otherwise survive the forward-slash-only split above.
-	const name = rawName.replace(/[^a-zA-Z0-9_-]/g, "_") || "plugin";
+	// Normalize to lowercase kebab-case so the derived name always satisfies
+	// KEBAB_RE at load time (avoids "installs but fails to load" mismatches).
+	const name = rawName.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "plugin";
 	const pluginDir = join(targetDir, name);
 
 	if (await dirExists(pluginDir)) {

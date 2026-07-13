@@ -7,9 +7,10 @@ import { query } from "./sdk.js";
 const SKIP_TYPES = new Set(["audio_delta", "agent_thinking"]);
 
 export function sanitizeBranch(branch: string): string {
-	// Strip both slash types (Windows path.join also treats "\" as a separator)
-	// and any leftover ".." so the result can never traverse outside historyDir.
-	return branch.replace(/[\\/]/g, "__").replace(/\.\./g, "__");
+	// Allowlist safe filename characters — anything else becomes "__". This
+	// can never yield a path separator ("/" or "\") or a "." segment, so the
+	// result can never traverse outside historyDir, and it is trivial to audit.
+	return branch.replace(/[^a-zA-Z0-9_-]/g, "__");
 }
 
 function historyDir(agentDir: string): string {

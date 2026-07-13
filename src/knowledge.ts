@@ -40,13 +40,16 @@ export async function loadKnowledge(agentDir: string): Promise<LoadedKnowledge> 
 	const available: KnowledgeEntry[] = [];
 
 	for (const entry of index.entries) {
+		// Reject any entry whose path escapes knowledgeDir — applied to both
+		// always_load and on-demand (available) entries, so a malicious
+		// index.yaml can't be surfaced for later reads either.
+		const resolvedPath = resolve(join(knowledgeDir, entry.path));
+		const rel = relative(resolve(knowledgeDir), resolvedPath);
+		if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) {
+			continue; // entry.path escapes knowledgeDir — skip
+		}
 		if (entry.always_load) {
 			try {
-				const resolvedPath = resolve(join(knowledgeDir, entry.path));
-				const rel = relative(resolve(knowledgeDir), resolvedPath);
-				if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) {
-					continue; // entry.path escapes knowledgeDir — skip
-				}
 				const content = await readFile(resolvedPath, "utf-8");
 				preloaded.push({ path: entry.path, content: content.trim() });
 			} catch {
