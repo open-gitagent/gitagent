@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { loadHistory } from "./chat-history.js";
+import { loadHistory, sanitizeBranch } from "./chat-history.js";
 import type { ServerMessage } from "./adapter.js";
 
 /** Token estimate: ~4 chars per token */
@@ -40,7 +40,7 @@ function findMemory(agentDir: string): string {
 
 /** Read the chat summary file for a branch */
 function readSummary(agentDir: string, branch: string): string {
-	const safeBranch = branch.replace(/\//g, "__");
+	const safeBranch = sanitizeBranch(branch);
 	const path = join(agentDir, ".gitagent", `chat-summary-${safeBranch}.md`);
 	return safeRead(path);
 }

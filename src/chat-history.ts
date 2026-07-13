@@ -6,8 +6,10 @@ import { query } from "./sdk.js";
 /** Types we skip — too large or ephemeral */
 const SKIP_TYPES = new Set(["audio_delta", "agent_thinking"]);
 
-function sanitizeBranch(branch: string): string {
-	return branch.replace(/\//g, "__");
+export function sanitizeBranch(branch: string): string {
+	// Strip both slash types (Windows path.join also treats "\" as a separator)
+	// and any leftover ".." so the result can never traverse outside historyDir.
+	return branch.replace(/[\\/]/g, "__").replace(/\.\./g, "__");
 }
 
 function historyDir(agentDir: string): string {

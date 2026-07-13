@@ -1,5 +1,5 @@
 import { readFile, readdir, stat } from "fs/promises";
-import { join } from "path";
+import { join, resolve, relative, isAbsolute, sep } from "path";
 import { spawn } from "child_process";
 import yaml from "js-yaml";
 import { Type } from "@sinclair/typebox";
@@ -47,13 +47,34 @@ export function buildTypeboxSchema(schema: Record<string, any>): any {
 	return Type.Object(properties);
 }
 
+// Interpreters a declarative tool's implementation.runtime is allowed to name.
+// spawn() below is already called in array form (no shell: true), so shell
+// metacharacters in scriptPath/runtime are never interpreted — this allowlist
+// is defense-in-depth against a tool config naming an unexpected binary/path.
+const ALLOWED_RUNTIMES = new Set(["sh", "bash", "node", "python3", "python"]);
+
 function createDeclarativeTool(
 	def: ToolDefinition,
 	agentDir: string,
 ): AgentTool<any> {
 	const schema = buildTypeboxSchema(def.input_schema);
-	const scriptPath = join(agentDir, "tools", def.implementation.script);
+	const toolsDir = join(agentDir, "tools");
+	const scriptPath = join(toolsDir, def.implementation.script);
+
+	// Path traversal guard: ensure script doesn't escape the tools/ directory
+	const resolvedScript = resolve(scriptPath);
+	const allowedBase = resolve(toolsDir);
+	const rel = relative(allowedBase, resolvedScript);
+	if (rel !== "" && (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel))) {
+		throw new Error(`Tool "${def.name}" script "${def.implementation.script}" escapes the tools directory`);
+	}
+
 	const runtime = def.implementation.runtime || "sh";
+	if (!ALLOWED_RUNTIMES.has(runtime)) {
+		throw new Error(
+			`Tool "${def.name}" specifies unsupported runtime "${runtime}". Allowed: ${[...ALLOWED_RUNTIMES].join(", ")}`,
+		);
+	}
 
 	return {
 		name: def.name,

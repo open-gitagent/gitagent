@@ -1,5 +1,5 @@
 import { readFile, readdir, stat, mkdir, rm } from "fs/promises";
-import { join } from "path";
+import { join, resolve, relative, isAbsolute, sep } from "path";
 import { execFileSync } from "child_process";
 import { createRequire } from "module";
 import { homedir } from "os";
@@ -18,6 +18,16 @@ import type { SkillMetadata } from "./skills.js";
 
 const require = createRequire(import.meta.url);
 const { version: GITAGENT_VERSION } = require("../package.json");
+
+// Resolves relPath against baseDir and returns the result only if it stays
+// within baseDir — guards against a plugin manifest (author-controlled,
+// untrusted for third-party plugins) pointing outside its own directory.
+function resolveWithinDir(baseDir: string, relPath: string): string | null {
+	const resolvedPath = resolve(join(baseDir, relPath));
+	const rel = relative(resolve(baseDir), resolvedPath);
+	if (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)) return null;
+	return resolvedPath;
+}
 
 const KEBAB_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -134,7 +144,10 @@ export async function installPlugin(
 	await mkdir(targetDir, { recursive: true });
 
 	// Derive plugin name from source
-	const name = source.split("/").pop()?.replace(/\.git$/, "") || "plugin";
+	const rawName = source.split("/").pop()?.replace(/\.git$/, "") || "plugin";
+	// Strip anything that isn't a safe identifier char — handles backslashes,
+	// "..", etc. that could otherwise survive the forward-slash-only split above.
+	const name = rawName.replace(/[^a-zA-Z0-9_-]/g, "_") || "plugin";
 	const pluginDir = join(targetDir, name);
 
 	if (await dirExists(pluginDir)) {
@@ -227,10 +240,15 @@ async function loadPlugin(
 	// Load prompt addition
 	let promptAddition = "";
 	if (manifest.provides?.prompt) {
-		try {
-			promptAddition = await readFile(join(pluginDir, manifest.provides.prompt), "utf-8");
-		} catch {
-			// Prompt file not found, skip
+		const promptPath = resolveWithinDir(pluginDir, manifest.provides.prompt);
+		if (promptPath) {
+			try {
+				promptAddition = await readFile(promptPath, "utf-8");
+			} catch {
+				// Prompt file not found, skip
+			}
+		} else {
+			console.warn(`Plugin "${manifest.id}": provides.prompt escapes plugin directory — skipping`);
 		}
 	}
 
@@ -238,36 +256,40 @@ async function loadPlugin(
 	let programmaticTools: any[] = [];
 	let memoryLayers: import("./plugin-types.js").MemoryLayerDef[] = [];
 	if (manifest.entry) {
-		try {
-			const { createPluginApi } = await import("./plugin-sdk.js");
-			const api = createPluginApi(manifest.id, pluginDir, config);
-			const entryPath = join(pluginDir, manifest.entry);
-			const mod = await import(entryPath);
-			if (typeof mod.register === "function") {
-				await mod.register(api);
-			} else if (typeof mod.default === "function") {
-				await mod.default(api);
-			}
-			programmaticTools = api.getTools();
-			// Merge programmatic hooks
-			const progHooks = api.getHooks();
-			if (progHooks) {
-				if (!hooks) hooks = { hooks: {} };
-				for (const event of ["on_session_start", "pre_tool_use", "post_response", "on_error"] as const) {
-					if (progHooks[event]) {
-						hooks.hooks[event] = [...(hooks.hooks[event] || []), ...progHooks[event]!];
+		const entryPath = resolveWithinDir(pluginDir, manifest.entry);
+		if (!entryPath) {
+			console.warn(`Plugin "${manifest.id}": entry escapes plugin directory — skipping`);
+		} else {
+			try {
+				const { createPluginApi } = await import("./plugin-sdk.js");
+				const api = createPluginApi(manifest.id, pluginDir, config);
+				const mod = await import(entryPath);
+				if (typeof mod.register === "function") {
+					await mod.register(api);
+				} else if (typeof mod.default === "function") {
+					await mod.default(api);
+				}
+				programmaticTools = api.getTools();
+				// Merge programmatic hooks
+				const progHooks = api.getHooks();
+				if (progHooks) {
+					if (!hooks) hooks = { hooks: {} };
+					for (const event of ["on_session_start", "pre_tool_use", "post_response", "on_error"] as const) {
+						if (progHooks[event]) {
+							hooks.hooks[event] = [...(hooks.hooks[event] || []), ...progHooks[event]!];
+						}
 					}
 				}
+				// Merge programmatic prompt
+				const extraPrompt = api.getPrompt();
+				if (extraPrompt) {
+					promptAddition = promptAddition ? `${promptAddition}\n\n${extraPrompt}` : extraPrompt;
+				}
+				// Collect memory layers
+				memoryLayers = api.getMemoryLayers();
+			} catch (err: any) {
+				console.warn(`Plugin "${manifest.id}": failed to load entry "${manifest.entry}": ${err.message}`);
 			}
-			// Merge programmatic prompt
-			const extraPrompt = api.getPrompt();
-			if (extraPrompt) {
-				promptAddition = promptAddition ? `${promptAddition}\n\n${extraPrompt}` : extraPrompt;
-			}
-			// Collect memory layers
-			memoryLayers = api.getMemoryLayers();
-		} catch (err: any) {
-			console.warn(`Plugin "${manifest.id}": failed to load entry "${manifest.entry}": ${err.message}`);
 		}
 	}
 
@@ -323,6 +345,10 @@ export async function discoverAndLoadPlugins(
 	for (const [pluginName, pluginConf] of Object.entries(pluginsConfig)) {
 		// Skip disabled plugins
 		if (pluginConf.enabled === false) continue;
+		if (!/^[a-zA-Z0-9_-]+$/.test(pluginName)) {
+			console.warn(`Skipping plugin with invalid name "${pluginName}" — only letters, digits, "-", and "_" are allowed`);
+			continue;
+		}
 
 		// Auto-install from source if needed
 		if (pluginConf.source) {

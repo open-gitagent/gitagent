@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir, readdir, rm } from "fs/promises";
 import { join } from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { skillLearnerSchema } from "./shared.js";
@@ -86,12 +86,9 @@ async function getExistingSkillDescriptions(agentDir: string): Promise<Array<{ n
 function gitCommit(agentDir: string, files: string[], message: string): void {
 	try {
 		for (const f of files) {
-			execSync(`git add "${f}"`, { cwd: agentDir, stdio: "pipe" });
+			execFileSync("git", ["add", f], { cwd: agentDir, stdio: "pipe" });
 		}
-		execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
-			cwd: agentDir,
-			stdio: "pipe",
-		});
+		execFileSync("git", ["commit", "-m", message], { cwd: agentDir, stdio: "pipe" });
 	} catch {
 		// Not fatal — file was still written
 	}
@@ -350,6 +347,9 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 				case "update": {
 					if (!params.skill_name) throw new Error("skill_name is required for update action");
 					if (!params.instructions) throw new Error("instructions is required for update action");
+					if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(params.skill_name)) {
+						throw new Error("skill_name must be kebab-case (e.g., deploy-staging)");
+					}
 
 					const skillFile = join(agentDir, "skills", params.skill_name, "SKILL.md");
 					let content: string;
@@ -377,6 +377,9 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 
 				case "delete": {
 					if (!params.skill_name) throw new Error("skill_name is required for delete action");
+					if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(params.skill_name)) {
+						throw new Error("skill_name must be kebab-case (e.g., deploy-staging)");
+					}
 
 					const skillDir = join(agentDir, "skills", params.skill_name);
 					try {
@@ -386,7 +389,8 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 					}
 
 					try {
-						execSync(`git add -A && git commit -m "Delete skill: ${params.skill_name.replace(/"/g, '\\"')}"`, {
+						execFileSync("git", ["add", "-A"], { cwd: agentDir, stdio: "pipe" });
+						execFileSync("git", ["commit", "-m", `Delete skill: ${params.skill_name}`], {
 							cwd: agentDir,
 							stdio: "pipe",
 						});

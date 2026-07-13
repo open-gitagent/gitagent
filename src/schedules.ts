@@ -39,7 +39,7 @@ export async function discoverSchedules(agentDir: string): Promise<ScheduleDefin
 		try {
 			const raw = await readFile(filePath, "utf-8");
 			const data = yaml.load(raw) as Record<string, any>;
-			if (data?.id && data?.prompt && (data?.cron || data?.runAt)) {
+			if (data?.id && KEBAB_RE.test(String(data.id)) && data?.prompt && (data?.cron || data?.runAt)) {
 				schedules.push({
 					id: String(data.id),
 					prompt: String(data.prompt),
@@ -65,6 +65,9 @@ export async function loadSchedule(filePath: string): Promise<ScheduleDefinition
 	const data = yaml.load(raw) as Record<string, any>;
 	if (!data?.id || !data?.prompt || (!data?.cron && !data?.runAt)) {
 		throw new Error("Invalid schedule definition: missing id, prompt, or cron/runAt");
+	}
+	if (!KEBAB_RE.test(String(data.id))) {
+		throw new Error("Schedule id must be kebab-case (e.g. daily-standup)");
 	}
 	return {
 		id: String(data.id),
@@ -105,11 +108,17 @@ export async function saveSchedule(agentDir: string, schedule: ScheduleDefinitio
 }
 
 export async function deleteSchedule(agentDir: string, id: string): Promise<void> {
+	if (!KEBAB_RE.test(id)) {
+		throw new Error("Schedule id must be kebab-case (e.g. daily-standup)");
+	}
 	const filePath = join(agentDir, "schedules", `${id}.yaml`);
 	await unlink(filePath);
 }
 
 export async function updateScheduleMeta(agentDir: string, id: string, updates: Partial<Pick<ScheduleDefinition, "lastRunAt" | "lastResult" | "enabled">>): Promise<void> {
+	if (!KEBAB_RE.test(id)) {
+		throw new Error("Schedule id must be kebab-case (e.g. daily-standup)");
+	}
 	const filePath = join(agentDir, "schedules", `${id}.yaml`);
 	const raw = await readFile(filePath, "utf-8");
 	const data = yaml.load(raw) as Record<string, any>;

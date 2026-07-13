@@ -286,14 +286,18 @@ export function createTaskTrackerTool(agentDir: string, gitagentDir: string): Ag
 					// Trigger reinforcement if a skill was used
 					let reinforcementMsg = "";
 					if (params.skill_used) {
-						const skillDir = join(agentDir, "skills", params.skill_used);
-						try {
-							const stats = await loadSkillStats(skillDir);
-							const updated = adjustConfidence(stats, outcome, params.failure_reason);
-							await saveSkillStats(skillDir, updated);
-							reinforcementMsg = `\nSkill "${params.skill_used}" confidence: ${stats.confidence} → ${updated.confidence}`;
-						} catch {
-							reinforcementMsg = `\nCould not update skill "${params.skill_used}" stats (skill may not exist).`;
+						if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(params.skill_used)) {
+							reinforcementMsg = `\nCould not update skill "${params.skill_used}" stats (invalid skill name).`;
+						} else {
+							const skillDir = join(agentDir, "skills", params.skill_used);
+							try {
+								const stats = await loadSkillStats(skillDir);
+								const updated = adjustConfidence(stats, outcome, params.failure_reason);
+								await saveSkillStats(skillDir, updated);
+								reinforcementMsg = `\nSkill "${params.skill_used}" confidence: ${stats.confidence} → ${updated.confidence}`;
+							} catch {
+								reinforcementMsg = `\nCould not update skill "${params.skill_used}" stats (skill may not exist).`;
+							}
 						}
 					}
 
