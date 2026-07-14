@@ -10,6 +10,11 @@ export interface ModelUsage {
 	requests: number;
 }
 
+export interface ConversionSavings {
+	filesConverted: number;
+	tokensSaved: number;
+}
+
 export interface SessionCosts {
 	totalCostUsd: number;
 	totalInputTokens: number;
@@ -17,6 +22,7 @@ export interface SessionCosts {
 	totalRequests: number;
 	startTime: number;
 	modelUsage: Record<string, ModelUsage>;
+	conversionSavings: ConversionSavings;
 }
 
 /**
@@ -34,6 +40,7 @@ export class CostTracker {
 			totalRequests: 0,
 			startTime: Date.now(),
 			modelUsage: {},
+			conversionSavings: { filesConverted: 0, tokensSaved: 0 },
 		};
 	}
 
@@ -74,6 +81,11 @@ export class CostTracker {
 		mu.requests++;
 	}
 
+	addConversion(savedTokens: number): void {
+		this.costs.conversionSavings.filesConverted++;
+		this.costs.conversionSavings.tokensSaved += savedTokens;
+	}
+
 	get(): SessionCosts {
 		return {
 			...this.costs,
@@ -89,6 +101,7 @@ export class CostTracker {
 			totalRequests: 0,
 			startTime: Date.now(),
 			modelUsage: {},
+			conversionSavings: { filesConverted: 0, tokensSaved: 0 },
 		};
 	}
 }

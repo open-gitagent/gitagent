@@ -22,6 +22,7 @@ import type { ComplianceWarning } from "./compliance.js";
 import { discoverAndLoadPlugins } from "./plugins.js";
 import type { LoadedPlugin } from "./plugin-types.js";
 import type { PluginConfig } from "./plugin-types.js";
+import { alignSystemPrompt, cacheEfficiency } from "./compression/index.js";
 
 export interface AgentManifest {
 	spec_version: string;
@@ -272,25 +273,9 @@ export async function loadAgent(
 	const duties = await readFileOr(join(agentDir, "DUTIES.md"), "");
 	const agentsMd = await readFileOr(join(agentDir, "AGENTS.md"), "");
 
-	// Build system prompt
-	const parts: string[] = [];
-
-	parts.push(`# ${manifest.name} v${manifest.version}\n${manifest.description}`);
-
-	if (soul) parts.push(soul);
-	if (rules) parts.push(rules);
-	if (parentRules) parts.push(parentRules); // Append parent rules (union)
-	if (duties) parts.push(duties);
-	if (agentsMd) parts.push(agentsMd);
-
-	parts.push(
-		`# Memory\n\nYou have a memory file at memory/MEMORY.md. Use the \`memory\` tool to load and save memories. Each save creates a git commit, so your memory has full history. You can also use the \`cli\` tool to run git commands for deeper memory inspection (git log, git diff, git show).\n\nYour memories define who you are. When you have none, you are newly awakened — curious and eager to understand the person you're talking to. As memories grow, so do you. Save memories proactively when you learn something meaningful about the user.`,
-	);
-
 	// Discover and load knowledge
 	const knowledge = await loadKnowledge(agentDir);
 	const knowledgeBlock = formatKnowledgeForPrompt(knowledge);
-	if (knowledgeBlock) parts.push(knowledgeBlock);
 
 	// Discover skills (filtered by manifest.skills if set)
 	let skills = await discoverSkills(agentDir);
@@ -304,33 +289,21 @@ export async function loadAgent(
 		skills = [...skills, ...plugin.skills];
 	}
 	const skillsBlock = formatSkillsForPrompt(skills);
-	if (skillsBlock) parts.push(skillsBlock);
 
 	// Discover workflows
 	const workflows = await discoverWorkflows(agentDir);
 	const workflowsBlock = formatWorkflowsForPrompt(workflows);
-	if (workflowsBlock) parts.push(workflowsBlock);
 
 	// Discover sub-agents (Phase 2.1)
 	const subAgents = await discoverSubAgents(agentDir);
 	const subAgentsBlock = formatSubAgentsForPrompt(subAgents);
-	if (subAgentsBlock) parts.push(subAgentsBlock);
 
 	// Load examples (Phase 2.3)
 	const examples = await loadExamples(agentDir);
 	const examplesBlock = formatExamplesForPrompt(examples);
-	if (examplesBlock) parts.push(examplesBlock);
-
-	// Append plugin prompt additions
-	for (const plugin of plugins) {
-		if (plugin.promptAddition) {
-			parts.push(`# Plugin: ${plugin.manifest.name}\n\n${plugin.promptAddition}`);
-		}
-	}
 
 	// Load compliance context (Phase 3)
 	const complianceBlock = await loadComplianceContext(agentDir);
-	if (complianceBlock) parts.push(complianceBlock);
 
 	// Workspace directory — all generated files go here
 	const cloudMode =
@@ -350,10 +323,8 @@ When creating files (documents, markdown files, PDFs, images, spreadsheets, code
 	const cloudBlock = cloudMode
 		? `\n\n## Cloud Mode\n\nYou are running inside a containerized cloud deployment — there is no desktop. Do NOT call \`open\`, \`xdg-open\`, \`start\`, \`osascript\`, or any GUI launcher; they will silently fail. To "show" the user an artifact:\n- Write it to \`workspace/\` (e.g. \`workspace/index.html\`, \`workspace/deck.pptx\`).\n- Mention the relative path in your reply.\n\nThe web UI auto-opens generated files in its viewer: HTML renders inline (with relative \`<link>\`/\`<script>\` working), PDFs/audio/video preview natively, and Office docs (PPTX/DOCX/XLSX) show a Download button. Don't shell out to "open" anything — just create the file and tell the user where it is.`
 		: "";
-	parts.push(workspaceBlock + cloudBlock);
 
-	// Task learning & skill discovery
-	parts.push(`# Task Learning & Skill Discovery
+	const taskLearningBlock = `# Task Learning & Skill Discovery
 
 You have an intelligent learning system. For ANY task the user gives you:
 
@@ -375,9 +346,49 @@ On FAILURE:
 - Failed approaches become negative examples — they won't be repeated
 
 If you used an existing skill, report it via skill_used so confidence adjusts based on the outcome.
-Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check skills for any task that involves creating, building, or modifying something.`);
+Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check skills for any task that involves creating, building, or modifying something.`;
 
-	const systemPrompt = parts.join("\n\n");
+	// ── Build system prompt via CacheAligner ───────────────────────────────
+	// Static identity block: everything that never changes between sessions.
+	// Placed first so the provider's KV cache hits on every request.
+	const identityParts = [
+		`# ${manifest.name} v${manifest.version}\n${manifest.description}`,
+		soul,
+		rules,
+		parentRules,
+		duties,
+		agentsMd,
+		`# Memory\n\nYou have a memory file at memory/MEMORY.md. Use the \`memory\` tool to load and save memories. Each save creates a git commit, so your memory has full history. You can also use the \`cli\` tool to run git commands for deeper memory inspection (git log, git diff, git show).\n\nYour memories define who you are. When you have none, you are newly awakened — curious and eager to understand the person you're talking to. As memories grow, so do you. Save memories proactively when you learn something meaningful about the user.`,
+	].filter(Boolean).join("\n\n");
+
+	const skillsParts = [
+		skillsBlock,
+		workflowsBlock,
+		subAgentsBlock,
+		examplesBlock,
+		...plugins.filter((p) => p.promptAddition).map((p) => `# Plugin: ${p.manifest.name}\n\n${p.promptAddition}`),
+		complianceBlock,
+		workspaceBlock + cloudBlock,
+		taskLearningBlock,
+	].filter(Boolean).join("\n\n");
+
+	const aligned = alignSystemPrompt({
+		identity: identityParts,
+		knowledge: knowledgeBlock,
+		skills: skillsParts,
+		memory: "",   // injected per-session via systemPromptSuffix in sdk.ts
+		task: "",     // injected per-turn
+	});
+
+	const efficiency = Math.round(cacheEfficiency(aligned) * 100);
+	if (process.env.GITAGENT_DEBUG) {
+		console.error(
+			`[compression] System prompt: ${aligned.staticTokens + aligned.dynamicTokens} tokens` +
+			` | static prefix: ${aligned.staticTokens} tokens (${efficiency}% cache-eligible)`,
+		);
+	}
+
+	const systemPrompt = aligned.prompt;
 
 	// Resolve model — env config model_override > CLI flag > manifest preferred
 	const modelStr = envConfig.model_override || modelFlag || manifest.model.preferred;

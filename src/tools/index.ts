@@ -1,6 +1,8 @@
+import { resolve } from "path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { SandboxContext } from "../sandbox.js";
 import type { MemoryLayerDef } from "../plugin-types.js";
+import type { CostTracker } from "../cost-tracker.js";
 import { createCliTool } from "./cli.js";
 import { createReadTool } from "./read.js";
 import { createWriteTool } from "./write.js";
@@ -14,6 +16,7 @@ import { createSandboxReadTool } from "./sandbox-read.js";
 import { createSandboxWriteTool } from "./sandbox-write.js";
 import { createSandboxEditTool } from "./sandbox-edit.js";
 import { createSandboxMemoryTool } from "./sandbox-memory.js";
+import { DocStore } from "./doc-store.js";
 
 export interface BuiltinToolsConfig {
 	dir: string;
@@ -21,6 +24,8 @@ export interface BuiltinToolsConfig {
 	sandbox?: SandboxContext;
 	gitagentDir?: string;
 	pluginMemoryLayers?: MemoryLayerDef[];
+	costTracker?: CostTracker;
+	docStore?: DocStore;
 }
 
 /**
@@ -41,12 +46,50 @@ export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[]
 
 	const tools: AgentTool<any>[] = [
 		createCliTool(config.dir, config.timeout),
-		createReadTool(config.dir),
+		createReadTool(config.dir, config.costTracker, config.docStore),
 		createWriteTool(config.dir),
 		createEditTool(config.dir),
 		createMemoryTool(config.dir, config.pluginMemoryLayers),
 		createCapturePhotoTool(config.dir),
 	];
+
+	// CCR retrieval tool — only registered when a DocStore is active
+	if (config.docStore) {
+		const docStore = config.docStore;
+		tools.push({
+			name: "read_doc_section",
+			label: "read_doc_section",
+			description:
+				"Retrieve a specific section of a document that was compressed via CCR. " +
+				"Use the section ID (e.g. s1, s3) shown in the document outline returned by read.",
+			parameters: {
+				type: "object",
+				properties: {
+					path: { type: "string", description: "Absolute or relative path to the document (same as passed to read)" },
+					section_id: { type: "string", description: "Section ID from the outline (e.g. s1, s4)" },
+				},
+				required: ["path", "section_id"],
+			},
+			execute: async (_toolCallId: string, params: unknown) => {
+				const { path, section_id } = params as { path: string; section_id: string };
+				const altPath = resolve(config.dir, path);
+				const result = docStore.fetch(path, section_id) ?? docStore.fetch(altPath, section_id);
+				if (!result) {
+					return {
+						content: [{ type: "text", text: `[No section "${section_id}" found for "${path}". Run read first.]` }],
+						details: undefined,
+					};
+				}
+				const refsNote = result.has_refs.length > 0
+					? `\n\n[References other sections: ${result.has_refs.join(", ")} — fetch them if needed]`
+					: "";
+				return {
+					content: [{ type: "text", text: `${result.content}${refsNote}` }],
+					details: undefined,
+				};
+			},
+		} satisfies AgentTool<any>);
+	}
 
 	// Add learning tools if gitagentDir is available
 	if (config.gitagentDir) {
