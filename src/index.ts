@@ -25,6 +25,14 @@ import type { LocalSession } from "./session.js";
 // Imported dynamically below so the slim core has no static dependency on it —
 // users without voice get a clean install + a clear error if they try --voice.
 import { handlePluginCommand } from "./plugin-cli.js";
+import {
+	runBriefOrchestration,
+	listBriefs,
+	loadBriefFromFile,
+	displayBriefList,
+	displayBriefDetail,
+} from "./brief/orchestrator.js";
+import { runWithBrief } from "./brief/runner.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	initTelemetry,
@@ -317,6 +325,148 @@ async function main(): Promise<void> {
 			}
 		}
 		await handlePluginCommand(resolve(agentDir), pluginArgs);
+		return;
+	}
+
+	// Handle brief subcommand: gitagent brief [--list|--view <id>|--regenerate <id>|--only] ["task"]
+	if (process.argv[2] === "brief") {
+		const briefArgs = process.argv.slice(3);
+		let agentDir = process.cwd();
+		let briefModel: string | undefined;
+		let briefTask: string | undefined;
+		let briefCommand: "negotiate" | "list" | "view" | "regenerate" = "negotiate";
+		let briefTarget: string | undefined;
+		let onlyMode = false;
+		let skipApproval = false;
+		let briefPath: string | undefined;
+
+		for (let i = 0; i < briefArgs.length; i++) {
+			const arg = briefArgs[i];
+			if ((arg === "--dir" || arg === "-d") && briefArgs[i + 1]) {
+				agentDir = briefArgs[++i];
+			} else if ((arg === "--model" || arg === "-m") && briefArgs[i + 1]) {
+				briefModel = briefArgs[++i];
+			} else if (arg === "--list") {
+				briefCommand = "list";
+			} else if (arg === "--view" && briefArgs[i + 1]) {
+				briefCommand = "view";
+				briefTarget = briefArgs[++i];
+			} else if (arg === "--regenerate") {
+				briefCommand = "regenerate";
+				if (briefArgs[i + 1] && !briefArgs[i + 1].startsWith("-")) {
+					briefTarget = briefArgs[++i];
+				}
+			} else if ((arg === "--brief-path" || arg === "--briefPath") && briefArgs[i + 1]) {
+				briefPath = briefArgs[++i];
+			} else if (arg === "--only") {
+				onlyMode = true;
+			} else if (arg === "--yes" || arg === "-y") {
+				skipApproval = true;
+			} else if (!arg.startsWith("-")) {
+				briefTask = arg;
+			}
+		}
+
+		const resolvedDir = resolve(agentDir);
+
+		if (briefCommand === "list") {
+			const briefs = await listBriefs(resolvedDir);
+			displayBriefList(briefs);
+			return;
+		}
+
+		if (briefCommand === "view" && briefTarget) {
+			// Try as file path first, then as id
+			try {
+				let brief;
+				if (briefTarget.endsWith(".md")) {
+					brief = await loadBriefFromFile(resolve(briefTarget));
+				} else {
+					const all = await listBriefs(resolvedDir);
+					brief = all.find(b => b.id === briefTarget);
+				}
+				if (!brief) {
+					console.error(red(`No brief found with id: ${briefTarget}`));
+					process.exit(1);
+				}
+				displayBriefDetail(brief);
+			} catch (err: any) {
+				console.error(red(`Error loading brief: ${err.message}`));
+				process.exit(1);
+			}
+			return;
+		}
+
+		if (!briefTask) {
+			console.error(red('Usage: gitagent brief "task description" [--only] [--dir <path>]'));
+			console.error(dim('       gitagent brief "task" --brief-path .gitagent/briefs/task.md'));
+			console.error(dim("       gitagent brief --list [--dir <path>]"));
+			console.error(dim("       gitagent brief --view <id> [--dir <path>]"));
+			console.error(dim("       gitagent brief --regenerate [--dir <path>]"));
+			process.exit(1);
+		}
+
+		// Load agent manifest for name, model, and extends (parent agent)
+		let agentName = "agent";
+		let resolvedBriefModel: string | undefined = briefModel;
+		let resolvedAgentModel: string | undefined;
+		let agentExtends: string | undefined;
+		try {
+			const loaded = await loadAgent(resolvedDir, briefModel);
+			agentName = loaded.manifest.name || "agent";
+			resolvedAgentModel = loaded.manifest.model?.preferred;
+			// Brief model priority: CLI --model flag > manifest brief.model > agent model
+			resolvedBriefModel = briefModel ?? loaded.manifest.brief?.model ?? resolvedAgentModel;
+			agentExtends = loaded.manifest.extends;
+		} catch {
+			// ok if agent not loaded yet
+		}
+
+		try {
+			const result = await runBriefOrchestration({
+				task: briefTask,
+				agentDir: resolvedDir,
+				agentName,
+				agentExtends,
+				model: resolvedBriefModel,
+				options: {
+					briefPath: briefPath ? resolve(briefPath) : undefined,
+					regenerate: briefCommand === "regenerate",
+					skipApproval,
+				},
+			});
+
+			if (result.skipped) {
+				console.log(dim("[brief] Brief not applied. Run without --only to execute, or approve the saved brief."));
+				return;
+			}
+
+			if (onlyMode) {
+				console.log(dim("[brief] Brief created and approved. Use it with: gitagent -p \"" + briefTask + "\" --dir " + resolvedDir));
+				return;
+			}
+
+			// Execute the task with the brief injected + output evaluator
+			console.log(bold(`\nRunning task with brief...\n`));
+			for await (const msg of runWithBrief({
+				prompt: briefTask,
+				dir: resolvedDir,
+				model: resolvedAgentModel,
+				briefModel: resolvedBriefModel,
+				brief: { briefPath: result.brief.file_path },
+				maxRetries: 2,
+			})) {
+				if (msg.type === "assistant") {
+					process.stdout.write(msg.content + "\n");
+				}
+				if (msg.type === "system" && (msg as any).metadata?.briefRetry) {
+					console.log(bold(`\n${msg.content}\n`));
+				}
+			}
+		} catch (err: any) {
+			console.error(red(`[brief] Error: ${err.message}`));
+			process.exit(1);
+		}
 		return;
 	}
 
