@@ -271,3 +271,64 @@ describe("query()", () => {
 		assert.ok(collected.length > 0);
 	});
 });
+
+// ── query().continue() ──────────────────────────────────────────────────
+
+describe("query().continue()", () => {
+	it("exposes a continue method on the Query object", () => {
+		const q = query({
+			prompt: "hello",
+			dir: "/nonexistent",
+		});
+
+		assert.equal(typeof q.continue, "function");
+		q.return();
+	});
+
+	it("rejects when called before the agent has finished loading", async () => {
+		const q = query({
+			prompt: "hello",
+			dir: "/nonexistent",
+		});
+
+		await assert.rejects(
+			() => q.continue(),
+			(err: Error) => {
+				assert.ok(err.message.includes("not yet initialized"));
+				return true;
+			},
+		);
+		q.return();
+	});
+
+	it("steer() also rejects before the agent has finished loading", async () => {
+		const q = query({
+			prompt: "hello",
+			dir: "/nonexistent",
+		});
+
+		assert.throws(
+			() => q.steer("nudge"),
+			(err: Error) => {
+				assert.ok(err.message.includes("not yet initialized"));
+				return true;
+			},
+		);
+		q.return();
+	});
+
+	it("continue() after a failed load surfaces the same 'not yet initialized' error rather than hanging", async () => {
+		const messages: any[] = [];
+		const q = query({
+			prompt: "hello",
+			dir: "/nonexistent/path/to/agent",
+		});
+		for await (const msg of q) {
+			messages.push(msg);
+		}
+
+		// The initial run already failed (agent dir invalid) and never got
+		// far enough to construct an Agent instance.
+		await assert.rejects(() => q.continue());
+	});
+});

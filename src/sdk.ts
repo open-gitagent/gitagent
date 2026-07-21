@@ -1,5 +1,5 @@
 import { Agent } from "@mariozechner/pi-agent-core";
-import type { AgentEvent, AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentEvent, AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { loadAgent } from "./loader.js";
 import type { AgentManifest } from "./loader.js";
@@ -35,6 +35,9 @@ import {
 interface Channel<T> {
 	push(v: T): void;
 	finish(): void;
+	// Undoes finish() so a completed query can resume streaming — used by
+	// Query.continue() to reopen the channel after the run first went idle.
+	reopen(): void;
 	pull(): Promise<IteratorResult<T>>;
 }
 
@@ -59,6 +62,9 @@ function createChannel<T>(): Channel<T> {
 				resolve = null;
 			}
 		},
+		reopen() {
+			done = false;
+		},
 		pull(): Promise<IteratorResult<T>> {
 			if (buffer.length) {
 				return Promise.resolve({ value: buffer.shift()!, done: false });
@@ -72,6 +78,14 @@ function createChannel<T>(): Channel<T> {
 }
 
 // ── Extract text/thinking from AssistantMessage ────────────────────────
+
+function toUserMessage(text: string): AgentMessage {
+	return {
+		role: "user",
+		content: [{ type: "text", text }],
+		timestamp: Date.now(),
+	} as AgentMessage;
+}
 
 function extractContent(msg: AssistantMessage): { text: string; thinking: string } {
 	let text = "";
@@ -111,6 +125,9 @@ export function query(options: QueryOptions): Query {
 	let sandboxCtx: SandboxContext | undefined;
 	// Local session (hoisted for cleanup in catch)
 	let localSession: LocalSession | undefined;
+	// Agent instance (hoisted so steer()/continue() can reach it once the
+	// agent is loaded, including after the initial run has gone idle)
+	let agent: Agent | undefined;
 
 	// OpenTelemetry session span — opened immediately so it covers agent
 	// load + prompt + cleanup. Closed in the IIFE's finally so every exit
@@ -299,7 +316,7 @@ export function query(options: QueryOptions): Query {
 		}
 
 		// 8. Create Agent
-		const agent = new Agent({
+		agent = new Agent({
 			initialState: {
 				systemPrompt,
 				model: loaded.model,
@@ -307,6 +324,9 @@ export function query(options: QueryOptions): Query {
 				...modelOptions,
 			},
 		});
+		// Non-null alias: `agent` is a `let` captured by closures below, so TS
+		// can't narrow it past the assignment above once inside them.
+		const activeAgent = agent;
 
 		// 9. Subscribe to events and map to GCMessage
 		agent.subscribe((event: AgentEvent) => {
@@ -508,7 +528,7 @@ export function query(options: QueryOptions): Query {
 				}
 			}
 			await otelContext.with(_session.ctx, () =>
-				agent.prompt(options.prompt as string),
+				activeAgent.prompt(options.prompt as string),
 			);
 		} else {
 			// Multi-turn: iterate the async iterable
@@ -532,7 +552,7 @@ export function query(options: QueryOptions): Query {
 					}
 				}
 				await otelContext.with(_session.ctx, () =>
-					agent.prompt(userMsg.content),
+					activeAgent.prompt(userMsg.content),
 				);
 			}
 		}
@@ -593,7 +613,51 @@ export function query(options: QueryOptions): Query {
 			ac.abort();
 		},
 
-		steer(_message: string) {
+		steer(message: string) {
+			if (!agent) {
+				throw new Error("Cannot steer: agent not yet initialized (query hasn't started)");
+			}
+			agent.steer(toUserMessage(message));
+		},
+
+		async continue(message?: string) {
+			if (!agent) {
+				throw new Error("Cannot continue: agent not yet initialized (query hasn't started)");
+			}
+			if (agent.signal) {
+				throw new Error("Cannot continue: agent is still processing a turn");
+			}
+
+			// The initial run may have already reached agent_end and finished
+			// the channel — reopen it so further messages can stream out.
+			channel.reopen();
+
+			try {
+				if (message !== undefined) {
+					pushMsg({ type: "user", content: message });
+					agent.followUp(toUserMessage(message));
+				} else {
+					// No new input: retry the turn the model failed to answer.
+					// Drop the failed assistant message so the transcript ends
+					// on the user/tool-result message it never responded to —
+					// pi-agent-core's continue() requires that to retry in place.
+					const messages = agent.state.messages as any[];
+					const last = messages[messages.length - 1];
+					if (last?.role === "assistant" && (last.stopReason === "error" || last.stopReason === "aborted")) {
+						agent.state.messages = messages.slice(0, -1);
+					}
+				}
+
+				await otelContext.with(_session.ctx, () => (agent as Agent).continue());
+			} catch (err: any) {
+				pushMsg({
+					type: "system",
+					subtype: "error",
+					content: err.message,
+				});
+				channel.finish();
+				throw err;
+			}
 		},
 
 		sessionId() {
