@@ -19,6 +19,7 @@ import { loadExamples, formatExamplesForPrompt } from "./examples.js";
 import type { ExampleEntry } from "./examples.js";
 import { validateCompliance, loadComplianceContext, formatComplianceWarnings } from "./compliance.js";
 import type { ComplianceWarning } from "./compliance.js";
+import { autoDetectModel } from "./auto-detect-model.js";
 import { discoverAndLoadPlugins } from "./plugins.js";
 import type { LoadedPlugin } from "./plugin-types.js";
 import type { PluginConfig } from "./plugin-types.js";
@@ -379,11 +380,18 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 
 	const systemPrompt = parts.join("\n\n");
 
-	// Resolve model — env config model_override > CLI flag > manifest preferred
-	const modelStr = envConfig.model_override || modelFlag || manifest.model.preferred;
+	// Resolve model — env config model_override > CLI flag > manifest preferred > auto-detected from API key
+	let modelStr = envConfig.model_override || modelFlag || manifest.model?.preferred;
+	if (!modelStr) {
+		const detected = autoDetectModel();
+		if (detected) {
+			console.log(`Using ${detected.modelStr} (auto-detected from ${detected.provider} credentials)`);
+			modelStr = detected.modelStr;
+		}
+	}
 	if (!modelStr) {
 		throw new Error(
-			'No model configured. Either:\n  - Set model.preferred in agent.yaml (e.g., "anthropic:claude-sonnet-4-5-20250929")\n  - Pass --model provider:model on the command line',
+			'No model configured. Either:\n  - Set model.preferred in agent.yaml (e.g., "anthropic:claude-sonnet-4-5-20250929")\n  - Pass --model provider:model on the command line\n  - Set an API key for a known provider (e.g. ANTHROPIC_API_KEY) to auto-select a default model',
 		);
 	}
 
