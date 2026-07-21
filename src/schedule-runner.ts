@@ -16,7 +16,7 @@ export interface SchedulerOptions {
 }
 
 const activeTasks = new Map<string, ScheduledTask>();
-const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+export const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const runningJobs = new Set<string>();
 
 // setTimeout's delay is a 32-bit signed int under the hood — anything past
