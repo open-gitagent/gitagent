@@ -34,7 +34,7 @@ export interface AgentManifest {
 	tags?: string[];
 	metadata?: Record<string, string | number | boolean>;
 	model: {
-		preferred: string;
+		preferred?: string;
 		fallback: string[];
 		constraints?: {
 			temperature?: number;
@@ -242,6 +242,9 @@ export async function loadAgent(
 	// Parse agent.yaml
 	const manifestRaw = await readFile(join(agentDir, "agent.yaml"), "utf-8");
 	let manifest = yaml.load(manifestRaw) as AgentManifest;
+	// model: is optional in agent.yaml (auto-detection can fill it in later) —
+	// normalize here so downstream code can always assume manifest.model exists.
+	manifest.model ??= { fallback: [] };
 
 	// Load environment config
 	const envConfig = await loadEnvConfig(agentDir, envFlag);
