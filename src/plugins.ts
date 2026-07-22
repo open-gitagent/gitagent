@@ -1,5 +1,6 @@
 import { readFile, readdir, stat, mkdir, rm } from "fs/promises";
 import { join } from "path";
+import { pathToFileURL } from "url";
 import { execFileSync } from "child_process";
 import { createRequire } from "module";
 import { homedir } from "os";
@@ -242,7 +243,11 @@ async function loadPlugin(
 			const { createPluginApi } = await import("./plugin-sdk.js");
 			const api = createPluginApi(manifest.id, pluginDir, config);
 			const entryPath = join(pluginDir, manifest.entry);
-			const mod = await import(entryPath);
+			// Node's ESM loader requires a file:// URL for absolute paths on
+			// Windows — a raw "D:\..." path is misread as a URL with protocol
+			// "d:", which the loader rejects. pathToFileURL() handles this
+			// correctly on every OS, including plain POSIX paths.
+			const mod = await import(pathToFileURL(entryPath).href);
 			if (typeof mod.register === "function") {
 				await mod.register(api);
 			} else if (typeof mod.default === "function") {
