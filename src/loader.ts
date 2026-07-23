@@ -78,6 +78,44 @@ function parseModelString(modelStr: string): { provider: string; modelId: string
 	};
 }
 
+const ATLASCLOUD_PROVIDER_ALIASES = new Set(["atlascloud", "atlas-cloud", "atlas"]);
+const ATLASCLOUD_DEFAULT_BASE_URL = "https://api.atlascloud.ai/v1";
+const ATLASCLOUD_API_KEY_ENV_VARS = ["ATLASCLOUD_API_KEY", "ATLAS_CLOUD_API_KEY"];
+const ATLASCLOUD_BASE_URL_ENV_VARS = [
+	"ATLASCLOUD_API_BASE",
+	"ATLASCLOUD_BASE_URL",
+	"ATLAS_CLOUD_API_BASE",
+	"ATLAS_CLOUD_BASE_URL",
+];
+
+function firstEnv(names: string[]): string | undefined {
+	for (const name of names) {
+		const value = process.env[name];
+		if (value) return value;
+	}
+	return undefined;
+}
+
+function isAtlasCloudProvider(provider: string): boolean {
+	return ATLASCLOUD_PROVIDER_ALIASES.has(provider.toLowerCase());
+}
+
+function getProviderApiKey(provider: string): string | undefined {
+	if (isAtlasCloudProvider(provider)) {
+		return firstEnv(ATLASCLOUD_API_KEY_ENV_VARS);
+	}
+
+	const envName = `${provider.toUpperCase().replace(/-/g, "_")}_API_KEY`;
+	return process.env[envName] || process.env.LYZR_API_KEY;
+}
+
+function getProviderBaseUrl(provider: string): string | undefined {
+	if (isAtlasCloudProvider(provider)) {
+		return firstEnv(ATLASCLOUD_BASE_URL_ENV_VARS) || ATLASCLOUD_DEFAULT_BASE_URL;
+	}
+	return undefined;
+}
+
 /**
  * Create a custom Model for any OpenAI-compatible endpoint.
  * Used when model string contains @baseUrl or GITAGENT_MODEL_BASE_URL is set.
@@ -389,6 +427,7 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 
 	const { provider, modelId } = parseModelString(modelStr);
 	const envBaseUrl = process.env.GITAGENT_MODEL_BASE_URL;
+	const providerBaseUrl = getProviderBaseUrl(provider);
 
 	let model: Model<any>;
 	if (modelId.includes("@")) {
@@ -398,6 +437,9 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 	} else if (envBaseUrl) {
 		// Environment-specified base URL overrides all providers
 		model = createCustomModel(provider, modelId, envBaseUrl);
+	} else if (providerBaseUrl) {
+		// Provider shortcut for known OpenAI-compatible endpoints.
+		model = createCustomModel(provider, modelId, providerBaseUrl);
 	} else {
 		// Standard registered model
 		model = getModel(provider as any, modelId as any);
@@ -409,8 +451,8 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 	// pi-ai finds OPENAI_API_KEY. The actual auth happens via custom headers on the model.
 	const knownProviders = new Set(["openai", "anthropic", "google", "google-vertex", "groq", "cerebras", "xai", "openrouter", "mistral", "amazon-bedrock", "azure-openai-responses", "huggingface", "opencode", "kimi-coding", "github-copilot"]);
 	if (model.baseUrl && !knownProviders.has(provider)) {
-		// Use provider-specific key if available, otherwise use LYZR key or dummy
-		const providerKey = process.env[`${provider.toUpperCase()}_API_KEY`] || process.env.LYZR_API_KEY;
+		// Use provider-specific key aliases when available.
+		const providerKey = getProviderApiKey(provider);
 		if (providerKey && !process.env.OPENAI_API_KEY) {
 			process.env.OPENAI_API_KEY = providerKey;
 		}
