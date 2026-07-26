@@ -52,6 +52,7 @@ interface ParsedArgs {
 	repo?: string;
 	pat?: string;
 	session?: string;
+	readOnly?: boolean;
 	voice?: string;
 }
 
@@ -67,6 +68,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 	let repo: string | undefined;
 	let pat: string | undefined;
 	let session: string | undefined;
+	let readOnly = false;
 	let voice: string | undefined;
 
 	for (let i = 0; i < args.length; i++) {
@@ -107,6 +109,9 @@ function parseArgs(argv: string[]): ParsedArgs {
 			case "--session":
 				session = args[++i];
 				break;
+			case "--read-only":
+				readOnly = true;
+				break;
 			case "--voice":
 			case "-v":
 				// Accept optional backend name: --voice, --voice openai, --voice gemini
@@ -124,7 +129,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 		}
 	}
 
-	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken, repo, pat, session, voice };
+	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken, repo, pat, session, readOnly, voice };
 }
 
 function handleEvent(
@@ -321,7 +326,7 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch, voice } = parseArgs(process.argv);
+	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch, readOnly, voice } = parseArgs(process.argv);
 
 	// If --repo is given, derive a default dir from the repo URL (skip interactive prompt)
 	let dir = rawDir;
@@ -351,6 +356,7 @@ async function main(): Promise<void> {
 			token,
 			dir,
 			session: sessionBranch,
+			readOnly,
 		});
 		dir = localSession.dir;
 		console.log(dim(`Local session: ${localSession.branch} (${localSession.dir})`));

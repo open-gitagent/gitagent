@@ -112,6 +112,7 @@ export interface LocalRepoOptions {
 	token: string;
 	dir?: string;
 	session?: string;
+	readOnly?: boolean;
 }
 
 // ── Sandbox options ─────────────────────────────────────────────────────
