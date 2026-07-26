@@ -1,4 +1,4 @@
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, realpathSync } from "fs";
 import { resolve } from "path";
 import { randomBytes } from "crypto";
@@ -30,7 +30,7 @@ function authedUrl(url: string, token: string): string {
 }
 
 function cleanUrl(url: string): string {
-	return url.replace(/^https:\/\/[^@]+@/, "https://");
+	return url.replace(/^https:\/\/[^@]+@/, "https://").replace(/\.git$/, "");
 }
 
 function git(args: string, cwd: string): string {
@@ -96,7 +96,10 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 			);
 		}
 
-		git(`remote set-url origin ${aUrl}`, dir);
+		// `set-url` only updates an existing remote — it errors if `origin`
+		// isn't configured yet, which happens if `dir` is a repo the caller
+		// created themselves rather than one gitagent cloned previously.
+		git(`remote ${existingOrigin ? "set-url" : "add"} origin ${aUrl}`, dir);
 		git("fetch origin", dir);
 
 		// Reset local default branch to latest remote
@@ -166,9 +169,12 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 				git("diff --cached --quiet", dir);
 				// Nothing staged — skip
 			} catch {
-				// There are staged changes
+				// There are staged changes. Use execFileSync with an argv array
+				// (not the shell-interpolated `git()` helper) since commitMsg may
+				// be an arbitrary caller-supplied string containing quotes, `$()`,
+				// backticks, etc.
 				const commitMsg = msg || `gitagent: auto-commit (${branch})`;
-				git(`commit -m "${commitMsg}"`, dir);
+				execFileSync("git", ["commit", "-m", commitMsg], { cwd: dir, stdio: "pipe" });
 			}
 		},
 

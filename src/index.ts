@@ -43,7 +43,7 @@ const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
 
 interface ParsedArgs {
 	model?: string;
-	dir: string;
+	dir?: string;
 	prompt?: string;
 	env?: string;
 	sandbox?: boolean;
@@ -59,7 +59,9 @@ interface ParsedArgs {
 function parseArgs(argv: string[]): ParsedArgs {
 	const args = argv.slice(2);
 	let model: string | undefined;
-	let dir = process.cwd();
+	// Left undefined unless --dir/-d is explicitly passed, so callers can tell
+	// "user gave no --dir" apart from "user's --dir value happens to equal cwd".
+	let dir: string | undefined;
 	let prompt: string | undefined;
 	let env: string | undefined;
 	let sandbox = false;
@@ -329,7 +331,7 @@ async function main(): Promise<void> {
 	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch, readOnly, voice } = parseArgs(process.argv);
 
 	// If --repo is given, derive a default dir from the repo URL (skip interactive prompt)
-	let dir = rawDir;
+	let dir = rawDir ?? process.cwd();
 	let localSession: LocalSession | undefined;
 
 	if (repo) {
@@ -345,8 +347,11 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 
-		// Default dir: /tmp/gitagent/<repo-name> if no --dir given
-		if (dir === process.cwd()) {
+		// Default dir: /tmp/gitagent/<repo-name> if --dir wasn't explicitly passed.
+		// Checked against `rawDir` (undefined unless the user passed --dir), not
+		// against `dir === process.cwd()` — a value-equality check can't tell
+		// "no --dir given" apart from "user explicitly passed --dir matching cwd".
+		if (rawDir === undefined) {
 			const repoName = repo.split("/").pop()?.replace(/\.git$/, "") || "repo";
 			dir = resolve(`/tmp/gitagent/${repoName}`);
 		}
