@@ -1,7 +1,7 @@
-// Classifies each SkillFlow step by complexity and resolves the model it should
-// run on: lightweight tasks (summarize/extract/classify/transform) to a cheap
-// model, reasoning-heavy tasks to the configured reasoning model. Explicit
-// per-step / per-skill settings win; anything unresolved falls back to primary.
+// Resolves which model each SkillFlow step runs on. Explicit per-step / per-skill
+// settings win; otherwise the step is classified by one call to the lightweight
+// model via an injected `query` (RouteDeps), falling back to a keyword heuristic
+// when no `query` is supplied.
 
 export type ModelTier = "lightweight" | "reasoning";
 
@@ -12,7 +12,7 @@ export interface RoutingConfig {
 	lightweight?: string;
 	/** Model id for reasoning tasks, e.g. "openai:gpt-4o". */
 	reasoning?: string;
-	/** Classification overrides — first matching rule wins. */
+	/** Classification overrides — first matching rule wins, before the LLM/keyword step. */
 	rules?: Array<{ tier: ModelTier; match: string[] }>;
 }
 
@@ -28,6 +28,25 @@ export interface RouteInput {
 	primaryModel?: string;
 }
 
+/** Minimal shape of the SDK `query()` used to classify — injected so core stays decoupled and testable. */
+export type RouteQuery = (opts: {
+	prompt: string;
+	model?: string;
+	dir?: string;
+	env?: string;
+	systemPrompt?: string;
+	maxTurns?: number;
+	tools?: [];
+	replaceBuiltinTools?: boolean;
+}) => AsyncIterable<{ type: string; content?: string }>;
+
+export interface RouteDeps {
+	/** When present (and routing is enabled) classification runs one LLM call on the lightweight model. */
+	query?: RouteQuery;
+	dir?: string;
+	env?: string;
+}
+
 export interface RouteResult {
 	/** Resolved "provider:model" (undefined → let the runtime decide). */
 	model?: string;
@@ -36,18 +55,19 @@ export interface RouteResult {
 	source: "step" | "skill" | "auto" | "fallback";
 }
 
-// Matched against word starts, so "summarize"/"summary"/"summarization" all hit
-// "summ" without "already" matching "read".
+// Keyword fallback, used only when no `query` is injected. Ambiguous verbs like
+// "search" that appear in both trivial and complex prompts are deliberately left
+// out so they don't systematically overpay.
 const DEFAULT_LIGHTWEIGHT = [
 	"summ", "extract", "classif", "transform", "format", "convert",
 	"parse", "fetch", "read", "load", "lookup", "normaliz", "translat",
 	"rephrase", "rewrite", "tag", "label", "render",
 ];
 const DEFAULT_REASONING = [
-	"search", "analy", "plan", "decid", "decision", "orchestrat", "solve",
+	"analy", "plan", "decid", "decision", "orchestrat", "solve",
 	"reason", "validat", "evaluat", "review", "audit", "diagnos", "debug",
-	"architect", "design", "strateg", "investigat", "assess", "judge",
-	"verify", "critique", "infer", "deduc",
+	"architect", "design", "strateg", "investigat", "research", "assess",
+	"judge", "verify", "critique", "infer", "deduc",
 ];
 
 function matchesAny(text: string, keywords: string[]): boolean {
@@ -58,44 +78,90 @@ function matchesAny(text: string, keywords: string[]): boolean {
 	return false;
 }
 
+function matchRules(text: string, rules?: Array<{ tier: ModelTier; match: string[] }>): ModelTier | null {
+	if (rules) {
+		for (const rule of rules) {
+			if (Array.isArray(rule.match) && matchesAny(text, rule.match)) return rule.tier;
+		}
+	}
+	return null;
+}
+
 /**
- * Classify a task into a complexity tier. User rules take precedence over the
- * built-in defaults. A task that matches neither — or both — resolves to
- * "reasoning", so cost optimization never silently degrades quality.
+ * Keyword-based tier classification — the offline fallback. User rules win;
+ * otherwise a task that matches neither list (or both) resolves to "reasoning",
+ * so cost optimization never silently degrades quality.
  */
-export function classifyTaskTier(
+export function classifyByKeywords(
 	classifyText: string,
 	rules?: Array<{ tier: ModelTier; match: string[] }>,
 ): ModelTier {
 	const text = classifyText || "";
-
-	if (rules) {
-		for (const rule of rules) {
-			if (Array.isArray(rule.match) && matchesAny(text, rule.match)) {
-				return rule.tier;
-			}
-		}
-	}
-
+	const ruled = matchRules(text, rules);
+	if (ruled) return ruled;
 	if (matchesAny(text, DEFAULT_REASONING)) return "reasoning";
 	if (matchesAny(text, DEFAULT_LIGHTWEIGHT)) return "lightweight";
 	return "reasoning";
 }
 
-/** Resolve a tier alias ("lightweight"/"reasoning") or pass a model id through. */
+const CLASSIFY_INSTRUCTIONS =
+	`Classify the following agent task as exactly one word: "lightweight" or "reasoning".\n` +
+	`- lightweight: mechanical work with a known shape (summarize, extract, format, fetch, read, look up).\n` +
+	`- reasoning: needs analysis, planning, multi-step logic, or judgment.\n` +
+	`If unsure, answer "reasoning". Reply with only the single word.\n\nTask: `;
+
+/** One classification call on the lightweight model. Returns null if the call fails or is unparseable. */
+async function classifyViaLLM(text: string, model: string, deps: RouteDeps): Promise<ModelTier | null> {
+	try {
+		// Constrained one-shot: no tools, single turn — keeps it a single cheap call.
+		const result = deps.query!({
+			prompt: CLASSIFY_INSTRUCTIONS + text.trim(),
+			model,
+			dir: deps.dir,
+			env: deps.env,
+			systemPrompt: "You are a task classifier. Reply with exactly one word.",
+			maxTurns: 1,
+			tools: [],
+			replaceBuiltinTools: true,
+		});
+		let out = "";
+		for await (const msg of result) {
+			if (msg.type === "assistant" && msg.content) out += msg.content;
+		}
+		const answer = out.toLowerCase();
+		if (answer.includes("lightweight")) return "lightweight";
+		if (answer.includes("reason")) return "reasoning";
+		return null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Resolve a tier alias ("lightweight"/"reasoning") or pass a model id through.
+ * Warns when an alias is requested but the routing block has no model for that
+ * tier, so silently falling through to the fallback stays observable.
+ */
 export function resolveModelAlias(ref: string | undefined, routing?: RoutingConfig): string | undefined {
 	if (!ref) return undefined;
-	if (ref === "lightweight") return routing?.lightweight || undefined;
-	if (ref === "reasoning") return routing?.reasoning || undefined;
+	if (ref === "lightweight" || ref === "reasoning") {
+		const configured = routing?.[ref];
+		if (!configured) {
+			console.warn(`[routing] tier alias '${ref}' requested but routing.${ref} is not configured; falling through`);
+			return undefined;
+		}
+		return configured;
+	}
 	return ref;
 }
 
 /**
  * Decide which model a task runs on, in precedence order: explicit per-step
  * model, per-skill model, automatic classification (only when a routing block
- * is present and enabled), then the primary model.
+ * is present and enabled), then the primary model. Automatic classification
+ * uses the injected `query` fn when available, else the keyword fallback.
  */
-export function resolveRoutedModel(input: RouteInput): RouteResult {
+export async function resolveRoutedModel(input: RouteInput, deps: RouteDeps = {}): Promise<RouteResult> {
 	const { stepModel, skillModel, classifyText, routing, primaryModel } = input;
 
 	const fromStep = resolveModelAlias(stepModel, routing);
@@ -106,7 +172,11 @@ export function resolveRoutedModel(input: RouteInput): RouteResult {
 
 	const autoEnabled = !!routing && routing.enabled !== false && !!(routing.lightweight || routing.reasoning);
 	if (autoEnabled) {
-		const tier = classifyTaskTier(classifyText, routing!.rules);
+		let tier = matchRules(classifyText || "", routing!.rules);
+		if (!tier && deps.query && routing!.lightweight) {
+			tier = await classifyViaLLM(classifyText, routing!.lightweight, deps);
+		}
+		if (!tier) tier = classifyByKeywords(classifyText, routing!.rules);
 		const model = tier === "lightweight" ? routing!.lightweight : routing!.reasoning;
 		if (model) return { model, tier, source: "auto" };
 	}
