@@ -37,9 +37,10 @@ function freshExporter(): {
 
 async function withTelemetry(
 	fn: (exporter: InMemorySpanExporter) => Promise<void> | void,
+	options: { captureToolContent?: boolean } = {},
 ): Promise<void> {
 	const { exporter, provider } = freshExporter();
-	await initTelemetry({ serviceName: "gitagent-test", _testProvider: provider });
+	await initTelemetry({ serviceName: "gitagent-test", _testProvider: provider, ...options });
 	try {
 		await fn(exporter);
 	} finally {
@@ -72,6 +73,39 @@ test("wrapToolWithOtel happy path produces gitagent.tool.execute span with statu
 		assert.ok(toolSpan, "expected gitagent.tool.execute span");
 		assert.equal(toolSpan!.attributes["tool.name"], "echo");
 		assert.equal(toolSpan!.attributes["tool.status"], "ok");
+	});
+});
+
+test("wrapToolWithOtel can capture bounded tool input and output when opted in", async () => {
+	await withTelemetry(async (exporter) => {
+		const tool: any = {
+			name: "describe",
+			description: "describe",
+			parameters: {} as any,
+			execute: async (args: any) => ({ ok: true, value: args.value }),
+		};
+		await (wrapToolWithOtel(tool) as any).execute({ value: "hello" });
+
+		const span = exporter.getFinishedSpans().find((s) => s.name === "gitagent.tool.execute");
+		assert.ok(span);
+		assert.equal(span!.attributes["tool.input"], '{"value":"hello"}');
+		assert.equal(span!.attributes["tool.output"], '{"ok":true,"value":"hello"}');
+	}, { captureToolContent: true });
+});
+
+test("wrapToolWithOtel omits tool content by default", async () => {
+	await withTelemetry(async (exporter) => {
+		const tool: any = {
+			name: "private",
+			description: "private",
+			parameters: {} as any,
+			execute: async () => "secret",
+		};
+		await (wrapToolWithOtel(tool) as any).execute({ secret: "value" });
+		const span = exporter.getFinishedSpans().find((s) => s.name === "gitagent.tool.execute");
+		assert.ok(span);
+		assert.equal(span!.attributes["tool.input"], undefined);
+		assert.equal(span!.attributes["tool.output"], undefined);
 	});
 });
 

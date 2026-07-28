@@ -6,7 +6,7 @@
 //    so the module is side-effect-free until telemetry is explicitly enabled.
 //  - Every public function wraps its body in try/catch — telemetry must never
 //    crash the agent.
-//  - Spans never carry prompt or completion content; only metadata.
+//  - Tool arguments/results are opt-in because they can contain sensitive data.
 
 import {
 	trace,
@@ -40,6 +40,8 @@ export interface TelemetryOptions {
 	resourceAttributes?: Record<string, string | number | boolean>;
 	/** Set to `false` to skip metric exporter setup. */
 	enableMetrics?: boolean;
+	/** Capture bounded tool arguments/results on tool spans. Disabled by default. */
+	captureToolContent?: boolean;
 	/**
 	 * Test escape hatch — register the given TracerProvider directly and
 	 * skip all dynamic SDK imports. Used by unit tests.
@@ -51,6 +53,25 @@ export interface TelemetryOptions {
 
 let _initialized = false;
 let _sdk: any = null;
+let _captureToolContent = false;
+
+const MAX_TOOL_CONTENT_LENGTH = 8_192;
+
+function formatToolContent(value: unknown): string {
+	let text: string;
+	if (typeof value === "string") {
+		text = value;
+	} else {
+		try {
+			text = JSON.stringify(value) ?? String(value);
+		} catch {
+			text = String(value);
+		}
+	}
+	return text.length > MAX_TOOL_CONTENT_LENGTH
+		? `${text.slice(0, MAX_TOOL_CONTENT_LENGTH)}…`
+		: text;
+}
 
 const TRACER_NAME = "gitagent";
 const METER_NAME = "gitagent";
@@ -70,6 +91,9 @@ const _slots = {
 
 export async function initTelemetry(opts: TelemetryOptions): Promise<void> {
 	if (_initialized) return;
+	_captureToolContent =
+		opts.captureToolContent === true ||
+		process.env.GITAGENT_OTEL_CAPTURE_TOOL_CONTENT?.toLowerCase() === "true";
 
 	try {
 		// Test path — register a caller-supplied TracerProvider directly.
@@ -158,6 +182,7 @@ export async function initTelemetry(opts: TelemetryOptions): Promise<void> {
 		// so misconfiguration is visible without breaking the agent.
 		_sdk = null;
 		_initialized = false;
+		_captureToolContent = false;
 		try {
 			console.error(
 				`[telemetry] init failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -177,6 +202,7 @@ export async function shutdownTelemetry(): Promise<void> {
 	} finally {
 		_initialized = false;
 		_sdk = null;
+		_captureToolContent = false;
 	}
 }
 
@@ -357,8 +383,14 @@ export function wrapToolWithOtel<T extends AgentTool<any>>(tool: T): T {
 			},
 			async (span) => {
 				try {
+					if (_captureToolContent) {
+						span.setAttribute("tool.input", formatToolContent(args));
+					}
 					const result = await original.apply(this, [args, ...rest]);
 					try {
+						if (_captureToolContent) {
+							span.setAttribute("tool.output", formatToolContent(result));
+						}
 						span.setAttribute("tool.status", "ok");
 						span.setStatus({ code: SpanStatusCode.OK });
 					} catch {

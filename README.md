@@ -756,6 +756,7 @@ Telemetry is enabled automatically when the endpoint is set and disabled when it
 | `OTEL_SERVICE_VERSION` | Resource `service.version` | (unset) |
 | `OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated key=value pairs, no quotes (e.g. `Authorization=Bearer xyz,x-tenant=abc`) | (unset) |
 | `OTEL_TRACES_EXPORTER` | Set to `console` to print spans to stdout — no collector needed | (unset) |
+| `GITAGENT_OTEL_CAPTURE_TOOL_CONTENT` | Set to `true` to include bounded tool arguments/results on tool spans (may contain sensitive data) | `false` |
 
 ### SDK usage
 
@@ -764,7 +765,7 @@ For programmatic embedders, call `initTelemetry` explicitly — you control when
 ```ts
 import { initTelemetry, shutdownTelemetry, query } from "gitagent";
 
-await initTelemetry({ serviceName: "my-app" });
+await initTelemetry({ serviceName: "my-app", captureToolContent: true });
 
 for await (const msg of query({ prompt: "hello", model: "anthropic:claude-4-6-sonnet-latest" })) {
   // …
@@ -780,7 +781,7 @@ await shutdownTelemetry();
 | Name | Kind | Key attributes |
 |------|------|----------------|
 | `gitagent.agent.session` | INTERNAL | `gitagent.entry` (`sdk` / `cli`), `gitagent.cost_usd`, `gitagent.session.duration_ms` |
-| `gitagent.tool.execute` | INTERNAL | `tool.name`, `tool.call_id`, `tool.status`, `tool.error_message` |
+| `gitagent.tool.execute` | INTERNAL | `tool.name`, `tool.call_id`, `tool.status`, `tool.error_message`; optional bounded `tool.input` / `tool.output` when content capture is enabled |
 | `gen_ai.chat` | CLIENT | `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `gitagent.cost_usd` |
 | `HTTP …` | CLIENT | URL, status code, duration (auto from `instrumentation-undici`) |
 
