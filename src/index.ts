@@ -8,6 +8,9 @@ import { createBuiltinTools } from "./tools/index.js";
 import { createSandboxContext } from "./sandbox.js";
 import type { SandboxContext, SandboxConfig } from "./sandbox.js";
 import { expandSkillCommand, refreshSkills } from "./skills.js";
+import { executeFlow } from "./flow-runner.js";
+import { loadFlowDefinition, discoverWorkflows } from "./workflows.js";
+import { query } from "./sdk.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import type { HooksConfig } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
@@ -638,7 +641,7 @@ async function main(): Promise<void> {
 	if (loaded.plugins.length > 0) {
 		console.log(dim(`Plugins: ${loaded.plugins.map((p) => p.manifest.id).join(", ")}`));
 	}
-	console.log(dim('Type /skills to list skills, /plugins to list plugins, /memory to view memory, /quit to exit\n'));
+	console.log(dim('Type /skills to list skills, /flows to list workflows, /plugins to list plugins, /memory to view memory, /quit to exit\n'));
 
 	// Single-shot mode
 	if (prompt) {
@@ -679,6 +682,59 @@ async function main(): Promise<void> {
 		input: process.stdin,
 		output: process.stdout,
 	});
+
+	// Approval gates prompt on the same readline instance. `ask()` is awaiting
+	// the flow at this point, so the prompt is free.
+	const askApproval = (message: string): Promise<boolean> =>
+		new Promise((res) => {
+			console.log(`\n${message}`);
+			rl.question(green("approve? [y/N] "), (answer) => {
+				res(/^(y|yes|approve|ok|continue|go|proceed)$/i.test(answer.trim()));
+			});
+		});
+
+	// Run a SkillFlow. Each step is an isolated query() — matching the web UI —
+	// so steps don't inherit the REPL's conversation history, and a step only
+	// sees what the flow explicitly threads into its prompt.
+	const runFlowInRepl = async (flowName: string, userContext: string): Promise<void> => {
+		// Re-discover rather than using the startup snapshot, so a flow created
+		// while the REPL is open (e.g. in voice's builder) is visible. Same
+		// reason /skills calls refreshSkills.
+		const workflows = await discoverWorkflows(dir);
+		const meta = workflows.find((w) => w.name === flowName && w.type === "flow");
+		if (!meta) {
+			console.error(red(`Unknown flow: ${flowName}`));
+			return;
+		}
+
+		const flowDef = await loadFlowDefinition(join(agentDir, meta.filePath));
+
+		await executeFlow(flowDef, userContext, {
+			runStep: async (stepPrompt) => {
+				let out = "";
+				const result = query({
+					prompt: stepPrompt,
+					dir: agentDir,
+					model,
+					env,
+				});
+				for await (const msg of result) {
+					if (msg.type === "delta" && msg.deltaType === "text") process.stdout.write(msg.content);
+					if (msg.type === "assistant" && msg.content) out += msg.content;
+					if (msg.type === "tool_use") console.log(dim(`\n  · ${msg.toolName}`));
+				}
+				process.stdout.write("\n");
+				return out;
+			},
+			requestApproval: askApproval,
+			onProgress: (e) => {
+				if (e.type === "flow_start") console.log(dim(`▶ flow: ${e.flow} (${e.totalSteps} steps)`));
+				if (e.type === "step_start") console.log(dim(`\n▶ step ${e.index + 1}/${e.total}: ${e.skill}`));
+				if (e.type === "flow_done") console.log(dim(`✓ flow complete (${e.steps} steps)`));
+				if (e.type === "flow_aborted") console.log(red(`✗ ${e.reason}`));
+			},
+		});
+	};
 
 	const ask = (): void => {
 		rl.question(green("→ "), async (input) => {
@@ -728,6 +784,23 @@ async function main(): Promise<void> {
 						const conf = s.confidence !== undefined ? dim(` [confidence: ${s.confidence}]`) : "";
 						console.log(`  ${bold(s.name)} — ${dim(s.description)}${conf}`);
 					}
+				}
+				ask();
+				return;
+			}
+
+			if (trimmed === "/flows") {
+				const currentWorkflows = await discoverWorkflows(dir);
+				if (currentWorkflows.length === 0) {
+					console.log(dim("No workflows defined."));
+				} else {
+					for (const w of currentWorkflows) {
+						const runnable = w.type === "flow";
+						const label = runnable ? bold(`@${w.name}`) : bold(w.name);
+						const note = runnable ? dim(` [${w.steps?.length ?? 0} steps]`) : dim(" [reference only]");
+						console.log(`  ${label} — ${dim(w.description)}${note}`);
+					}
+					console.log(dim("\nRun a flow by typing @flow-name, optionally followed by input."));
 				}
 				ask();
 				return;
@@ -783,6 +856,19 @@ async function main(): Promise<void> {
 						console.log(`  ${bold(p.manifest.id)} v${p.manifest.version} — ${dim(p.manifest.description)}`);
 						if (info) console.log(`    ${dim(`provides: ${info}`)}`);
 					}
+				}
+				ask();
+				return;
+			}
+
+			// SkillFlow trigger: @flow-name [input]. Anchored to the start of the
+			// line so an @mention or email address mid-sentence can't fire a flow.
+			const flowMatch = trimmed.match(/^@([a-z0-9]+(?:-[a-z0-9]+)*)\b\s*([\s\S]*)$/);
+			if (flowMatch) {
+				try {
+					await runFlowInRepl(flowMatch[1], flowMatch[2].trim());
+				} catch (err: any) {
+					console.error(red(`Flow error: ${err.message}`));
 				}
 				ask();
 				return;
