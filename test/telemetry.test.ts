@@ -126,7 +126,7 @@ test("wrapToolWithOtel bounds large content and tolerates circular values", asyn
 		const output = String(span!.attributes["tool.output"]);
 		assert.equal(output.length, 8_193);
 		assert.equal(output.endsWith("…"), true);
-	});
+	}, { captureToolContent: true });
 });
 
 test("wrapToolWithOtel error path sets status=error and records error message", async () => {
