@@ -16,35 +16,67 @@ interface ToolDefinition {
 	};
 }
 
-export function buildTypeboxSchema(schema: Record<string, any>): any {
-	// Convert a simplified JSON-schema-like object to Typebox properties
+/**
+ * Recursively convert a JSON-Schema node into a TypeBox schema. Handles the
+ * full set of types tool authors and MCP servers use: string/number/integer/
+ * boolean/null, enums (→ union of literals), typed arrays (real item type),
+ * nested objects (real properties + required), and union `type` arrays. Unknown
+ * or missing types degrade to `Type.Any()` so the call still goes through and
+ * the server validates the actual payload.
+ */
+function jsonSchemaToTypebox(def: any): any {
+	if (!def || typeof def !== "object") return Type.Any();
+	const desc = def.description || "";
+	const opts = desc ? { description: desc } : {};
+
+	// enum → union of literals (preserves the allowed values for the model)
+	if (Array.isArray(def.enum) && def.enum.length > 0) {
+		if (def.enum.length === 1) return Type.Literal(def.enum[0], opts);
+		return Type.Union(def.enum.map((v: any) => Type.Literal(v)), opts);
+	}
+
+	// union type, e.g. ["string", "null"]
+	if (Array.isArray(def.type)) {
+		const variants = def.type.map((t: string) => jsonSchemaToTypebox({ ...def, type: t, description: undefined }));
+		return variants.length === 1 ? variants[0] : Type.Union(variants, opts);
+	}
+
+	switch (def.type) {
+		case "string":
+			return Type.String(opts);
+		case "number":
+			return Type.Number(opts);
+		case "integer":
+			return Type.Integer(opts);
+		case "boolean":
+			return Type.Boolean(opts);
+		case "null":
+			return Type.Null(opts);
+		case "array":
+			return Type.Array(def.items ? jsonSchemaToTypebox(def.items) : Type.Any(), opts);
+		case "object":
+			return buildTypeboxSchema(def, opts);
+		default:
+			// No/unknown type — fall back to permissive Any.
+			return Type.Any(opts);
+	}
+}
+
+/**
+ * Build a TypeBox object schema from a JSON-Schema-like object (with
+ * `properties` and `required`). Used for both declarative YAML tools and MCP
+ * tool input schemas.
+ */
+export function buildTypeboxSchema(schema: Record<string, any>, opts: Record<string, any> = {}): any {
 	const properties: Record<string, any> = {};
 	if (schema.properties) {
 		for (const [key, def] of Object.entries(schema.properties) as [string, any][]) {
-			const desc = def.description || "";
 			const required = schema.required?.includes(key) ?? false;
-			let prop;
-			switch (def.type) {
-				case "number":
-					prop = Type.Number({ description: desc });
-					break;
-				case "boolean":
-					prop = Type.Boolean({ description: desc });
-					break;
-				case "array":
-					prop = Type.Array(Type.Any(), { description: desc });
-					break;
-				case "object":
-					prop = Type.Any({ description: desc });
-					break;
-				default:
-					prop = Type.String({ description: desc });
-					break;
-			}
+			const prop = jsonSchemaToTypebox(def);
 			properties[key] = required ? prop : Type.Optional(prop);
 		}
 	}
-	return Type.Object(properties);
+	return Type.Object(properties, opts);
 }
 
 function createDeclarativeTool(

@@ -1,6 +1,6 @@
 import { spawn } from "child_process";
 import { readFile } from "fs/promises";
-import { join, resolve } from "path";
+import { join, resolve, relative, isAbsolute, sep } from "path";
 import yaml from "js-yaml";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
@@ -66,7 +66,9 @@ async function executeHook(
 		// Path traversal guard: ensure script doesn't escape its base directory
 		const resolvedScript = resolve(scriptPath);
 		const allowedBase = resolve(baseDir);
-		if (!resolvedScript.startsWith(allowedBase + "/") && resolvedScript !== allowedBase) {
+		const rel = relative(allowedBase, resolvedScript);
+		const escapesBase = rel !== "" && (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel));
+		if (escapesBase) {
 			reject(new Error(`Hook "${hook.script}" escapes its base directory`));
 			return;
 		}
@@ -95,8 +97,16 @@ async function executeHook(
 			reject(new Error(`Hook "${hook.script}" timed out after 10s`));
 		}, 10_000);
 
-		child.on("error", (err) => {
+		child.on("error", (err: any) => {
 			clearTimeout(timeout);
+			if (err.code === "ENOENT" && err.path === "sh") {
+				reject(new Error(
+					`Hook "${hook.script}" could not run: no POSIX shell ("sh") found on this system. ` +
+					`Hook scripts require a POSIX shell — on Windows, run gitagent from Git Bash or WSL, ` +
+					`or ensure "sh" is on PATH.`,
+				));
+				return;
+			}
 			reject(new Error(`Hook "${hook.script}" failed to start: ${err.message}`));
 		});
 
