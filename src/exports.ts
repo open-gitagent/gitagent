@@ -86,9 +86,18 @@ export { getVoiceContext, getAgentContext } from "./context.js";
 export { discoverSkills } from "./skills.js";
 export {
 	discoverWorkflows,
+	executeFlow,
 	loadFlowDefinition,
 	saveFlowDefinition,
 	deleteFlowDefinition,
+} from "./workflows.js";
+export type {
+	FlowExecutionContext,
+	FlowExecutionResult,
+	FlowProgressEvent,
+	FlowStepResult,
+	SkillFlowDefinition,
+	SkillFlowStep,
 } from "./workflows.js";
 export {
 	discoverSchedules,

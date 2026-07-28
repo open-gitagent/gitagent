@@ -15,6 +15,69 @@ export interface SkillFlowDefinition {
 	steps: SkillFlowStep[];
 }
 
+export type FlowProgressEvent =
+	| { type: "start"; flow: SkillFlowDefinition; input: string }
+	| { type: "step_start"; flow: SkillFlowDefinition; step: SkillFlowStep; index: number; input: string }
+	| { type: "step_complete"; flow: SkillFlowDefinition; step: SkillFlowStep; index: number; input: string; output: string }
+	| { type: "complete"; flow: SkillFlowDefinition; input: string; output: string; status: "completed" | "rejected" };
+
+export interface FlowExecutionContext {
+	/** Execute one non-approval step. The input is the previous step's output. */
+	runStep: (step: SkillFlowStep, input: string, index: number) => Promise<string>;
+	/** Resolve an approval gate. Return false to stop the flow without running later steps. */
+	requestApproval?: (step: SkillFlowStep, index: number) => Promise<boolean>;
+	onProgress?: (event: FlowProgressEvent) => void;
+}
+
+export interface FlowStepResult {
+	step: SkillFlowStep;
+	index: number;
+	input: string;
+	output: string;
+}
+
+export interface FlowExecutionResult {
+	flow: SkillFlowDefinition;
+	input: string;
+	output: string;
+	status: "completed" | "rejected";
+	steps: FlowStepResult[];
+}
+
+/** Execute a SkillFlow without assuming a transport or agent implementation. */
+export async function executeFlow(
+	flow: SkillFlowDefinition,
+	input: string,
+	context: FlowExecutionContext,
+): Promise<FlowExecutionResult> {
+	if (!flow.steps || flow.steps.length === 0) throw new Error("Flow must have at least one step");
+	let currentInput = input;
+	const steps: FlowStepResult[] = [];
+	context.onProgress?.({ type: "start", flow, input });
+
+	for (const [index, step] of flow.steps.entries()) {
+		context.onProgress?.({ type: "step_start", flow, step, index, input: currentInput });
+		if (step.skill === "__approval_gate__") {
+			if (!context.requestApproval) throw new Error(`Flow step ${index + 1} requires an approval callback`);
+			if (!(await context.requestApproval(step, index))) {
+				const result = { flow, input, output: currentInput, status: "rejected" as const, steps };
+				context.onProgress?.({ type: "complete", ...result });
+				return result;
+			}
+			continue;
+		}
+		const stepInput = currentInput;
+		const output = await context.runStep(step, stepInput, index);
+		steps.push({ step, index, input: stepInput, output });
+		currentInput = output;
+		context.onProgress?.({ type: "step_complete", flow, step, index, input: stepInput, output });
+	}
+
+	const result = { flow, input, output: currentInput, status: "completed" as const, steps };
+	context.onProgress?.({ type: "complete", ...result });
+	return result;
+}
+
 export interface WorkflowMetadata {
 	name: string;
 	description: string;
