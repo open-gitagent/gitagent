@@ -137,6 +137,9 @@ export function query(options: QueryOptions): Query {
 
 		// Local repo mode
 		if (options.repo) {
+			if (!options.repo.dir) {
+				throw new Error("repo.dir is required; refusing to use the caller's working directory");
+			}
 			const token = options.repo.token || process.env.GITHUB_TOKEN || process.env.GIT_TOKEN;
 			if (!token) {
 				throw new Error("repo.token, GITHUB_TOKEN, or GIT_TOKEN is required with repo option");
@@ -144,8 +147,9 @@ export function query(options: QueryOptions): Query {
 			localSession = initLocalSession({
 				url: options.repo.url,
 				token,
-				dir: options.repo.dir || dir,
+				dir: options.repo.dir,
 				session: options.repo.session,
+				autoPush: options.repo.autoPush,
 			});
 			dir = localSession.dir;
 		}
@@ -547,7 +551,10 @@ export function query(options: QueryOptions): Query {
 
 		// Finalize local session if active
 		if (localSession) {
-			try { localSession.finalize(); } catch { /* best-effort */ }
+			try {
+				if (options.repo?.autoPush === false) localSession.cleanup();
+				else localSession.finalize();
+			} catch { /* best-effort */ }
 		}
 
 		// Stop sandbox if active
@@ -576,7 +583,10 @@ export function query(options: QueryOptions): Query {
 	})().catch(async (err) => {
 		// Finalize local session on error
 		if (localSession) {
-			try { localSession.finalize(); } catch { /* best-effort */ }
+			try {
+				if (options.repo?.autoPush === false) localSession.cleanup();
+				else localSession.finalize();
+			} catch { /* best-effort */ }
 		}
 
 		// Stop sandbox on error

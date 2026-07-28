@@ -10,6 +10,7 @@ export interface LocalRepoOptions {
 	token: string;
 	dir: string;
 	session?: string;
+	autoPush?: boolean;
 }
 
 export interface LocalSession {
@@ -19,6 +20,7 @@ export interface LocalSession {
 	commitChanges(msg?: string): void;
 	push(): void;
 	finalize(): void;
+	cleanup(): void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -63,6 +65,15 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 	if (!existsSync(dir)) {
 		execSync(`git clone --depth 1 --no-single-branch ${aUrl} ${dir}`, { stdio: "pipe" });
 	} else {
+		let repoRoot: string;
+		try {
+			repoRoot = resolve(git("rev-parse --show-toplevel", dir));
+		} catch {
+			throw new Error(`repo.dir must be an existing Git repository or an empty path: ${dir}`);
+		}
+		if (repoRoot !== dir) {
+			throw new Error(`repo.dir must be the Git repository root, not a nested path: ${dir}`);
+		}
 		git(`remote set-url origin ${aUrl}`, dir);
 		git("fetch origin", dir);
 
@@ -145,7 +156,13 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 
 		finalize() {
 			localSession.commitChanges();
-			localSession.push();
+			if (opts.autoPush !== false) {
+				localSession.push();
+			}
+			localSession.cleanup();
+		},
+
+		cleanup() {
 			// Strip PAT from remote URL
 			git(`remote set-url origin ${cleanUrl(url)}`, dir);
 		},

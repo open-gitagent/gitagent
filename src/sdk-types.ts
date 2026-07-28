@@ -110,8 +110,10 @@ export interface GCToolDefinition {
 export interface LocalRepoOptions {
 	url: string;
 	token: string;
-	dir?: string;
+	dir: string;
 	session?: string;
+	/** Commit locally but do not push the session branch when false. */
+	autoPush?: boolean;
 }
 
 // ── Sandbox options ─────────────────────────────────────────────────────
