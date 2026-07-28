@@ -6,6 +6,54 @@ import type { ServerMessage } from "./adapter.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 
+/** Node clamps timers above this value to a much shorter delay. */
+export const MAX_TIMEOUT_MS = 2_147_483_647;
+
+export interface ScheduledTimer {
+	cancel(): void;
+}
+
+/** Split a delay into timer-safe chunks without overflowing Node's timer limit. */
+export function splitTimeoutDelay(delayMs: number): number[] {
+	const remaining = Math.max(0, Math.floor(delayMs));
+	if (remaining === 0) return [0];
+	const chunks: number[] = [];
+	let pending = remaining;
+	while (pending > 0) {
+		const chunk = Math.min(pending, MAX_TIMEOUT_MS);
+		chunks.push(chunk);
+		pending -= chunk;
+	}
+	return chunks;
+}
+
+/** Schedule a callback across multiple safe timers when the delay is far-future. */
+export function scheduleLongTimeout(callback: () => void, delayMs: number): ScheduledTimer {
+	let cancelled = false;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	const scheduleNext = (remaining: number) => {
+		if (cancelled) return;
+		const chunk = Math.min(remaining, MAX_TIMEOUT_MS);
+		timer = setTimeout(() => {
+			if (cancelled) return;
+			if (remaining > chunk) {
+				scheduleNext(remaining - chunk);
+			} else {
+				callback();
+			}
+		}, chunk);
+	};
+
+	scheduleNext(Math.max(0, Math.floor(delayMs)));
+	return {
+		cancel: () => {
+			cancelled = true;
+			if (timer) clearTimeout(timer);
+		},
+	};
+}
+
 export interface SchedulerOptions {
 	agentDir: string;
 	model?: string;
@@ -16,7 +64,7 @@ export interface SchedulerOptions {
 }
 
 const activeTasks = new Map<string, ScheduledTask>();
-const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const activeTimers = new Map<string, ScheduledTimer>();
 const runningJobs = new Set<string>();
 
 export async function startScheduler(opts: SchedulerOptions): Promise<void> {
@@ -33,7 +81,7 @@ export async function startScheduler(opts: SchedulerOptions): Promise<void> {
 				console.log(dim(`[scheduler] "${schedule.id}" runAt is in the past — skipping`));
 				continue;
 			}
-			const timer = setTimeout(() => {
+			const timer = scheduleLongTimeout(() => {
 				executeScheduledJob(schedule, opts, true);
 			}, delay);
 			activeTimers.set(schedule.id, timer);
@@ -74,7 +122,7 @@ export function stopScheduler(): void {
 	}
 	activeTasks.clear();
 	for (const [, timer] of activeTimers) {
-		clearTimeout(timer);
+		timer.cancel();
 	}
 	activeTimers.clear();
 	console.log(dim("[scheduler] Stopped all scheduled tasks"));
@@ -136,7 +184,7 @@ export async function executeScheduledJob(schedule: ScheduleDefinition, opts: Sc
 		const task = activeTasks.get(schedule.id);
 		if (task) { task.stop(); activeTasks.delete(schedule.id); }
 		const timer = activeTimers.get(schedule.id);
-		if (timer) { clearTimeout(timer); activeTimers.delete(schedule.id); }
+		if (timer) { timer.cancel(); activeTimers.delete(schedule.id); }
 		console.log(dim(`[scheduler] "${schedule.id}" auto-disabled (run-once)`));
 	}
 
