@@ -109,6 +109,26 @@ test("wrapToolWithOtel omits tool content by default", async () => {
 	});
 });
 
+test("wrapToolWithOtel bounds large content and tolerates circular values", async () => {
+	await withTelemetry(async (exporter) => {
+		const circular: any = {};
+		circular.self = circular;
+		const tool: any = {
+			name: "bounded",
+			description: "bounded",
+			parameters: {} as any,
+			execute: async () => "x".repeat(9_000),
+		};
+		await (wrapToolWithOtel(tool) as any).execute(circular);
+		const span = exporter.getFinishedSpans().find((s) => s.name === "gitagent.tool.execute");
+		assert.ok(span);
+		assert.equal(String(span!.attributes["tool.input"]), "[object Object]");
+		const output = String(span!.attributes["tool.output"]);
+		assert.equal(output.length, 8_193);
+		assert.equal(output.endsWith("…"), true);
+	});
+});
+
 test("wrapToolWithOtel error path sets status=error and records error message", async () => {
 	await withTelemetry(async (exporter) => {
 		const tool: any = {
