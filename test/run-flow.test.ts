@@ -45,6 +45,21 @@ test("unknown flow name errors and lists what is available", async () => {
 	}
 });
 
+test("a runnable flow wins over a same-named reference workflow", async () => {
+	// Both discover as "gate-only". readdir order is filesystem-dependent, so
+	// resolution must prefer the runnable one rather than whichever came first.
+	const dir = await agentWith({
+		"gate-only.md": "---\nname: gate-only\ndescription: a doc that shadows the flow\n---\n\nProse.\n",
+		"gate-only.yaml": GATE_ONLY,
+	});
+	try {
+		const r = await runFlow({ agentDir: dir, flow: "gate-only", approve: "auto" });
+		assert.equal(r.completed, true); // resolved the YAML, not the markdown
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
 test("a markdown reference workflow is rejected as not runnable", async () => {
 	const dir = await agentWith({
 		"notes.md": "---\nname: notes\ndescription: just a reference doc\n---\n\nSome prose.\n",

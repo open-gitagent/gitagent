@@ -80,7 +80,13 @@ async function resolveFlow(agentDir: string, flow: string | SkillFlowDefinition)
 	if (typeof flow !== "string") return flow;
 
 	const workflows = await discoverWorkflows(agentDir);
-	const meta = workflows.find((w) => w.name === flow);
+	// Prefer a runnable flow: a name can collide across formats (notes.md and
+	// notes.yaml both discover as "notes"), and readdir order is filesystem
+	// dependent, so an unfiltered find could return the markdown one and report
+	// "not runnable" for a flow that exists. The second lookup is only so the
+	// error below can say "that's a reference workflow" instead of "not found".
+	const meta = workflows.find((w) => w.name === flow && w.type === "flow")
+		?? workflows.find((w) => w.name === flow);
 
 	if (!meta) {
 		const runnable = workflows.filter((w) => w.type === "flow").map((w) => w.name);

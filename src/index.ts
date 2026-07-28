@@ -862,8 +862,10 @@ async function main(): Promise<void> {
 			}
 
 			// SkillFlow trigger: @flow-name [input]. Anchored to the start of the
-			// line so an @mention or email address mid-sentence can't fire a flow.
-			const flowMatch = trimmed.match(/^@([a-z0-9]+(?:-[a-z0-9]+)*)\b\s*([\s\S]*)$/);
+			// line so an @mention or email address mid-sentence can't fire a flow,
+			// and the name must be followed by whitespace or end-of-line — a bare
+			// \b would let "@daily-report.com" fire the flow with input ".com".
+			const flowMatch = trimmed.match(/^@([a-z0-9]+(?:-[a-z0-9]+)*)(?=\s|$)\s*([\s\S]*)$/);
 			if (flowMatch) {
 				try {
 					await runFlowInRepl(flowMatch[1], flowMatch[2].trim());
