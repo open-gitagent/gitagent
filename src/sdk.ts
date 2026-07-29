@@ -132,10 +132,10 @@ export function query(options: QueryOptions): Query {
 	// Async initialization + run
 	const runPromise = (async () => {
 		try {
-		if (options.timeoutMs !== undefined &&
-			(!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)) {
-			throw new Error("timeoutMs must be a finite number greater than zero");
-		}
+			if (options.timeoutMs !== undefined &&
+				(!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)) {
+				throw new Error("timeoutMs must be a finite number greater than zero");
+			}
 
 		// Validate mutually exclusive options
 		if (options.repo && options.sandbox) {
