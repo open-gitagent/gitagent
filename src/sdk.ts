@@ -327,7 +327,6 @@ export function query(options: QueryOptions): Query {
 		const forwardAbort = () => agent.abort();
 		ac.signal.addEventListener("abort", forwardAbort, { once: true });
 		removeAbortForwarder = () => ac.signal.removeEventListener("abort", forwardAbort);
-		if (ac.signal.aborted) agent.abort();
 
 		const promptWithTimeout = async (prompt: string) => {
 			if (ac.signal.aborted) return;
@@ -519,11 +518,32 @@ export function query(options: QueryOptions): Query {
 			}
 		});
 
+		const emitAbortedResponse = () => {
+			pushMsg({
+				type: "assistant",
+				content: "",
+				model: (loaded.model as any).id ?? "unknown",
+				provider: (loaded.model as any).provider ?? "unknown",
+				stopReason: "aborted",
+				usage: {
+					inputTokens: 0,
+					outputTokens: 0,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+					totalTokens: 0,
+					costUsd: 0,
+				},
+			});
+		};
+
 		// 10. Send prompt — run inside the session span's context so that
 		// gen_ai.chat and gitagent.tool.execute spans become children of
 		// gitagent.agent.session.
 		if (typeof options.prompt === "string") {
-			if (ac.signal.aborted) return;
+			if (ac.signal.aborted) {
+				emitAbortedResponse();
+				return;
+			}
 			// Fire pre_query hook before sending to LLM
 			if (hooksConfig?.hooks.pre_query) {
 				const result = await runHooks(hooksConfig.hooks.pre_query, loaded.agentDir, {
@@ -546,7 +566,10 @@ export function query(options: QueryOptions): Query {
 		} else {
 			// Multi-turn: iterate the async iterable
 			for await (const userMsg of options.prompt) {
-				if (ac.signal.aborted) return;
+				if (ac.signal.aborted) {
+					emitAbortedResponse();
+					return;
+				}
 				pushMsg({ type: "user", content: userMsg.content });
 				// Fire pre_query hook for each turn
 				if (hooksConfig?.hooks.pre_query) {
@@ -583,6 +606,9 @@ export function query(options: QueryOptions): Query {
 		// Ensure channel finishes even if no agent_end event
 		channel.finish();
 		} finally {
+			// Close the channel on every exit path, including abort and hook-block
+			// returns that happen before the normal completion call.
+			channel.finish();
 			removeAbortForwarder?.();
 			removeAbortForwarder = undefined;
 			// Tear down MCP servers on every exit path — success, hook-block
