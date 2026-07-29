@@ -10,5 +10,6 @@ tools:
   - read
   - write
   - memory
+  - web_search
 runtime:
   max_turns: 56

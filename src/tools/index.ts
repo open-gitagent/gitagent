@@ -9,6 +9,7 @@ import { createMemoryTool } from "./memory.js";
 import { createTaskTrackerTool } from "./task-tracker.js";
 import { createSkillLearnerTool } from "./skill-learner.js";
 import { createCapturePhotoTool } from "./capture-photo.js";
+import { createWebSearchTool } from "./web-search.js";
 import { createSandboxCliTool } from "./sandbox-cli.js";
 import { createSandboxReadTool } from "./sandbox-read.js";
 import { createSandboxWriteTool } from "./sandbox-write.js";
@@ -24,7 +25,7 @@ export interface BuiltinToolsConfig {
 }
 
 /**
- * Create the built-in tools (cli, read, write, memory, task_tracker, skill_learner).
+ * Create the built-in tools (cli, read, write, edit, memory, capture_photo, web_search, task_tracker, skill_learner).
  * If a SandboxContext is provided, returns sandbox-backed tools;
  * otherwise returns the standard local tools.
  */
@@ -46,6 +47,7 @@ export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[]
 		createEditTool(config.dir),
 		createMemoryTool(config.dir, config.pluginMemoryLayers),
 		createCapturePhotoTool(config.dir),
+		createWebSearchTool(),
 	];
 
 	// Add learning tools if gitagentDir is available
