@@ -251,6 +251,16 @@ describe("query()", () => {
 				clearTimeout(deadlineTimer!);
 			}
 			assert.ok(messages.some((m) => m.type === "system"));
+			const assistantMessages = messages.filter((m) => m.type === "assistant");
+			assert.equal(messages.some((m) => m.type === "delta"), false);
+			assert.equal(assistantMessages.length, 1);
+			assert.equal(assistantMessages[0].stopReason, "aborted");
+			assert.equal(assistantMessages[0].usage.totalTokens, 0);
+			assert.equal(
+				assistantMessages[0].content,
+				"",
+				"a pre-aborted query must not produce model content",
+			);
 		} finally {
 			rmSync(agentDir, { recursive: true, force: true });
 		}

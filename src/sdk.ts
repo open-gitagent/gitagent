@@ -92,11 +92,9 @@ export function query(options: QueryOptions): Query {
 	const collectedMessages: GCMessage[] = [];
 	const ac = options.abortController ?? new AbortController();
 	const costTracker = new CostTracker();
-	let activeAgent: Agent | undefined;
 	let removeAbortForwarder: (() => void) | undefined;
 	const abortQuery = () => {
 		ac.abort();
-		activeAgent?.abort();
 	};
 
 	// These are set once the agent is loaded (async init below)
@@ -326,13 +324,13 @@ export function query(options: QueryOptions): Query {
 				...modelOptions,
 			},
 		});
-		activeAgent = agent;
 		const forwardAbort = () => agent.abort();
 		ac.signal.addEventListener("abort", forwardAbort, { once: true });
 		removeAbortForwarder = () => ac.signal.removeEventListener("abort", forwardAbort);
 		if (ac.signal.aborted) agent.abort();
 
 		const promptWithTimeout = async (prompt: string) => {
+			if (ac.signal.aborted) return;
 			const timer = options.timeoutMs === undefined
 				? undefined
 				: setTimeout(abortQuery, options.timeoutMs);
@@ -525,6 +523,7 @@ export function query(options: QueryOptions): Query {
 		// gen_ai.chat and gitagent.tool.execute spans become children of
 		// gitagent.agent.session.
 		if (typeof options.prompt === "string") {
+			if (ac.signal.aborted) return;
 			// Fire pre_query hook before sending to LLM
 			if (hooksConfig?.hooks.pre_query) {
 				const result = await runHooks(hooksConfig.hooks.pre_query, loaded.agentDir, {
@@ -547,6 +546,7 @@ export function query(options: QueryOptions): Query {
 		} else {
 			// Multi-turn: iterate the async iterable
 			for await (const userMsg of options.prompt) {
+				if (ac.signal.aborted) return;
 				pushMsg({ type: "user", content: userMsg.content });
 				// Fire pre_query hook for each turn
 				if (hooksConfig?.hooks.pre_query) {
@@ -585,7 +585,6 @@ export function query(options: QueryOptions): Query {
 		} finally {
 			removeAbortForwarder?.();
 			removeAbortForwarder = undefined;
-			activeAgent = undefined;
 			// Tear down MCP servers on every exit path — success, hook-block
 			// early-return, abort, and error (this finally runs before the
 			// .catch() handler below). cleanup() is idempotent.
