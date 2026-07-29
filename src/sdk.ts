@@ -327,7 +327,25 @@ export function query(options: QueryOptions): Query {
 		const forwardAbort = () => agent.abort();
 		ac.signal.addEventListener("abort", forwardAbort, { once: true });
 		removeAbortForwarder = () => ac.signal.removeEventListener("abort", forwardAbort);
-		if (ac.signal.aborted) agent.abort();
+		if (ac.signal.aborted) {
+			pushMsg({
+				type: "system",
+				subtype: "session_start",
+				content: `Agent ${loaded.manifest.name} started`,
+				metadata: { sessionId: _sessionId },
+			});
+			pushMsg({
+				type: "assistant",
+				content: "",
+				thinking: "",
+				model: "unknown",
+				provider: "",
+				stopReason: "aborted",
+				usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, costUsd: 0 },
+			});
+			channel.finish();
+			return;
+		}
 
 		const promptWithTimeout = async (prompt: string) => {
 			if (ac.signal.aborted) return;
@@ -523,7 +541,7 @@ export function query(options: QueryOptions): Query {
 		// gen_ai.chat and gitagent.tool.execute spans become children of
 		// gitagent.agent.session.
 		if (typeof options.prompt === "string") {
-			if (ac.signal.aborted) return;
+			if (ac.signal.aborted) { channel.finish(); return; }
 			// Fire pre_query hook before sending to LLM
 			if (hooksConfig?.hooks.pre_query) {
 				const result = await runHooks(hooksConfig.hooks.pre_query, loaded.agentDir, {
