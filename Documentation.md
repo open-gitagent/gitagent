@@ -163,8 +163,8 @@ description: A description of what this agent does
 model:
   preferred: "anthropic:claude-sonnet-4-6"
   fallback:
-    - "openai:gpt-4o"
-    - "google:gemini-2.0-flash-001"
+    - "openai:gpt-4.1-mini"
+    - "google:gemini-2.5-flash"
   constraints:
     temperature: 0.7
     max_tokens: 4096
@@ -202,7 +202,7 @@ dependencies:
 # Sub-agents (optional)
 agents:
   researcher:
-    model: "anthropic:claude-haiku-4-5-20251001"
+    model: "anthropic:claude-haiku-4-5"
     tools: [read, cli]
 
 delegation:
@@ -263,11 +263,11 @@ GitAgent supports any model from the following providers out of the box:
 | Provider | Format | API Key Env Var |
 |----------|--------|-----------------|
 | Anthropic | `anthropic:claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
-| OpenAI | `openai:gpt-4o` | `OPENAI_API_KEY` |
-| Google | `google:gemini-2.0-flash-001` | `GEMINI_API_KEY` |
+| OpenAI | `openai:gpt-4.1-mini` | `OPENAI_API_KEY` |
+| Google | `google:gemini-2.5-flash` | `GEMINI_API_KEY` |
 | Groq | `groq:llama-3.3-70b-versatile` | `GROQ_API_KEY` |
-| xAI | `xai:grok-2-1212` | `XAI_API_KEY` |
-| Mistral | `mistral:mistral-large-latest` | `MISTRAL_API_KEY` |
+| xAI | `xai:grok-3` | `XAI_API_KEY` |
+| Mistral | `mistral:mistral-large-2512` | `MISTRAL_API_KEY` |
 | OpenRouter | `openrouter:anthropic/claude-3.5-sonnet` | `OPENROUTER_API_KEY` |
 | Cerebras | `cerebras:llama3.1-70b` | `CEREBRAS_API_KEY` |
 | DeepSeek | `deepseek:deepseek-chat` | `DEEPSEEK_API_KEY` |
@@ -361,7 +361,7 @@ GitAgent supports real-time bidirectional voice via two adapters:
 
 ### Gemini Live
 
-- Model: `gemini-2.0-flash`
+- Model: `gemini-2.5-flash`
 - Alternative voice provider
 - Free tier available
 - Requires: `GEMINI_API_KEY`

@@ -132,7 +132,7 @@ gitagent --repo https://github.com/org/repo "Add unit tests"
 | `--repo <url>` | `-r` | GitHub repo URL to clone and work on |
 | `--pat <token>` | | GitHub PAT (or set `GITHUB_TOKEN` / `GIT_TOKEN`) |
 | `--session <branch>` | | Resume an existing session branch |
-| `--model <provider:model>` | `-m` | Override model (e.g. `anthropic:claude-sonnet-4-5-20250929`) |
+| `--model <provider:model>` | `-m` | Override model (e.g. `anthropic:claude-sonnet-4-6`) |
 | `--sandbox` | `-s` | Run in sandbox VM |
 | `--prompt <text>` | `-p` | Single-shot prompt (skip REPL) |
 | `--env <name>` | `-e` | Environment config |
@@ -146,7 +146,7 @@ import { query } from "gitagent";
 for await (const msg of query({
   prompt: "List all TypeScript files and summarize them",
   dir: "./my-agent",
-  model: "openai:gpt-4o-mini",
+  model: "openai:gpt-4.1-mini",
 })) {
   if (msg.type === "delta") process.stdout.write(msg.content);
   if (msg.type === "assistant") console.log("\n\nDone.");
@@ -155,7 +155,7 @@ for await (const msg of query({
 // Local repo mode via SDK
 for await (const msg of query({
   prompt: "Fix the login bug",
-  model: "openai:gpt-4o-mini",
+  model: "openai:gpt-4.1-mini",
   repo: {
     url: "https://github.com/org/repo",
     token: process.env.GITHUB_TOKEN!,
@@ -179,7 +179,7 @@ import { query } from "gitagent";
 for await (const msg of query({
   prompt: "Refactor the auth module",
   dir: "/path/to/agent",
-  model: "anthropic:claude-sonnet-4-5-20250929",
+  model: "anthropic:claude-sonnet-4-6",
 })) {
   switch (msg.type) {
     case "delta":       // streaming text chunk
@@ -336,8 +336,8 @@ version: 1.0.0
 description: An agent that does things
 
 model:
-  preferred: "anthropic:claude-sonnet-4-5-20250929"
-  fallback: ["openai:gpt-4o"]
+  preferred: "anthropic:claude-sonnet-4-6"
+  fallback: ["openai:gpt-4.1-mini"]
   constraints:
     temperature: 0.7
     max_tokens: 4096
@@ -678,10 +678,10 @@ Gitagent works with any LLM provider supported by [pi-ai](https://github.com/bad
 ```yaml
 # agent.yaml
 model:
-  preferred: "anthropic:claude-sonnet-4-5-20250929"
+  preferred: "anthropic:claude-sonnet-4-6"
   fallback:
-    - "openai:gpt-4o"
-    - "google:gemini-2.0-flash"
+    - "openai:gpt-4.1-mini"
+    - "google:gemini-2.5-flash"
 ```
 
 Supported providers: `anthropic`, `openai`, `google`, `xai`, `groq`, `mistral`, and more.
@@ -861,7 +861,7 @@ export OPENAI_API_KEY="sk-..."
 - Anthropic (Claude models via native SDK)
 - Any OpenAI-compatible provider
 
-Use `--model` flag to override: `gitagent --model anthropic:claude-sonnet-4-5-20250929`
+Use `--model` flag to override: `gitagent --model anthropic:claude-sonnet-4-6`
 
 ### Core Concepts
 
@@ -869,7 +869,7 @@ Use `--model` flag to override: `gitagent --model anthropic:claude-sonnet-4-5-20
 The SDK provides programmatic access via `query()` function that streams agent events:
 ```typescript
 import { query } from "gitagent";
-for await (const msg of query({ prompt: "hello", model: "openai:gpt-4o-mini" })) {
+for await (const msg of query({ prompt: "hello", model: "openai:gpt-4.1-mini" })) {
   if (msg.type === "delta") process.stdout.write(msg.content);
 }
 ```

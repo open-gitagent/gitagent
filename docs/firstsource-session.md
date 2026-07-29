@@ -176,7 +176,7 @@ description: First Source's GitAgent connected to Lyzr Studio
 model:
   preferred: "lyzr:agent-abc123xyz@https://agent-prod.studio.lyzr.ai/v4"
   fallback:
-    - "openai:gpt-4o"   # optional fallback if Studio is unreachable
+    - "openai:gpt-4.1-mini"   # optional fallback if Studio is unreachable
 
 tools:
   - cli
@@ -237,10 +237,10 @@ description: Customer support agent for First Source
 
 # Model configuration
 model:
-  preferred: "anthropic:claude-sonnet-4-5-20250929"
+  preferred: "anthropic:claude-sonnet-4-6"
   fallback:
-    - "openai:gpt-4o"
-    - "google:gemini-2.0-flash"
+    - "openai:gpt-4.1-mini"
+    - "google:gemini-2.5-flash"
 
 # Built-in tools to enable
 tools:
@@ -281,13 +281,13 @@ agents:
 
 ```yaml
 # Anthropic
-preferred: "anthropic:claude-sonnet-4-5-20250929"
+preferred: "anthropic:claude-sonnet-4-6"
 
 # OpenAI
-preferred: "openai:gpt-4o"
+preferred: "openai:gpt-4.1-mini"
 
 # Google
-preferred: "google:gemini-2.0-flash"
+preferred: "google:gemini-2.5-flash"
 
 # Groq (fast inference)
 preferred: "groq:llama-3.3-70b-versatile"
@@ -1012,9 +1012,9 @@ version: 0.1.0
 description: My First Source GitAgent
 
 model:
-  preferred: "anthropic:claude-sonnet-4-5-20250929"   # or your preferred provider
+  preferred: "anthropic:claude-sonnet-4-6"   # or your preferred provider
   fallback:
-    - "openai:gpt-4o"
+    - "openai:gpt-4.1-mini"
 
 tools:
   - cli
@@ -1129,7 +1129,7 @@ import { query } from "gitagent";
 for await (const msg of query({
   prompt: `Review PR #${process.env.PR_NUMBER} for security issues`,
   dir: "./agent",
-  model: "anthropic:claude-sonnet-4-5-20250929",
+  model: "anthropic:claude-sonnet-4-6",
   allowedTools: ["read", "cli"],   // restrict for CI
 })) {
   if (msg.type === "assistant") console.log(msg.content);
@@ -1180,7 +1180,7 @@ npm install -g @open-gitagent/gitagent @open-gitagent/voice
 # Run
 gitagent "prompt"                                    # run in current dir
 gitagent --dir ~/my-agent "prompt"                   # specific dir
-gitagent --model anthropic:claude-sonnet-4-5-20250929 "prompt"   # override model
+gitagent --model anthropic:claude-sonnet-4-6 "prompt"   # override model
 gitagent --voice                                     # open web UI at localhost:3333
 gitagent --sandbox "prompt"                          # run in isolated VM
 

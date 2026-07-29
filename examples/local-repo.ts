@@ -21,7 +21,7 @@ async function main() {
 
 	const stream = query({
 		prompt: "Read the README and summarize what this project does.",
-		model: "openai:gpt-4o-mini",
+		model: "openai:gpt-4.1-mini",
 		repo: {
 			url: REPO_URL,
 			token: TOKEN,
