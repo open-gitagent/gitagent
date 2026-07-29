@@ -99,6 +99,7 @@ export async function summarizeHistory(agentDir: string, branch: string): Promis
 			prompt,
 			dir: agentDir,
 			maxTurns: 1,
+			timeoutMs: 30_000,
 			replaceBuiltinTools: true,
 			tools: [],
 			systemPrompt: "You are a concise summarizer. Output only the summary, nothing else.",

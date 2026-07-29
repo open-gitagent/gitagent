@@ -92,6 +92,12 @@ export function query(options: QueryOptions): Query {
 	const collectedMessages: GCMessage[] = [];
 	const ac = options.abortController ?? new AbortController();
 	const costTracker = new CostTracker();
+	let activeAgent: Agent | undefined;
+	let removeAbortForwarder: (() => void) | undefined;
+	const abortQuery = () => {
+		ac.abort();
+		activeAgent?.abort();
+	};
 
 	// These are set once the agent is loaded (async init below)
 	let _sessionId = options.sessionId ?? "";
@@ -128,6 +134,11 @@ export function query(options: QueryOptions): Query {
 	// Async initialization + run
 	const runPromise = (async () => {
 		try {
+		if (options.timeoutMs !== undefined &&
+			(!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)) {
+			throw new Error("timeoutMs must be a finite number greater than zero");
+		}
+
 		// Validate mutually exclusive options
 		if (options.repo && options.sandbox) {
 			throw new Error("repo and sandbox options are mutually exclusive");
@@ -315,6 +326,22 @@ export function query(options: QueryOptions): Query {
 				...modelOptions,
 			},
 		});
+		activeAgent = agent;
+		const forwardAbort = () => agent.abort();
+		ac.signal.addEventListener("abort", forwardAbort, { once: true });
+		removeAbortForwarder = () => ac.signal.removeEventListener("abort", forwardAbort);
+		if (ac.signal.aborted) agent.abort();
+
+		const promptWithTimeout = async (prompt: string) => {
+			const timer = options.timeoutMs === undefined
+				? undefined
+				: setTimeout(abortQuery, options.timeoutMs);
+			try {
+				await otelContext.with(_session.ctx, () => agent.prompt(prompt));
+			} finally {
+				if (timer !== undefined) clearTimeout(timer);
+			}
+		};
 
 		// 9. Subscribe to events and map to GCMessage
 		agent.subscribe((event: AgentEvent) => {
@@ -515,9 +542,8 @@ export function query(options: QueryOptions): Query {
 					return;
 				}
 			}
-			await otelContext.with(_session.ctx, () =>
-				agent.prompt(options.prompt as string),
-			);
+			await promptWithTimeout(options.prompt as string);
+			if (ac.signal.aborted) return;
 		} else {
 			// Multi-turn: iterate the async iterable
 			for await (const userMsg of options.prompt) {
@@ -539,9 +565,8 @@ export function query(options: QueryOptions): Query {
 						return;
 					}
 				}
-				await otelContext.with(_session.ctx, () =>
-					agent.prompt(userMsg.content),
-				);
+				await promptWithTimeout(userMsg.content);
+				if (ac.signal.aborted) return;
 			}
 		}
 
@@ -558,6 +583,9 @@ export function query(options: QueryOptions): Query {
 		// Ensure channel finishes even if no agent_end event
 		channel.finish();
 		} finally {
+			removeAbortForwarder?.();
+			removeAbortForwarder = undefined;
+			activeAgent = undefined;
 			// Tear down MCP servers on every exit path — success, hook-block
 			// early-return, abort, and error (this finally runs before the
 			// .catch() handler below). cleanup() is idempotent.
@@ -604,7 +632,7 @@ export function query(options: QueryOptions): Query {
 	// Build the Query object (AsyncGenerator + helpers)
 	const generator: Query = {
 		abort() {
-			ac.abort();
+			abortQuery();
 		},
 
 		steer(_message: string) {
