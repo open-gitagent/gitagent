@@ -1,5 +1,8 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 // Dynamic imports since the project is ESM
 let query: typeof import("../dist/exports.js").query;
@@ -204,6 +207,55 @@ describe("wrapToolWithProgrammaticHooks()", () => {
 // ── query() error handling ─────────────────────────────────────────────
 
 describe("query()", () => {
+	it("reports invalid timeout values without loading an agent", async () => {
+		const messages: any[] = [];
+		for await (const msg of query({
+			prompt: "hello",
+			dir: "/nonexistent/path",
+			timeoutMs: 0,
+		})) {
+			messages.push(msg);
+		}
+
+		const errorMsg = messages.find((m) => m.type === "system" && m.subtype === "error");
+		assert.match(errorMsg?.content ?? "", /timeoutMs must be a finite number greater than zero/);
+	});
+
+	it("honors an already-aborted controller before starting the model", async () => {
+		const agentDir = mkdtempSync(join(tmpdir(), "gitagent-abort-"));
+		try {
+			writeFileSync(join(agentDir, "agent.yaml"), `spec_version: "1.0"\nname: test\nversion: "1.0.0"\ndescription: test\nmodel:\n  preferred: openai:gpt-4o-mini\n  fallback: []\ntools: []\nruntime:\n  max_turns: 1\n`);
+			const controller = new AbortController();
+			controller.abort();
+			const messages: any[] = [];
+			const drain = (async () => {
+				for await (const msg of query({
+					prompt: "hello",
+					dir: agentDir,
+					abortController: controller,
+					timeoutMs: 100,
+				})) {
+					messages.push(msg);
+				}
+			})();
+			let deadlineTimer: ReturnType<typeof setTimeout>;
+			const deadline = new Promise((_, reject) => {
+				deadlineTimer = setTimeout(
+					() => reject(new Error("aborted query did not settle")),
+					2000,
+				);
+			});
+			try {
+				await Promise.race([drain, deadline]);
+			} finally {
+				clearTimeout(deadlineTimer!);
+			}
+			assert.ok(messages.some((m) => m.type === "system"));
+		} finally {
+			rmSync(agentDir, { recursive: true, force: true });
+		}
+	});
+
 	it("emits error system message when agent dir is invalid", async () => {
 		const messages: any[] = [];
 		for await (const msg of query({
