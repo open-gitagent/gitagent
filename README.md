@@ -766,7 +766,7 @@ import { initTelemetry, shutdownTelemetry, query } from "gitagent";
 
 await initTelemetry({ serviceName: "my-app" });
 
-for await (const msg of query({ prompt: "hello", model: "anthropic:claude-4-6-sonnet-latest" })) {
+for await (const msg of query({ prompt: "hello", model: "anthropic:claude-sonnet-4-6" })) {
   // …
 }
 
