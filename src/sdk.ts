@@ -535,13 +535,23 @@ export function query(options: QueryOptions): Query {
 				},
 			});
 		};
+		const finishAbortedQuery = () => {
+			emitAbortedResponse();
+			channel.finish();
+		};
 
 		// 10. Send prompt — run inside the session span's context so that
 		// gen_ai.chat and gitagent.tool.execute spans become children of
 		// gitagent.agent.session.
 		if (typeof options.prompt === "string") {
 			if (ac.signal.aborted) {
-				emitAbortedResponse();
+				pushMsg({
+					type: "system",
+					subtype: "session_start",
+					content: `Agent ${loaded.manifest.name} initialized`,
+					metadata: { sessionId: _sessionId },
+				});
+				finishAbortedQuery();
 				return;
 			}
 			// Fire pre_query hook before sending to LLM
@@ -562,12 +572,15 @@ export function query(options: QueryOptions): Query {
 				}
 			}
 			await promptWithTimeout(options.prompt as string);
-			if (ac.signal.aborted) return;
+			if (ac.signal.aborted) {
+				finishAbortedQuery();
+				return;
+			}
 		} else {
 			// Multi-turn: iterate the async iterable
 			for await (const userMsg of options.prompt) {
 				if (ac.signal.aborted) {
-					emitAbortedResponse();
+					finishAbortedQuery();
 					return;
 				}
 				pushMsg({ type: "user", content: userMsg.content });
@@ -589,7 +602,10 @@ export function query(options: QueryOptions): Query {
 					}
 				}
 				await promptWithTimeout(userMsg.content);
-				if (ac.signal.aborted) return;
+				if (ac.signal.aborted) {
+					finishAbortedQuery();
+					return;
+				}
 			}
 		}
 
@@ -606,9 +622,6 @@ export function query(options: QueryOptions): Query {
 		// Ensure channel finishes even if no agent_end event
 		channel.finish();
 		} finally {
-			// Close the channel on every exit path, including abort and hook-block
-			// returns that happen before the normal completion call.
-			channel.finish();
 			removeAbortForwarder?.();
 			removeAbortForwarder = undefined;
 			// Tear down MCP servers on every exit path — success, hook-block
