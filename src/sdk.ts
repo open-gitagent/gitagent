@@ -9,6 +9,7 @@ import type { SandboxContext } from "./sandbox.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
 import { toAgentTool } from "./tool-utils.js";
+import { setupA2A } from "./a2a/manager.js";
 import { setupMcp } from "./mcp/manager.js";
 import type { McpSetupResult } from "./mcp/types.js";
 import { wrapToolWithProgrammaticHooks } from "./sdk-hooks.js";
@@ -114,6 +115,12 @@ export function query(options: QueryOptions): Query {
 	let mcpSetup: McpSetupResult | undefined;
 	// Local session (hoisted for cleanup in catch)
 	let localSession: LocalSession | undefined;
+	// A2A connection teardown (hoisted for cleanup on success + error paths)
+	let a2aCleanup: (() => Promise<void>) | null = null;
+	const runA2ACleanup = async () => {
+		if (!a2aCleanup) return;
+		try { await a2aCleanup(); } catch { /* best-effort */ }
+	};
 
 	// OpenTelemetry session span — opened immediately so it covers agent
 	// load + prompt + cleanup. Closed in the IIFE's finally so every exit
@@ -191,6 +198,17 @@ export function query(options: QueryOptions): Query {
 		// Declarative tools from tools/*.yaml
 		const declarativeTools = await loadDeclarativeTools(loaded.agentDir);
 		tools = [...tools, ...declarativeTools];
+
+		// A2A remote-agent tools — outbound only, opt-in. Sourced from the
+		// manifest's `a2a_agents` and/or the `a2aAgents` option (option wins on
+		// key collision), so SDK users can define agents purely in code.
+		const a2aAgents =
+			(loaded.manifest.a2a_agents || options.a2aAgents)
+				? { ...loaded.manifest.a2a_agents, ...options.a2aAgents }
+				: undefined;
+		const a2aSetup = await setupA2A(a2aAgents, new Set(tools.map((t) => t.name)));
+		tools = [...tools, ...a2aSetup.tools];
+		a2aCleanup = a2aSetup.cleanup;
 
 		// Plugin tools (declarative + programmatic) — check for collisions with existing tools
 		const existingToolNames = new Set(tools.map((t) => t.name));
@@ -545,6 +563,9 @@ export function query(options: QueryOptions): Query {
 			}
 		}
 
+		// Tear down A2A connections
+		await runA2ACleanup();
+
 		// Finalize local session if active
 		if (localSession) {
 			try { localSession.finalize(); } catch { /* best-effort */ }
@@ -574,6 +595,9 @@ export function query(options: QueryOptions): Query {
 			}
 		}
 	})().catch(async (err) => {
+		// Tear down A2A connections on error
+		await runA2ACleanup();
+
 		// Finalize local session on error
 		if (localSession) {
 			try { localSession.finalize(); } catch { /* best-effort */ }

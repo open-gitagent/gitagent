@@ -607,6 +607,23 @@ my-plugin/
 └── index.ts             # Programmatic entry point
 ```
 
+## A2A Client
+
+Let gitagent **call other AI agents** that speak the [A2A (Agent2Agent) protocol](https://a2a-protocol.org) — the Linux Foundation interop standard. gitagent delegates a task to a remote agent (LangGraph, CrewAI, Google ADK, …) and uses the result. It's **outbound-only — no server runs** — and fully opt-in.
+
+Add remote agents to `agent.yaml`:
+
+```yaml
+a2a_agents:
+  research-agent:
+    url: https://research.example.com
+    headers:
+      Authorization: "Bearer ${RESEARCH_TOKEN}"   # ${VAR} interpolated
+    stream: true                                   # SSE streaming when supported (default)
+```
+
+At startup gitagent fetches each agent's **Agent Card** and exposes every skill as a tool named `<agent>__<skill>`. The model calls it like any other tool; failed connections are skipped with a warning. See [Documentation.md → A2A Client](Documentation.md#a2a-client) for details.
+
 ## MCP (Model Context Protocol)
 
 Gitagent is an **MCP client**: point it at any [MCP server](https://modelcontextprotocol.io) and that server's tools are automatically discovered and made available to the agent — no integration code to write. This unlocks the whole ecosystem of ready-made servers (filesystem, GitHub, Postgres, Slack, fetch, …).

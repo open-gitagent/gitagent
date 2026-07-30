@@ -13,6 +13,7 @@ import type { HooksConfig } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
 import { setupMcp } from "./mcp/manager.js";
 import { toAgentTool } from "./tool-utils.js";
+import { setupA2A } from "./a2a/manager.js";
 import { AuditLogger, isAuditEnabled } from "./audit.js";
 import { formatComplianceWarnings } from "./compliance.js";
 import { readFile, mkdir, writeFile, stat, access } from "fs/promises";
@@ -40,6 +41,20 @@ const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
+
+// Teardown for A2A connections, set during agent assembly. Module-scoped so the
+// SIGTERM handler (outside main()) can reach it. No-op until A2A is configured.
+let a2aCleanup: (() => Promise<void>) | null = null;
+const runA2ACleanup = async () => {
+	if (!a2aCleanup) return;
+	const fn = a2aCleanup;
+	a2aCleanup = null;
+	try {
+		await fn();
+	} catch {
+		/* best-effort — never block exit */
+	}
+};
 
 interface ParsedArgs {
 	model?: string;
@@ -543,6 +558,12 @@ async function main(): Promise<void> {
 	const declarativeTools = await loadDeclarativeTools(agentDir);
 	tools = [...tools, ...declarativeTools];
 
+	// A2A remote-agent tools (manifest-declared) — outbound only, no server.
+	// Each remote skill becomes a tool; failed connections warn and are skipped.
+	const a2aSetup = await setupA2A(manifest.a2a_agents, new Set(tools.map((t) => t.name)));
+	tools = [...tools, ...a2aSetup.tools];
+	a2aCleanup = a2aSetup.cleanup;
+
 	// Plugin tools (declarative + programmatic) — check for collisions with existing tools
 	const existingToolNames = new Set(tools.map((t) => t.name));
 	for (const plugin of loaded.plugins) {
@@ -656,6 +677,7 @@ async function main(): Promise<void> {
 			}
 			throw err;
 		} finally {
+			await runA2ACleanup();
 			await mcpSetup.cleanup().catch(() => {});
 			if (localSession) {
 				console.log(dim("Finalizing session..."));
@@ -691,6 +713,7 @@ async function main(): Promise<void> {
 
 			if (trimmed === "/quit" || trimmed === "/exit") {
 				rl.close();
+				await runA2ACleanup();
 				await mcpSetup.cleanup().catch(() => {});
 				if (localSession) {
 					console.log(dim("Finalizing session..."));
@@ -843,7 +866,9 @@ async function main(): Promise<void> {
 			try {
 				_session.end({ "gitagent.cost_usd": _totalCostUsd });
 			} catch { /* ignore */ }
-			Promise.all([mcpSetup.cleanup(), stopSandbox()]).finally(() => process.exit(0));
+			Promise.all([runA2ACleanup(), mcpSetup.cleanup().catch(() => {})])
+				.finally(() => shutdownTelemetry().catch(() => {}))
+				.finally(() => stopSandbox().finally(() => process.exit(0)));
 		}
 	});
 
@@ -852,7 +877,9 @@ async function main(): Promise<void> {
 
 // Flush OpenTelemetry exporters on SIGTERM. No-op when telemetry is disabled.
 process.on("SIGTERM", () => {
-	shutdownTelemetry().catch(() => {}).finally(() => process.exit(0));
+	runA2ACleanup()
+		.finally(() => shutdownTelemetry().catch(() => {}))
+		.finally(() => process.exit(0));
 });
 
 main()
