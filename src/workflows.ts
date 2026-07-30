@@ -55,7 +55,7 @@ export async function discoverWorkflows(agentDir: string): Promise<WorkflowMetad
 			try {
 				const raw = await readFile(filePath, "utf-8");
 				const data = yaml.load(raw) as Record<string, any>;
-				if (data?.name) {
+				if (data?.name && KEBAB_RE.test(String(data.name))) {
 					const isFlow = Array.isArray(data.steps) && data.steps.length > 0;
 					workflows.push({
 						name: data.name,
@@ -137,6 +137,9 @@ export async function saveFlowDefinition(agentDir: string, flow: SkillFlowDefini
 }
 
 export async function deleteFlowDefinition(agentDir: string, name: string): Promise<void> {
+	if (!KEBAB_RE.test(name)) {
+		throw new Error("Flow name must be kebab-case (e.g. my-flow-name)");
+	}
 	const filePath = join(agentDir, "workflows", `${name}.yaml`);
 	await unlink(filePath);
 }

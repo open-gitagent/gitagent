@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from "fs/promises";
-import { join, dirname } from "path";
-import { execSync } from "child_process";
+import { join, dirname, resolve, relative, isAbsolute, sep } from "path";
+import { execFileSync } from "child_process";
 import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { memorySchema, DEFAULT_MEMORY_PATH } from "./shared.js";
@@ -88,7 +88,7 @@ async function archiveOverflow(
 
 	// Try to git add the archive
 	try {
-		execSync(`git add "${archiveFile}"`, { cwd, stdio: "pipe" });
+		execFileSync("git", ["add", archiveFile], { cwd, stdio: "pipe" });
 	} catch {
 		// Not in git, that's fine
 	}
@@ -114,6 +114,15 @@ export function createMemoryTool(cwd: string, pluginLayers?: MemoryLayerDef[]): 
 			const config = await loadMemoryConfig(cwd, pluginLayers);
 			const { path: memoryPath, maxLines } = getWorkingLayer(config);
 			const memoryFile = join(cwd, memoryPath);
+
+			// Path traversal guard: a memory layer's declared path (from memory.yaml
+			// or a plugin manifest — both untrusted config) must stay within cwd.
+			const resolvedMemoryFile = resolve(memoryFile);
+			const allowedBase = resolve(cwd);
+			const rel = relative(allowedBase, resolvedMemoryFile);
+			if (rel !== "" && (rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel))) {
+				throw new Error(`Memory layer path "${memoryPath}" escapes the agent directory`);
+			}
 
 			if (action === "load") {
 				try {
@@ -154,10 +163,8 @@ export function createMemoryTool(cwd: string, pluginLayers?: MemoryLayerDef[]): 
 			await writeFile(memoryFile, finalContent, "utf-8");
 
 			try {
-				execSync(`git add "${memoryPath}" && git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, {
-					cwd,
-					stdio: "pipe",
-				});
+				execFileSync("git", ["add", memoryPath], { cwd, stdio: "pipe" });
+				execFileSync("git", ["commit", "-m", commitMsg], { cwd, stdio: "pipe" });
 			} catch (err: any) {
 				const stderr = err.stderr?.toString() || "";
 				return {

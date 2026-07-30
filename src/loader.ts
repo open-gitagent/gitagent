@@ -1,7 +1,7 @@
 import { readFile, mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { getModel } from "@mariozechner/pi-ai";
 import type { Model } from "@mariozechner/pi-ai";
 import yaml from "js-yaml";
@@ -144,9 +144,12 @@ export interface LoadedAgent {
 	plugins: LoadedPlugin[];
 }
 
+const UNSAFE_MERGE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function deepMerge(base: Record<string, any>, override: Record<string, any>): Record<string, any> {
 	const result = { ...base };
 	for (const key of Object.keys(override)) {
+		if (UNSAFE_MERGE_KEYS.has(key)) continue;
 		if (
 			result[key] &&
 			typeof result[key] === "object" &&
@@ -175,11 +178,14 @@ async function resolveInheritance(
 	await mkdir(depsDir, { recursive: true });
 
 	// Clone parent into .gitagent/deps/
-	const parentName = manifest.extends.split("/").pop()?.replace(/\.git$/, "") || "parent";
+	const rawParentName = manifest.extends.split("/").pop()?.replace(/\.git$/, "") || "parent";
+	// Strip anything that isn't a safe identifier char — handles backslashes,
+	// "..", etc. that could otherwise survive the forward-slash-only split above.
+	const parentName = rawParentName.replace(/[^a-zA-Z0-9_-]/g, "_") || "parent";
 	const parentDir = join(depsDir, parentName);
 
 	try {
-		execSync(`git clone --depth 1 "${manifest.extends}" "${parentDir}" 2>/dev/null || true`, {
+		execFileSync("git", ["clone", "--depth", "1", manifest.extends, parentDir], {
 			cwd: agentDir,
 			stdio: "pipe",
 		});
@@ -223,10 +229,15 @@ async function resolveDependencies(
 	await mkdir(depsDir, { recursive: true });
 
 	for (const dep of manifest.dependencies) {
+		if (!/^[a-zA-Z0-9_-]+$/.test(dep.name)) {
+			console.warn(`Skipping dependency with invalid name "${dep.name}" — only letters, digits, "-", and "_" are allowed`);
+			continue;
+		}
 		const depDir = join(depsDir, dep.name);
 		try {
-			execSync(
-				`git clone --depth 1 --branch "${dep.version}" "${dep.source}" "${depDir}" 2>/dev/null || true`,
+			execFileSync(
+				"git",
+				["clone", "--depth", "1", "--branch", dep.version, dep.source, depDir],
 				{ cwd: agentDir, stdio: "pipe" },
 			);
 		} catch {

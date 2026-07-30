@@ -8,9 +8,12 @@ export interface EnvConfig {
 	[key: string]: any;
 }
 
+const UNSAFE_MERGE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
 function deepMerge(base: Record<string, any>, override: Record<string, any>): Record<string, any> {
 	const result = { ...base };
 	for (const key of Object.keys(override)) {
+		if (UNSAFE_MERGE_KEYS.has(key)) continue;
 		if (
 			result[key] &&
 			typeof result[key] === "object" &&
@@ -47,6 +50,9 @@ export async function loadEnvConfig(agentDir: string, env?: string): Promise<Env
 	const base = await loadYamlFile(join(configDir, "default.yaml"));
 
 	if (envName) {
+		if (!/^[a-zA-Z0-9_-]+$/.test(envName)) {
+			throw new Error(`Invalid environment name "${envName}" — only letters, digits, "-", and "_" are allowed`);
+		}
 		const envOverride = await loadYamlFile(join(configDir, `${envName}.yaml`));
 		return deepMerge(base, envOverride) as EnvConfig;
 	}

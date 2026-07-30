@@ -6,8 +6,11 @@ import { query } from "./sdk.js";
 /** Types we skip — too large or ephemeral */
 const SKIP_TYPES = new Set(["audio_delta", "agent_thinking"]);
 
-function sanitizeBranch(branch: string): string {
-	return branch.replace(/\//g, "__");
+export function sanitizeBranch(branch: string): string {
+	// Allowlist safe filename characters — anything else becomes "__". This
+	// can never yield a path separator ("/" or "\") or a "." segment, so the
+	// result can never traverse outside historyDir, and it is trivial to audit.
+	return branch.replace(/[^a-zA-Z0-9_-]/g, "__");
 }
 
 function historyDir(agentDir: string): string {

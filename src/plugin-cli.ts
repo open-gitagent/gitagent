@@ -135,6 +135,10 @@ async function handleRemove(agentDir: string, args: string[]): Promise<void> {
 		console.error(red("Usage: gitagent plugin remove <name>"));
 		process.exit(1);
 	}
+	if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)) {
+		console.error(red("Plugin name must be kebab-case (e.g., my-plugin)"));
+		process.exit(1);
+	}
 
 	// Try local first, then installed
 	const localDir = join(agentDir, "plugins", name);
