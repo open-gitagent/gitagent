@@ -624,6 +624,70 @@ a2a_agents:
 
 At startup gitagent fetches each agent's **Agent Card** and exposes every skill as a tool named `<agent>__<skill>`. The model calls it like any other tool; failed connections are skipped with a warning. See [Documentation.md → A2A Client](Documentation.md#a2a-client) for details.
 
+## MCP (Model Context Protocol)
+
+Gitagent is an **MCP client**: point it at any [MCP server](https://modelcontextprotocol.io) and that server's tools are automatically discovered and made available to the agent — no integration code to write. This unlocks the whole ecosystem of ready-made servers (filesystem, GitHub, Postgres, Slack, fetch, …).
+
+### Configure servers in `agent.yaml`
+
+```yaml
+mcp_servers:
+  filesystem:                                   # local server over stdio (default)
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/data"]
+    env:
+      LOG_LEVEL: "${MCP_LOG_LEVEL}"             # ${VAR} interpolated from the environment
+    timeoutMs: 30000                            # connect/list timeout (default 30000)
+
+  analytics:                                    # remote server over Streamable HTTP
+    type: http
+    url: "https://mcp.example.com/mcp"
+    headers:
+      Authorization: "Bearer ${ANALYTICS_TOKEN}"
+
+  legacy:                                       # legacy SSE transport (deprecated)
+    type: sse
+    url: "https://old.example.com/sse"
+```
+
+On startup gitagent connects to each server, lists its tools, and registers them as **`<server>__<tool>`** (e.g. `filesystem__read_file`, `analytics__query`). Connections are torn down automatically when the session ends.
+
+| Field | Applies to | Description |
+|---|---|---|
+| `command` / `args` / `env` / `cwd` | stdio | How to launch a local server |
+| `type: http \| sse` + `url` + `headers` | remote | Connect to a remote server |
+| `timeoutMs` | both | Connect + list-tools timeout (default `30000`) |
+
+### Use via the SDK
+
+```typescript
+import { query } from "gitagent";
+
+for await (const msg of query({
+  prompt: "Summarize last week's signups from the database",
+  mcpServers: {
+    postgres: {
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-postgres", process.env.DB_URL!],
+    },
+  },
+})) {
+  if (msg.type === "tool_use") console.log(`calling ${msg.toolName}`);
+}
+```
+
+SDK `mcpServers` are merged with any `agent.yaml` `mcp_servers` (the SDK value wins on a key collision).
+
+### Behavior & guarantees
+
+- **Fail-soft:** a server that can't start (or times out) is logged and skipped — other servers and built-in tools keep working.
+- **Namespaced & sanitized:** tool names are prefixed with the server name and cleaned to satisfy provider naming rules.
+- **Pagination:** servers that paginate their tool list are fully enumerated.
+- **Cleanup:** stdio servers (child processes) are shut down on every exit path (normal, `/quit`, Ctrl+C, error).
+- **Lazy:** if no servers are configured, the MCP SDK is never loaded.
+
+> Note: v1 supports MCP **tools**. Resources and prompts are not yet exposed.
+
 ## Multi-Model Support
 
 Gitagent works with any LLM provider supported by [pi-ai](https://github.com/badlogic/pi-mono/tree/main/packages/ai):

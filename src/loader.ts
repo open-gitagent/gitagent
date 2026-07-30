@@ -23,6 +23,7 @@ import { discoverAndLoadPlugins } from "./plugins.js";
 import type { LoadedPlugin } from "./plugin-types.js";
 import type { PluginConfig } from "./plugin-types.js";
 import type { A2AAgentConfig } from "./a2a/types.js";
+import type { McpServerConfig } from "./mcp/types.js";
 
 export interface AgentManifest {
 	spec_version: string;
@@ -58,6 +59,7 @@ export interface AgentManifest {
 	plugins?: Record<string, PluginConfig>;
 	/** Remote A2A agents gitagent may call (outbound only — no server). */
 	a2a_agents?: Record<string, A2AAgentConfig>;
+	mcp_servers?: Record<string, McpServerConfig>;
 }
 
 async function readFileOr(path: string, fallback: string): Promise<string> {

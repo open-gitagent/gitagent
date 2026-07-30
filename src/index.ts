@@ -11,6 +11,7 @@ import { expandSkillCommand, refreshSkills } from "./skills.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import type { HooksConfig } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
+import { setupMcp } from "./mcp/manager.js";
 import { toAgentTool } from "./tool-utils.js";
 import { setupA2A } from "./a2a/manager.js";
 import { AuditLogger, isAuditEnabled } from "./audit.js";
@@ -527,7 +528,7 @@ async function main(): Promise<void> {
 	const apiKeyEnvVars: Record<string, string> = {
 		anthropic: "ANTHROPIC_API_KEY",
 		openai: "OPENAI_API_KEY",
-		google: "GOOGLE_API_KEY",
+		google: "GEMINI_API_KEY",
 		xai: "XAI_API_KEY",
 		groq: "GROQ_API_KEY",
 		mistral: "MISTRAL_API_KEY",
@@ -579,6 +580,10 @@ async function main(): Promise<void> {
 			}
 		}
 	}
+
+	// MCP tools (manifest-declared servers)
+	const mcpSetup = await setupMcp(manifest.mcp_servers, existingToolNames);
+	tools.push(...mcpSetup.tools);
 
 	// Wrap with hooks if configured
 	if (hooksConfig) {
@@ -673,6 +678,7 @@ async function main(): Promise<void> {
 			throw err;
 		} finally {
 			await runA2ACleanup();
+			await mcpSetup.cleanup().catch(() => {});
 			if (localSession) {
 				console.log(dim("Finalizing session..."));
 				localSession.finalize();
@@ -708,6 +714,7 @@ async function main(): Promise<void> {
 			if (trimmed === "/quit" || trimmed === "/exit") {
 				rl.close();
 				await runA2ACleanup();
+				await mcpSetup.cleanup().catch(() => {});
 				if (localSession) {
 					console.log(dim("Finalizing session..."));
 					localSession.finalize();
@@ -859,7 +866,7 @@ async function main(): Promise<void> {
 			try {
 				_session.end({ "gitagent.cost_usd": _totalCostUsd });
 			} catch { /* ignore */ }
-			runA2ACleanup()
+			Promise.all([runA2ACleanup(), mcpSetup.cleanup().catch(() => {})])
 				.finally(() => shutdownTelemetry().catch(() => {}))
 				.finally(() => stopSandbox().finally(() => process.exit(0)));
 		}

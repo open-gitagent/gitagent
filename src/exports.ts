@@ -25,6 +25,7 @@ export type {
 export type { AgentManifest, LoadedAgent } from "./loader.js";
 export type { A2AAgentConfig, A2ASetupResult } from "./a2a/types.js";
 export { setupA2A } from "./a2a/manager.js";
+export type { McpServerConfig } from "./mcp/types.js";
 export type { SkillMetadata } from "./skills.js";
 export type { WorkflowMetadata } from "./workflows.js";
 export type { SubAgentMetadata } from "./agents.js";

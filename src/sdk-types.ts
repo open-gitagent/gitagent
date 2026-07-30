@@ -1,6 +1,7 @@
 import type { AgentManifest } from "./loader.js";
 import type { SessionCosts } from "./cost-tracker.js";
 import type { A2AAgentConfig } from "./a2a/types.js";
+import type { McpServerConfig } from "./mcp/types.js";
 
 // ── Message types ──────────────────────────────────────────────────────
 
@@ -152,6 +153,8 @@ export interface QueryOptions {
 	maxTurns?: number;
 	abortController?: AbortController;
 	sessionId?: string;
+	/** MCP servers to connect to. Merged with manifest `mcp_servers` (these win on key collision). */
+	mcpServers?: Record<string, McpServerConfig>;
 	constraints?: {
 		temperature?: number;
 		maxTokens?: number;

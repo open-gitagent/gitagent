@@ -10,6 +10,8 @@ import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
 import { toAgentTool } from "./tool-utils.js";
 import { setupA2A } from "./a2a/manager.js";
+import { setupMcp } from "./mcp/manager.js";
+import type { McpSetupResult } from "./mcp/types.js";
 import { wrapToolWithProgrammaticHooks } from "./sdk-hooks.js";
 import { mergeHooksConfigs } from "./plugins.js";
 import { initLocalSession } from "./session.js";
@@ -110,6 +112,7 @@ export function query(options: QueryOptions): Query {
 
 	// Sandbox context (hoisted for cleanup in catch)
 	let sandboxCtx: SandboxContext | undefined;
+	let mcpSetup: McpSetupResult | undefined;
 	// Local session (hoisted for cleanup in catch)
 	let localSession: LocalSession | undefined;
 	// A2A connection teardown (hoisted for cleanup on success + error paths)
@@ -223,6 +226,11 @@ export function query(options: QueryOptions): Query {
 				}
 			}
 		}
+
+		// MCP tools — merge manifest + SDK server configs (SDK wins on key collision)
+		const mcpServers = { ...loaded.manifest.mcp_servers, ...options.mcpServers };
+		mcpSetup = await setupMcp(mcpServers, existingToolNames);
+		tools = [...tools, ...mcpSetup.tools];
 
 		// SDK-provided tools
 		if (options.tools) {
@@ -571,6 +579,12 @@ export function query(options: QueryOptions): Query {
 		// Ensure channel finishes even if no agent_end event
 		channel.finish();
 		} finally {
+			// Tear down MCP servers on every exit path — success, hook-block
+			// early-return, abort, and error (this finally runs before the
+			// .catch() handler below). cleanup() is idempotent.
+			if (mcpSetup) {
+				try { await mcpSetup.cleanup(); } catch { /* best-effort */ }
+			}
 			// Close the session span on every exit path — success, hook-block
 			// early-return, and the .catch() handler below (rethrow so this
 			// runs first).
