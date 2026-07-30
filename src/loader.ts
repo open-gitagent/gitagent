@@ -22,6 +22,7 @@ import type { ComplianceWarning } from "./compliance.js";
 import { discoverAndLoadPlugins } from "./plugins.js";
 import type { LoadedPlugin } from "./plugin-types.js";
 import type { PluginConfig } from "./plugin-types.js";
+import type { McpServerConfig } from "./mcp/types.js";
 
 export interface AgentManifest {
 	spec_version: string;
@@ -55,6 +56,7 @@ export interface AgentManifest {
 	delegation?: { mode: "auto" | "explicit" | "router"; router?: string };
 	compliance?: Record<string, any>;
 	plugins?: Record<string, PluginConfig>;
+	mcp_servers?: Record<string, McpServerConfig>;
 }
 
 async function readFileOr(path: string, fallback: string): Promise<string> {
