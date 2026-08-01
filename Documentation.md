@@ -1,7 +1,7 @@
 # GitAgent Documentation
 
 > **GitAgent** — A universal git-native multimodal always-learning AI Agent
-> Version 1.5.2 | MIT License | [github.com/open-gitagent/gitagent](https://github.com/open-gitagent/gitagent)
+> Version 2.0.2 | MIT License | [github.com/open-gitagent/gitagent](https://github.com/open-gitagent/gitagent)
 
 ---
 
