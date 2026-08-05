@@ -3,10 +3,20 @@ import { join } from "path";
 import { execSync } from "child_process";
 import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { Model } from "@mariozechner/pi-ai";
+import type { GCAssistantMessage } from "../sdk-types.js";
 import { skillLearnerSchema } from "./shared.js";
 import { loadSkillStats, isSkillFlagged } from "../learning/reinforcement.js";
+import { repairSkillSteps } from "../learning/skill-repair.js";
 import type { TaskRecord } from "./task-tracker.js";
 import yaml from "js-yaml";
+
+// Caps how many times a single skill can be auto-repaired before it must
+// go to a human (via "update" or "delete") instead.
+const MAX_REPAIRS = 3;
+// Clears the <0.4 flag immediately but stays below what a genuinely-proven
+// skill earns — a repaired skill has to re-earn trust, not start clean.
+const REPAIR_RESET_CONFIDENCE = 0.6;
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -83,6 +93,18 @@ async function getExistingSkillDescriptions(agentDir: string): Promise<Array<{ n
 	return result;
 }
 
+async function loadRepairCount(skillDir: string): Promise<number> {
+	try {
+		const content = await readFile(join(skillDir, "SKILL.md"), "utf-8");
+		const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+		if (!fmMatch) return 0;
+		const fm = yaml.load(fmMatch[1]) as Record<string, any>;
+		return typeof fm.repair_count === "number" ? fm.repair_count : 0;
+	} catch {
+		return 0;
+	}
+}
+
 function gitCommit(agentDir: string, files: string[], message: string): void {
 	try {
 		for (const f of files) {
@@ -99,12 +121,17 @@ function gitCommit(agentDir: string, files: string[], message: string): void {
 
 // ── Tool factory ────────────────────────────────────────────────────────
 
-export function createSkillLearnerTool(agentDir: string, gitagentDir: string): AgentTool<typeof skillLearnerSchema> {
+export function createSkillLearnerTool(
+	agentDir: string,
+	gitagentDir: string,
+	model?: Model<any>,
+	onUsage?: (msg: GCAssistantMessage) => void,
+): AgentTool<typeof skillLearnerSchema> {
 	return {
 		name: "skill_learner",
 		label: "skill_learner",
 		description:
-			"Learn from successful tasks. Use 'evaluate' to check if a completed task is worth saving as a skill, 'crystallize' to save it, 'status' to list all skills with confidence scores, 'review' to see flagged low-confidence skills, 'update' to modify a skill, 'delete' to remove one.",
+			"Learn from successful tasks. Use 'evaluate' to check if a completed task is worth saving as a skill, 'crystallize' to save it, 'status' to list all skills with confidence scores, 'review' to see flagged low-confidence skills, 'repair' to have the agent rewrite a flagged skill's steps using its own accumulated failure lessons, 'update' to modify a skill, 'delete' to remove one.",
 		parameters: skillLearnerSchema,
 		execute: async (
 			_toolCallId: string,
@@ -268,18 +295,20 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 						};
 					}
 
-					const skills: Array<{ name: string; confidence: number; usage: number; ratio: string }> = [];
+					const skills: Array<{ name: string; confidence: number; usage: number; ratio: string; repairs: number }> = [];
 
 					for (const entry of entries) {
 						if (!entry.isDirectory()) continue;
 						const dir = join(skillsDir, entry.name);
 						const stats = await loadSkillStats(dir);
+						const repairs = await loadRepairCount(dir);
 						// Only include learned skills (those with stats fields)
 						skills.push({
 							name: entry.name,
 							confidence: stats.confidence,
 							usage: stats.usage_count,
 							ratio: `${stats.success_count}/${stats.success_count + stats.failure_count}`,
+							repairs,
 						});
 					}
 
@@ -291,7 +320,8 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 					}
 
 					const lines = skills.map((s) =>
-						`  ${s.name}: confidence=${s.confidence}, usage=${s.usage}, success_ratio=${s.ratio}`,
+						`  ${s.name}: confidence=${s.confidence}, usage=${s.usage}, success_ratio=${s.ratio}` +
+						(s.repairs > 0 ? `, repairs=${s.repairs}/${MAX_REPAIRS}` : ""),
 					);
 					return {
 						content: [{ type: "text", text: `Skills:\n${lines.join("\n")}` }],
@@ -342,8 +372,88 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 					});
 
 					return {
-						content: [{ type: "text", text: `Flagged skills (confidence < 0.4):\n${lines.join("\n")}\n\nConsider updating or deleting these skills.` }],
+						content: [{
+							type: "text",
+							text: `Flagged skills (confidence < 0.4):\n${lines.join("\n")}\n\nCall skill_learner action "repair" with a skill_name to let the agent rewrite its steps using these lessons (up to ${MAX_REPAIRS} times per skill). If a skill has already been repaired ${MAX_REPAIRS} times, use "update" or "delete" instead.`,
+						}],
 						details: { flagged },
+					};
+				}
+
+				case "repair": {
+					if (!params.skill_name) throw new Error("skill_name is required for repair action");
+					if (!model) throw new Error("Repair requires a model to be configured for this agent.");
+
+					const skillFile = join(agentDir, "skills", params.skill_name, "SKILL.md");
+					let content: string;
+					try {
+						content = await readFile(skillFile, "utf-8");
+					} catch {
+						throw new Error(`Skill not found: ${params.skill_name}`);
+					}
+
+					const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+					if (!fmMatch) throw new Error("Invalid SKILL.md format");
+					const frontmatter = yaml.load(fmMatch[1]) as Record<string, any>;
+					const body = fmMatch[2];
+
+					const skillDir = join(agentDir, "skills", params.skill_name);
+					const stats = await loadSkillStats(skillDir);
+					if (!isSkillFlagged(stats)) {
+						throw new Error(
+							`Skill "${params.skill_name}" is not flagged (confidence ${stats.confidence} >= 0.4). Repair is only for flagged skills.`,
+						);
+					}
+
+					const repairCount = typeof frontmatter.repair_count === "number" ? frontmatter.repair_count : 0;
+					if (repairCount >= MAX_REPAIRS) {
+						throw new Error(
+							`Skill "${params.skill_name}" has already been repaired ${repairCount}/${MAX_REPAIRS} times. Use "update" or "delete" instead.`,
+						);
+					}
+
+					const stepsMatch = body.match(/## Steps\r?\n([\s\S]*?)(?=\r?\n## |\s*$)/);
+					const currentSteps = stepsMatch ? stepsMatch[1].trim() : body.trim();
+
+					const repairedSteps = await repairSkillSteps(
+						model,
+						{
+							skillDescription: frontmatter.description || "",
+							currentSteps,
+							negativeExamples: stats.negative_examples,
+						},
+						onUsage,
+					);
+
+					const historyMatch = body.match(/## Repair History\r?\n([\s\S]*?)(?=\r?\n## |\s*$)/);
+					const existingHistory = historyMatch ? historyMatch[1].trim() : "";
+					const attempt = repairCount + 1;
+					const lessonLines = stats.negative_examples.length
+						? stats.negative_examples.map((n) => `  - ${n}`).join("\n")
+						: "  - (no specific lessons recorded)";
+					const newEntry = `- Repair #${attempt} on ${new Date().toISOString()}:\n${lessonLines}`;
+					const historyBody = existingHistory ? `${existingHistory}\n${newEntry}` : newEntry;
+
+					frontmatter.confidence = REPAIR_RESET_CONFIDENCE;
+					frontmatter.usage_count = 0;
+					frontmatter.success_count = 0;
+					frontmatter.failure_count = 0;
+					frontmatter.negative_examples = [];
+					frontmatter.repair_count = attempt;
+
+					const newBody = `\n## Steps\n${repairedSteps}\n\n## Repair History\n${historyBody}\n`;
+					const yamlStr = yaml.dump(frontmatter, { lineWidth: -1, noRefs: true }).trimEnd();
+					const updated = `---\n${yamlStr}\n---\n${newBody}`;
+
+					await writeFile(skillFile, updated, "utf-8");
+					gitCommit(agentDir, [`skills/${params.skill_name}/SKILL.md`], `Repair skill: ${params.skill_name}`);
+
+					return {
+						content: [{
+							type: "text",
+							text: `Skill "${params.skill_name}" repaired (attempt ${attempt}/${MAX_REPAIRS}) and committed.\nConfidence reset to ${REPAIR_RESET_CONFIDENCE} (was ${stats.confidence}).\nSteps rewritten based on ${stats.negative_examples.length} recorded failure(s).`,
+						}],
+						details: { skill_name: params.skill_name, repair_count: attempt, confidence: REPAIR_RESET_CONFIDENCE },
 					};
 				}
 

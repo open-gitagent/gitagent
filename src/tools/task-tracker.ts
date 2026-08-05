@@ -3,8 +3,11 @@ import { join } from "path";
 import { randomUUID } from "crypto";
 import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { Model } from "@mariozechner/pi-ai";
+import type { GCAssistantMessage } from "../sdk-types.js";
 import { taskTrackerSchema } from "./shared.js";
 import { adjustConfidence, loadSkillStats, saveSkillStats } from "../learning/reinforcement.js";
+import { reflectOnFailure } from "../learning/reflection.js";
 import yaml from "js-yaml";
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -149,7 +152,12 @@ async function searchSkillsMP(objective: string): Promise<SkillMatch[]> {
 
 // ── Tool factory ────────────────────────────────────────────────────────
 
-export function createTaskTrackerTool(agentDir: string, gitagentDir: string): AgentTool<typeof taskTrackerSchema> {
+export function createTaskTrackerTool(
+	agentDir: string,
+	gitagentDir: string,
+	model?: Model<any>,
+	onUsage?: (msg: GCAssistantMessage) => void,
+): AgentTool<typeof taskTrackerSchema> {
 	return {
 		name: "task_tracker",
 		label: "task_tracker",
@@ -277,10 +285,33 @@ export function createTaskTrackerTool(agentDir: string, gitagentDir: string): Ag
 					if (task.status !== "active") throw new Error(`Task ${params.task_id} is not active (status: ${task.status})`);
 
 					const outcome = params.outcome as "success" | "failure" | "partial";
+
+					// Reflexion-style reflection: on any non-success outcome, replace the
+					// model's own one-line failure report with a grounded root-cause +
+					// next-strategy reflection generated from the task's actual recorded
+					// steps. Fails soft — any error here keeps the raw string exactly as
+					// before this reflection step existed.
+					let effectiveFailureReason = params.failure_reason;
+					if (outcome !== "success" && model) {
+						try {
+							effectiveFailureReason = await reflectOnFailure(
+								model,
+								{
+									objective: task.objective,
+									steps: task.steps.map((s) => s.description),
+									failureReason: params.failure_reason,
+								},
+								onUsage,
+							);
+						} catch {
+							// fail-soft — keep the raw one-liner
+						}
+					}
+
 					task.outcome = outcome;
 					task.status = outcome === "success" ? "succeeded" : "failed";
 					task.ended_at = new Date().toISOString();
-					task.failure_reason = params.failure_reason;
+					task.failure_reason = effectiveFailureReason;
 					task.skill_used = params.skill_used;
 
 					// Trigger reinforcement if a skill was used
@@ -289,7 +320,7 @@ export function createTaskTrackerTool(agentDir: string, gitagentDir: string): Ag
 						const skillDir = join(agentDir, "skills", params.skill_used);
 						try {
 							const stats = await loadSkillStats(skillDir);
-							const updated = adjustConfidence(stats, outcome, params.failure_reason);
+							const updated = adjustConfidence(stats, outcome, effectiveFailureReason);
 							await saveSkillStats(skillDir, updated);
 							reinforcementMsg = `\nSkill "${params.skill_used}" confidence: ${stats.confidence} → ${updated.confidence}`;
 						} catch {
@@ -312,7 +343,7 @@ export function createTaskTrackerTool(agentDir: string, gitagentDir: string): Ag
 					return {
 						content: [{
 							type: "text",
-							text: `Task ${task.id} ${outcome}. Reason: ${params.failure_reason || "not specified"}.${reinforcementMsg}\n\nConsider a different approach. Call task_tracker action "begin" with the same objective to retry.`,
+							text: `Task ${task.id} ${outcome}. Reason: ${effectiveFailureReason || "not specified"}.${reinforcementMsg}\n\nConsider a different approach. Call task_tracker action "begin" with the same objective to retry.`,
 						}],
 						details: { task_id: task.id },
 					};

@@ -1,6 +1,8 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { Model } from "@mariozechner/pi-ai";
 import type { SandboxContext } from "../sandbox.js";
 import type { MemoryLayerDef } from "../plugin-types.js";
+import type { GCAssistantMessage } from "../sdk-types.js";
 import { createCliTool } from "./cli.js";
 import { createReadTool } from "./read.js";
 import { createWriteTool } from "./write.js";
@@ -21,6 +23,10 @@ export interface BuiltinToolsConfig {
 	sandbox?: SandboxContext;
 	gitagentDir?: string;
 	pluginMemoryLayers?: MemoryLayerDef[];
+	/** Resolved model, used by task_tracker for Reflexion-style failure reflection. */
+	model?: Model<any>;
+	/** Called with the reflection LLM call's usage, so callers can feed it into their own cost tracking. */
+	onUsage?: (msg: GCAssistantMessage) => void;
 }
 
 /**
@@ -50,8 +56,8 @@ export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[]
 
 	// Add learning tools if gitagentDir is available
 	if (config.gitagentDir) {
-		tools.push(createTaskTrackerTool(config.dir, config.gitagentDir));
-		tools.push(createSkillLearnerTool(config.dir, config.gitagentDir));
+		tools.push(createTaskTrackerTool(config.dir, config.gitagentDir, config.model, config.onUsage));
+		tools.push(createSkillLearnerTool(config.dir, config.gitagentDir, config.model, config.onUsage));
 	}
 
 	return tools;

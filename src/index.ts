@@ -530,6 +530,11 @@ async function main(): Promise<void> {
 	// Collect plugin memory layers
 	const pluginMemoryLayers = loaded.plugins.flatMap((p) => p.memoryLayers);
 
+	// Hoisted above tool creation (was declared later, alongside the agent's own
+	// message_end handler) so task_tracker's reflection LLM call can add to the
+	// same running total via onUsage below.
+	let _totalCostUsd = 0;
+
 	// Build tools — built-in + declarative
 	let tools: AgentTool<any>[] = createBuiltinTools({
 		dir,
@@ -537,6 +542,10 @@ async function main(): Promise<void> {
 		sandbox: sandboxCtx,
 		gitagentDir,
 		pluginMemoryLayers: pluginMemoryLayers.length > 0 ? pluginMemoryLayers : undefined,
+		model: loaded.model,
+		onUsage: (msg) => {
+			if (msg.usage) _totalCostUsd += msg.usage.costUsd ?? 0;
+		},
 	});
 
 	// Load declarative tools from tools/*.yaml (Phase 2.2)
@@ -589,7 +598,6 @@ async function main(): Promise<void> {
 		"gitagent.entry": "cli",
 	});
 	let _llmCallStart = 0;
-	let _totalCostUsd = 0;
 
 	const agent = new Agent({
 		initialState: {
