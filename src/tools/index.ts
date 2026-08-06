@@ -3,6 +3,7 @@ import type { Model } from "@mariozechner/pi-ai";
 import type { SandboxContext } from "../sandbox.js";
 import type { MemoryLayerDef } from "../plugin-types.js";
 import type { GCAssistantMessage } from "../sdk-types.js";
+import type { Elicitor } from "../elicit.js";
 import { createCliTool } from "./cli.js";
 import { createReadTool } from "./read.js";
 import { createWriteTool } from "./write.js";
@@ -27,6 +28,18 @@ export interface BuiltinToolsConfig {
 	model?: Model<any>;
 	/** Called with the reflection LLM call's usage, so callers can feed it into their own cost tracking. */
 	onUsage?: (msg: GCAssistantMessage) => void;
+	/**
+	 * Terminal prompt channel for decisions the user should own: whether to use a
+	 * flagged skill, and whether to accept a proposed skill repair. CLI-only —
+	 * programmatic callers use `autoRepair` instead.
+	 */
+	elicit?: Elicitor;
+	/**
+	 * Let the agent repair its own flagged skills unattended. Only consulted when
+	 * `elicit` can't prompt (no TTY, or programmatic use). Default false: flagged
+	 * skills are reported and "repair" refuses.
+	 */
+	autoRepair?: boolean;
 }
 
 /**
@@ -56,8 +69,8 @@ export function createBuiltinTools(config: BuiltinToolsConfig): AgentTool<any>[]
 
 	// Add learning tools if gitagentDir is available
 	if (config.gitagentDir) {
-		tools.push(createTaskTrackerTool(config.dir, config.gitagentDir, config.model, config.onUsage));
-		tools.push(createSkillLearnerTool(config.dir, config.gitagentDir, config.model, config.onUsage));
+		tools.push(createTaskTrackerTool(config.dir, config.gitagentDir, config.model, config.onUsage, config.elicit, config.autoRepair));
+		tools.push(createSkillLearnerTool(config.dir, config.gitagentDir, config.model, config.onUsage, config.elicit, config.autoRepair));
 	}
 
 	return tools;

@@ -9,6 +9,8 @@ import { skillLearnerSchema } from "./shared.js";
 import { loadSkillStats, isSkillFlagged } from "../learning/reinforcement.js";
 import { repairSkillSteps } from "../learning/skill-repair.js";
 import type { TaskRecord } from "./task-tracker.js";
+import type { Elicitor } from "../elicit.js";
+import { renderDiff } from "../text-diff.js";
 import yaml from "js-yaml";
 
 // Caps how many times a single skill can be auto-repaired before it must
@@ -121,11 +123,35 @@ function gitCommit(agentDir: string, files: string[], message: string): void {
 
 // ── Tool factory ────────────────────────────────────────────────────────
 
+/** Diff + failure lessons block shown above the accept/edit/cancel choices. */
+function renderRepairPreview(
+	currentSteps: string,
+	proposedSteps: string,
+	negativeExamples: string[],
+): string {
+	const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
+	const parts = [
+		renderDiff(currentSteps, proposedSteps, {
+			beforeLabel: "current steps",
+			afterLabel: "proposed steps",
+		}),
+	];
+	if (negativeExamples.length > 0) {
+		const lessons = negativeExamples
+			.slice(-3)
+			.map((n) => `    - ${n.length > 160 ? `${n.slice(0, 160)}…` : n}`);
+		parts.push(dim(`\n  based on ${negativeExamples.length} recorded failure(s):\n${lessons.join("\n")}`));
+	}
+	return parts.join("\n");
+}
+
 export function createSkillLearnerTool(
 	agentDir: string,
 	gitagentDir: string,
 	model?: Model<any>,
 	onUsage?: (msg: GCAssistantMessage) => void,
+	elicit?: Elicitor,
+	autoRepair?: boolean,
 ): AgentTool<typeof skillLearnerSchema> {
 	return {
 		name: "skill_learner",
@@ -295,7 +321,7 @@ export function createSkillLearnerTool(
 						};
 					}
 
-					const skills: Array<{ name: string; confidence: number; usage: number; ratio: string; repairs: number }> = [];
+					const skills: Array<{ name: string; confidence: number; usage: number; ratio: string; repairs: number; flagged: boolean }> = [];
 
 					for (const entry of entries) {
 						if (!entry.isDirectory()) continue;
@@ -309,6 +335,7 @@ export function createSkillLearnerTool(
 							usage: stats.usage_count,
 							ratio: `${stats.success_count}/${stats.success_count + stats.failure_count}`,
 							repairs,
+							flagged: isSkillFlagged(stats),
 						});
 					}
 
@@ -321,10 +348,15 @@ export function createSkillLearnerTool(
 
 					const lines = skills.map((s) =>
 						`  ${s.name}: confidence=${s.confidence}, usage=${s.usage}, success_ratio=${s.ratio}` +
-						(s.repairs > 0 ? `, repairs=${s.repairs}/${MAX_REPAIRS}` : ""),
+						(s.repairs > 0 ? `, repairs=${s.repairs}/${MAX_REPAIRS}` : "") +
+						(s.flagged ? ` ⚠️ FLAGGED — unreliable, consider action "repair"` : ""),
 					);
+					const flaggedCount = skills.filter((s) => s.flagged).length;
+					const footer = flaggedCount > 0
+						? `\n\n${flaggedCount} skill(s) flagged as unreliable. Before using one, call skill_learner action "repair" on it first, or proceed with caution.`
+						: "";
 					return {
-						content: [{ type: "text", text: `Skills:\n${lines.join("\n")}` }],
+						content: [{ type: "text", text: `Skills:\n${lines.join("\n")}${footer}` }],
 						details: { skills },
 					};
 				}
@@ -412,6 +444,21 @@ export function createSkillLearnerTool(
 						);
 					}
 
+					// A repair rewrites and commits a file the agent will keep following, so
+					// it needs someone to sign off: a human at the terminal, or an explicit
+					// autoRepair opt-in. With neither, refuse before spending an LLM call.
+					if (!elicit?.interactive && !autoRepair) {
+						return {
+							content: [{
+								type: "text",
+								text: `Repair of "${params.skill_name}" was NOT applied — repair needs approval, and this run has neither an interactive terminal nor autoRepair enabled. ` +
+									`skills/${params.skill_name}/SKILL.md is unchanged (confidence still ${stats.confidence}).\n\n` +
+									`Do NOT retry. Either use the skill as-is and report the real outcome, or solve the task from scratch.`,
+							}],
+							details: { skill_name: params.skill_name, approved: false, reason: "no_approval_channel" },
+						};
+					}
+
 					const stepsMatch = body.match(/## Steps\r?\n([\s\S]*?)(?=\r?\n## |\s*$)/);
 					const currentSteps = stepsMatch ? stepsMatch[1].trim() : body.trim();
 
@@ -425,13 +472,58 @@ export function createSkillLearnerTool(
 						onUsage,
 					);
 
+					// Human approval gate: nothing is written or committed until the user
+					// accepts. Skipped under autoRepair, which applies the rewrite unattended.
+					let finalSteps = repairedSteps;
+					let userEdited = false;
+					const attemptNo = repairCount + 1;
+
+					if (elicit?.interactive) {
+						for (;;) {
+							const choice = await elicit.select({
+								title: `Proposed repair for skill "${params.skill_name}" (attempt ${attemptNo}/${MAX_REPAIRS})`,
+								body: renderRepairPreview(currentSteps, finalSteps, stats.negative_examples),
+								choices: [
+									{ key: "a", label: "accept — write SKILL.md and commit" },
+									{ key: "e", label: "edit — open the proposed steps in $EDITOR first" },
+									{ key: "c", label: "cancel — leave the skill unchanged" },
+								],
+								defaultKey: "a",
+								signal,
+							});
+
+							if (choice === "a") break;
+
+							if (choice === "c") {
+								return {
+									content: [{
+										type: "text",
+										text: `Repair of "${params.skill_name}" was CANCELLED BY THE USER. ` +
+											`skills/${params.skill_name}/SKILL.md is unchanged (confidence still ${stats.confidence}).\n\n` +
+											`Do NOT retry the repair. Either use the skill as-is and report the real outcome, or solve the task from scratch.`,
+									}],
+									details: { skill_name: params.skill_name, approved: false, cancelled: true },
+								};
+							}
+
+							const edited = await elicit.edit(finalSteps, { extension: ".md" });
+							if (edited !== null) {
+								finalSteps = edited.trim();
+								userEdited = true;
+							}
+						}
+					}
+
 					const historyMatch = body.match(/## Repair History\r?\n([\s\S]*?)(?=\r?\n## |\s*$)/);
 					const existingHistory = historyMatch ? historyMatch[1].trim() : "";
-					const attempt = repairCount + 1;
+					const attempt = attemptNo;
 					const lessonLines = stats.negative_examples.length
 						? stats.negative_examples.map((n) => `  - ${n}`).join("\n")
 						: "  - (no specific lessons recorded)";
-					const newEntry = `- Repair #${attempt} on ${new Date().toISOString()}:\n${lessonLines}`;
+					const approval = elicit?.interactive
+						? userEdited ? " (user-edited, approved)" : " (user-approved)"
+						: " (autoRepair)";
+					const newEntry = `- Repair #${attempt} on ${new Date().toISOString()}${approval}:\n${lessonLines}`;
 					const historyBody = existingHistory ? `${existingHistory}\n${newEntry}` : newEntry;
 
 					frontmatter.confidence = REPAIR_RESET_CONFIDENCE;
@@ -441,7 +533,7 @@ export function createSkillLearnerTool(
 					frontmatter.negative_examples = [];
 					frontmatter.repair_count = attempt;
 
-					const newBody = `\n## Steps\n${repairedSteps}\n\n## Repair History\n${historyBody}\n`;
+					const newBody = `\n## Steps\n${finalSteps}\n\n## Repair History\n${historyBody}\n`;
 					const yamlStr = yaml.dump(frontmatter, { lineWidth: -1, noRefs: true }).trimEnd();
 					const updated = `---\n${yamlStr}\n---\n${newBody}`;
 
@@ -451,9 +543,20 @@ export function createSkillLearnerTool(
 					return {
 						content: [{
 							type: "text",
-							text: `Skill "${params.skill_name}" repaired (attempt ${attempt}/${MAX_REPAIRS}) and committed.\nConfidence reset to ${REPAIR_RESET_CONFIDENCE} (was ${stats.confidence}).\nSteps rewritten based on ${stats.negative_examples.length} recorded failure(s).`,
+							text: `Skill "${params.skill_name}" repaired (attempt ${attempt}/${MAX_REPAIRS}) and committed.` +
+								(elicit?.interactive
+									? `\nThe user ${userEdited ? "edited and approved" : "approved"} the new steps.`
+									: "") +
+								`\nConfidence reset to ${REPAIR_RESET_CONFIDENCE} (was ${stats.confidence}).\nSteps rewritten based on ${stats.negative_examples.length} recorded failure(s).` +
+								`\n\nNow load skills/${params.skill_name}/SKILL.md and follow the repaired steps.`,
 						}],
-						details: { skill_name: params.skill_name, repair_count: attempt, confidence: REPAIR_RESET_CONFIDENCE },
+						details: {
+							skill_name: params.skill_name,
+							repair_count: attempt,
+							confidence: REPAIR_RESET_CONFIDENCE,
+							approved: true,
+							user_edited: userEdited,
+						},
 					};
 				}
 

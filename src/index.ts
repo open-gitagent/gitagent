@@ -8,6 +8,7 @@ import { createBuiltinTools } from "./tools/index.js";
 import { createSandboxContext } from "./sandbox.js";
 import type { SandboxContext, SandboxConfig } from "./sandbox.js";
 import { expandSkillCommand, refreshSkills } from "./skills.js";
+import { createConsoleElicitor } from "./elicit.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import type { HooksConfig } from "./hooks.js";
 import { loadDeclarativeTools } from "./tool-loader.js";
@@ -53,6 +54,7 @@ interface ParsedArgs {
 	pat?: string;
 	session?: string;
 	voice?: string;
+	autoRepair?: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -68,6 +70,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 	let pat: string | undefined;
 	let session: string | undefined;
 	let voice: string | undefined;
+	let autoRepair = false;
 
 	for (let i = 0; i < args.length; i++) {
 		switch (args[i]) {
@@ -90,6 +93,9 @@ function parseArgs(argv: string[]): ParsedArgs {
 			case "--sandbox":
 			case "-s":
 				sandbox = true;
+				break;
+			case "--auto-repair":
+				autoRepair = true;
 				break;
 			case "--sandbox-repo":
 				sandboxRepo = args[++i];
@@ -124,7 +130,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 		}
 	}
 
-	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken, repo, pat, session, voice };
+	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken, repo, pat, session, voice, autoRepair };
 }
 
 function handleEvent(
@@ -321,7 +327,7 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch, voice } = parseArgs(process.argv);
+	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch, voice, autoRepair: autoRepairFlag } = parseArgs(process.argv);
 
 	// If --repo is given, derive a default dir from the repo URL (skip interactive prompt)
 	let dir = rawDir;
@@ -535,6 +541,13 @@ async function main(): Promise<void> {
 	// same running total via onUsage below.
 	let _totalCostUsd = 0;
 
+	// Human-in-the-loop channel for skill decisions. In REPL mode it gets the
+	// REPL's own readline interface attached below; in single-shot mode it opens
+	// a short-lived one per prompt. When it can't prompt (no TTY, GITAGENT_APPROVAL=auto),
+	// --auto-repair / GITAGENT_AUTO_REPAIR decides whether repair may run unattended.
+	const elicitor = createConsoleElicitor();
+	const autoRepair = autoRepairFlag === true || process.env.GITAGENT_AUTO_REPAIR === "1";
+
 	// Build tools — built-in + declarative
 	let tools: AgentTool<any>[] = createBuiltinTools({
 		dir,
@@ -543,6 +556,8 @@ async function main(): Promise<void> {
 		gitagentDir,
 		pluginMemoryLayers: pluginMemoryLayers.length > 0 ? pluginMemoryLayers : undefined,
 		model: loaded.model,
+		elicit: elicitor,
+		autoRepair,
 		onUsage: (msg) => {
 			if (msg.usage) _totalCostUsd += msg.usage.costUsd ?? 0;
 		},
@@ -687,6 +702,8 @@ async function main(): Promise<void> {
 		input: process.stdin,
 		output: process.stdout,
 	});
+	// Share stdin with the REPL — a second interface would fight it for input.
+	elicitor.attach(rl);
 
 	const ask = (): void => {
 		rl.question(green("→ "), async (input) => {
