@@ -126,6 +126,25 @@ describe("isSkillFlagged", () => {
 	});
 });
 
+describe("statsFromFrontmatter", () => {
+	it("matches loadSkillStats for the same file, without re-reading it", async () => {
+		const dir = agentDir();
+		const skillDir = writeSkill(dir, "parity", {
+			name: "parity", confidence: 0.2, usage_count: 6, success_count: 2, failure_count: 4,
+			negative_examples: ["one", "two"],
+		});
+		const raw = readFileSync(join(skillDir, "SKILL.md"), "utf-8");
+		const frontmatter = (await import("js-yaml")).default.load(raw.match(/^---\r?\n([\s\S]*?)\r?\n---/)![1]) as any;
+		assert.deepEqual(reinforcement.statsFromFrontmatter(frontmatter), await reinforcement.loadSkillStats(skillDir));
+	});
+
+	it("fills defaults for an empty frontmatter", () => {
+		assert.deepEqual(reinforcement.statsFromFrontmatter({}), {
+			confidence: 1, usage_count: 0, success_count: 0, failure_count: 0, negative_examples: [],
+		});
+	});
+});
+
 describe("loadSkillStats / saveSkillStats", () => {
 	it("defaults to full confidence when there is no SKILL.md", async () => {
 		const stats = await reinforcement.loadSkillStats(join(agentDir(), "nope"));
@@ -532,6 +551,52 @@ describe("skill_learner repair guard rails", () => {
 		const elicit = { interactive: false, select: async () => "a", edit: async () => null };
 		const res = await learner(dir, explodingModel(), elicit, false).execute("c", { action: "repair", skill_name: "flagged" });
 		assert.match(text(res), /was NOT applied/);
+	});
+});
+
+describe("skill_learner skill_name validation", () => {
+	// Review follow-up: a skill name indexes into the filesystem, and "delete"
+	// removes that path recursively — so every action that resolves a skill by
+	// name must reject traversal, not just the one that creates skills.
+	const TRAVERSALS = ["../..", "../../etc", "skills/../../..", "/etc", "Not Kebab", "has_underscore"];
+
+	it("rejects traversing names on repair, update and delete", async () => {
+		const dir = agentDir();
+		const l = learner(dir, explodingModel());
+		for (const name of TRAVERSALS) {
+			await assert.rejects(l.execute("c", { action: "repair", skill_name: name }), /Invalid skill_name/, name);
+			await assert.rejects(l.execute("c", { action: "update", skill_name: name, instructions: "x" }), /Invalid skill_name/, name);
+			await assert.rejects(l.execute("c", { action: "delete", skill_name: name }), /Invalid skill_name/, name);
+		}
+	});
+
+	it("does not delete anything outside the skills directory", async () => {
+		const dir = agentDir();
+		const victim = join(dir, "workspace");
+		mkdirSync(victim, { recursive: true });
+		writeFileSync(join(victim, "important.txt"), "do not delete me");
+
+		await assert.rejects(
+			learner(dir).execute("c", { action: "delete", skill_name: "../workspace" }),
+			/Invalid skill_name/,
+		);
+		assert.equal(existsSync(join(victim, "important.txt")), true);
+	});
+
+	it("still rejects a bad name on crystallize", async () => {
+		const dir = agentDir();
+		const id = await runTask(dir, "Naming job", ["a", "b", "c"], "success");
+		await assert.rejects(
+			learner(dir).execute("c", { action: "crystallize", task_id: id, skill_name: "../escape", skill_description: "d" }),
+			/must be kebab-case/,
+		);
+	});
+
+	it("accepts ordinary kebab-case names", async () => {
+		const dir = agentDir();
+		writeSkill(dir, "deploy-staging-v2", { name: "deploy-staging-v2", description: "d", confidence: 0.5 });
+		const res = await learner(dir).execute("c", { action: "update", skill_name: "deploy-staging-v2", instructions: "## Steps\n1. go" });
+		assert.match(text(res), /updated and committed/);
 	});
 });
 

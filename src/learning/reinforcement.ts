@@ -83,18 +83,27 @@ function serializeFrontmatter(frontmatter: Record<string, any>, body: string): s
 	return `---\n${yamlStr}\n---\n${body}`;
 }
 
+/**
+ * Reads stats out of already-parsed frontmatter, filling defaults for missing or
+ * malformed fields. Lets callers that have parsed SKILL.md for other reasons get
+ * stats without a second read of the same file.
+ */
+export function statsFromFrontmatter(frontmatter: Record<string, any>): SkillStats {
+	return {
+		confidence: typeof frontmatter.confidence === "number" ? frontmatter.confidence : DEFAULT_STATS.confidence,
+		usage_count: typeof frontmatter.usage_count === "number" ? frontmatter.usage_count : DEFAULT_STATS.usage_count,
+		success_count: typeof frontmatter.success_count === "number" ? frontmatter.success_count : DEFAULT_STATS.success_count,
+		failure_count: typeof frontmatter.failure_count === "number" ? frontmatter.failure_count : DEFAULT_STATS.failure_count,
+		negative_examples: Array.isArray(frontmatter.negative_examples) ? frontmatter.negative_examples : [],
+	};
+}
+
 export async function loadSkillStats(skillDir: string): Promise<SkillStats> {
 	const skillFile = join(skillDir, "SKILL.md");
 	try {
 		const content = await readFile(skillFile, "utf-8");
 		const { frontmatter } = parseFrontmatter(content);
-		return {
-			confidence: typeof frontmatter.confidence === "number" ? frontmatter.confidence : DEFAULT_STATS.confidence,
-			usage_count: typeof frontmatter.usage_count === "number" ? frontmatter.usage_count : DEFAULT_STATS.usage_count,
-			success_count: typeof frontmatter.success_count === "number" ? frontmatter.success_count : DEFAULT_STATS.success_count,
-			failure_count: typeof frontmatter.failure_count === "number" ? frontmatter.failure_count : DEFAULT_STATS.failure_count,
-			negative_examples: Array.isArray(frontmatter.negative_examples) ? frontmatter.negative_examples : [],
-		};
+		return statsFromFrontmatter(frontmatter);
 	} catch {
 		return { ...DEFAULT_STATS };
 	}

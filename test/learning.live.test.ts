@@ -198,6 +198,25 @@ describe("skill_learner repair (live)", { skip: !LIVE }, () => {
 		assert.match(after, /\(user-edited, approved\)/);
 	});
 
+	it("ignores an emptied editor buffer instead of writing a stepless skill", async () => {
+		const dir = flaggedAgentDir();
+		let tried = false;
+		const elicit = {
+			interactive: true,
+			select: async () => (tried ? "a" : "e"),
+			// Simulates the user clearing the whole file and saving.
+			edit: async () => { tried = true; return "   \n\n"; },
+		};
+		const tool = createSkillLearnerTool(dir, dir, model, undefined, elicit, false);
+		const res = await tool.execute("c", { action: "repair", skill_name: "flaky-checklist" });
+
+		assert.match(res.content[0].text, /repaired \(attempt 1\/3\)/);
+		assert.equal((res.details as any).user_edited, false, "an empty buffer is not an edit");
+		const steps = stepsOf(skillMd(dir));
+		assert.ok(steps.length > 0, "steps must not be empty");
+		assert.ok(steps.startsWith("1."), `steps were: ${JSON.stringify(steps)}`);
+	});
+
 	it("leaves the file byte-identical when the user cancels", async () => {
 		const dir = flaggedAgentDir();
 		const before = skillMd(dir);

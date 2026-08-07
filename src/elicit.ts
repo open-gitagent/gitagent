@@ -141,6 +141,12 @@ export class ConsoleElicitor implements Elicitor {
 				process.stdout.write(dim("  No changes saved.\n"));
 				return null;
 			}
+			// An empty buffer is a mistake, not an edit — callers would otherwise
+			// write out whatever "nothing" means for them.
+			if (edited.trim().length === 0) {
+				process.stdout.write(dim("  Saved file was empty — proposal left unchanged.\n"));
+				return null;
+			}
 			return edited;
 		} finally {
 			try {

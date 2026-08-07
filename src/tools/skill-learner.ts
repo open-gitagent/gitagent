@@ -7,7 +7,7 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { Model } from "@mariozechner/pi-ai";
 import type { GCAssistantMessage } from "../sdk-types.js";
 import { skillLearnerSchema } from "./shared.js";
-import { loadSkillStats, isSkillFlagged } from "../learning/reinforcement.js";
+import { loadSkillStats, isSkillFlagged, statsFromFrontmatter } from "../learning/reinforcement.js";
 import { repairSkillSteps } from "../learning/skill-repair.js";
 import type { TaskRecord } from "./task-tracker.js";
 import type { Elicitor } from "../elicit.js";
@@ -20,6 +20,20 @@ const MAX_REPAIRS = 3;
 // Clears the <0.4 flag immediately but stays below what a genuinely-proven
 // skill earns — a repaired skill has to re-earn trust, not start clean.
 const REPAIR_RESET_CONFIDENCE = 0.6;
+
+// A skill name indexes straight into the filesystem — join(agentDir, "skills",
+// name) — and "delete" removes that path recursively. Anything with a slash or
+// a ".." reaches outside the skills tree, so every action that resolves a skill
+// by name validates it, not just the one that creates skills.
+const SKILL_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+function assertValidSkillName(name: string): void {
+	if (!SKILL_NAME_PATTERN.test(name)) {
+		throw new Error(
+			`Invalid skill_name "${name}" — must be kebab-case (e.g., deploy-staging), with no path separators.`,
+		);
+	}
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -238,10 +252,7 @@ export function createSkillLearnerTool(
 					if (!params.skill_name) throw new Error("skill_name is required for crystallize action");
 					if (!params.skill_description) throw new Error("skill_description is required for crystallize action");
 
-					// Validate kebab-case
-					if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(params.skill_name)) {
-						throw new Error("skill_name must be kebab-case (e.g., deploy-staging)");
-					}
+					assertValidSkillName(params.skill_name);
 
 					// Crystallize writes a fresh SKILL.md with confidence 1.0 and empty
 					// stats. Doing that over an existing skill would erase its whole track
@@ -434,6 +445,7 @@ export function createSkillLearnerTool(
 
 				case "repair": {
 					if (!params.skill_name) throw new Error("skill_name is required for repair action");
+					assertValidSkillName(params.skill_name);
 					if (!model) throw new Error("Repair requires a model to be configured for this agent.");
 
 					const skillFile = join(agentDir, "skills", params.skill_name, "SKILL.md");
@@ -449,8 +461,9 @@ export function createSkillLearnerTool(
 					const frontmatter = yaml.load(fmMatch[1]) as Record<string, any>;
 					const body = fmMatch[2];
 
-					const skillDir = join(agentDir, "skills", params.skill_name);
-					const stats = await loadSkillStats(skillDir);
+					// Stats come from the frontmatter just parsed above — no second read of
+					// the same file, so there's no window for it to change underneath us.
+					const stats = statsFromFrontmatter(frontmatter);
 					if (!isSkillFlagged(stats)) {
 						throw new Error(
 							`Skill "${params.skill_name}" is not flagged (confidence ${stats.confidence} >= 0.4). Repair is only for flagged skills.`,
@@ -527,7 +540,9 @@ export function createSkillLearnerTool(
 							}
 
 							const edited = await elicit.edit(finalSteps, { extension: ".md" });
-							if (edited !== null) {
+							// An emptied buffer would otherwise write a skill with no steps at
+							// all. Treat it as "no usable edit" and re-show the proposal.
+							if (edited !== null && edited.trim().length > 0) {
 								finalSteps = edited.trim();
 								userEdited = true;
 							}
@@ -582,6 +597,7 @@ export function createSkillLearnerTool(
 
 				case "update": {
 					if (!params.skill_name) throw new Error("skill_name is required for update action");
+					assertValidSkillName(params.skill_name);
 					if (!params.instructions) throw new Error("instructions is required for update action");
 
 					const skillFile = join(agentDir, "skills", params.skill_name, "SKILL.md");
@@ -610,6 +626,7 @@ export function createSkillLearnerTool(
 
 				case "delete": {
 					if (!params.skill_name) throw new Error("skill_name is required for delete action");
+					assertValidSkillName(params.skill_name);
 
 					const skillDir = join(agentDir, "skills", params.skill_name);
 					try {
