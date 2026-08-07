@@ -389,6 +389,31 @@ describe("skill_learner crystallize", () => {
 		assert.match(md, /used the wrong parser/);
 	});
 
+	it("refuses to overwrite an existing skill, preserving its record", async () => {
+		// Regression: a live voice session crystallized over a flagged skill,
+		// resetting confidence 0.3 → 1.0, wiping its recorded failures, and
+		// replacing its steps with the task's step log — all ungated.
+		const dir = agentDir();
+		writeSkill(dir, "widget-report", {
+			name: "widget-report", description: "Assemble a widget report",
+			confidence: 0.3, usage_count: 7, success_count: 2, failure_count: 5,
+			negative_examples: ["used the wrong parser"],
+		}, "1. original instructions");
+		const before = readFileSync(skillFile(dir, "widget-report"), "utf-8");
+
+		const id = await runTask(dir, "Assemble the widget report", ["gather", "render", "verify"], "success");
+		const res = await learner(dir).execute("c", {
+			action: "crystallize", task_id: id, skill_name: "widget-report", skill_description: "Assemble a widget report",
+		});
+
+		assert.match(text(res), /already exists/);
+		assert.match(text(res), /does NOT overwrite/);
+		assert.match(text(res), /Use action "update"/);
+		assert.equal((res.details as any).created, false);
+		assert.equal((res.details as any).reason, "already_exists");
+		assert.equal(readFileSync(skillFile(dir, "widget-report"), "utf-8"), before);
+	});
+
 	it("refuses a failed task", async () => {
 		const dir = agentDir();
 		const id = await runTask(dir, "Doomed job", ["a", "b", "c"], "failure", { failure_reason: "nope" });

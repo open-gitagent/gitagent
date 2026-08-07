@@ -1,4 +1,5 @@
 import { readFile, writeFile, mkdir, readdir, rm } from "fs/promises";
+import { existsSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
 import { type Static } from "@sinclair/typebox";
@@ -240,6 +241,25 @@ export function createSkillLearnerTool(
 					// Validate kebab-case
 					if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(params.skill_name)) {
 						throw new Error("skill_name must be kebab-case (e.g., deploy-staging)");
+					}
+
+					// Crystallize writes a fresh SKILL.md with confidence 1.0 and empty
+					// stats. Doing that over an existing skill would erase its whole track
+					// record — including the failures that flagged it — and swap its
+					// instructions for one task's step log, with none of the approval a
+					// "repair" needs. Refuse and point at the non-destructive action.
+					if (existsSync(join(agentDir, "skills", params.skill_name, "SKILL.md"))) {
+						const existing = await loadSkillStats(join(agentDir, "skills", params.skill_name));
+						return {
+							content: [{
+								type: "text",
+								text: `Skill "${params.skill_name}" already exists (confidence ${existing.confidence}, ` +
+									`${existing.success_count} success / ${existing.failure_count} failure). Crystallize does NOT overwrite — ` +
+									`that would erase its confidence, usage history, and recorded failures.\n\n` +
+									`Use action "update" to change its steps, or crystallize under a different skill_name.`,
+							}],
+							details: { skill_name: params.skill_name, created: false, reason: "already_exists" },
+						};
 					}
 
 					const store = await loadTasks(gitagentDir);
