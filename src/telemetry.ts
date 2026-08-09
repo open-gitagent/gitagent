@@ -71,6 +71,11 @@ const _slots = {
 export async function initTelemetry(opts: TelemetryOptions): Promise<void> {
 	if (_initialized) return;
 
+	// When there is no endpoint configured and no test provider, telemetry
+	// has nowhere to send data — skip the dynamic SDK imports entirely.
+	const hasEndpoint = opts.exporterEndpoint || process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+	if (!opts._testProvider && !hasEndpoint) return;
+
 	try {
 		// Test path — register a caller-supplied TracerProvider directly.
 		if (opts._testProvider) {

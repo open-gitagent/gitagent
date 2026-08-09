@@ -43,7 +43,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "test": "node --test test/*.test.ts --experimental-strip-types"
+    "test": "npx tsx --test test/*.test.ts"
   },
   "engines": {
     "node": ">=20"
@@ -79,6 +79,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "@types/node-cron": "^3.0.11",
+    "tsx": "^4.20.6",
     "typescript": "^5.7.0"
   }
 }
