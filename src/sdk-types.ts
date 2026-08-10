@@ -161,6 +161,21 @@ export interface QueryOptions {
 export interface Query extends AsyncGenerator<GCMessage, void, undefined> {
 	abort(): void;
 	steer(message: string): void;
+	/**
+	 * Resume a session after it has gone idle — most commonly after the model
+	 * failed to return output (an assistant message with `stopReason: "error"`
+	 * or `"aborted"`) ended the run early.
+	 *
+	 * - `continue()` with no argument retries the exact turn the model failed
+	 *   to answer: the failed assistant message is dropped so the transcript
+	 *   ends on the user/tool-result message it never responded to, then the
+	 *   turn is re-sent.
+	 * - `continue(message)` instead queues `message` as a new follow-up turn
+	 *   and resumes the session with it.
+	 *
+	 * Throws if the agent hasn't started yet or is still processing a turn.
+	 */
+	continue(message?: string): Promise<void>;
 	sessionId(): string;
 	manifest(): AgentManifest;
 	messages(): GCMessage[];
