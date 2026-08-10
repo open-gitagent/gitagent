@@ -12,7 +12,7 @@ async function main() {
 	for await (const msg of query({
 		prompt: "Use the greet tool to greet Zeus, then say something short and fun.",
 		dir: process.cwd(),
-		model: "openai:gpt-4o-mini",
+		model: "openai:gpt-4.1-mini",
 		tools: [greet],
 		hooks: {
 			preToolUse: async (ctx) => {
