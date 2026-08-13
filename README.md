@@ -167,7 +167,7 @@ for await (const msg of query({
 
 ## SDK
 
-The SDK provides a programmatic interface to Gitagent agents. It mirrors the [Claude Agent SDK](https://github.com/anthropics/claude-code-sdk) pattern but runs **in-process** — no subprocesses, no IPC.
+The SDK provides a programmatic interface to Gitagent agents. It mirrors the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) pattern but runs **in-process** — no subprocesses, no IPC.
 
 ### `query(options): Query`
 
