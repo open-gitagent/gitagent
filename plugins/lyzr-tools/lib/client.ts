@@ -23,6 +23,7 @@ export interface LyzrResult<T = unknown> {
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
 export interface LyzrClient {
+	getAgent(agentId: string): Promise<LyzrResult>;
 	listUserTools(): Promise<LyzrResult>;
 	listAllUserTools(): Promise<LyzrResult>;
 	listConnectedAccounts(userId: string): Promise<LyzrResult>;
@@ -113,6 +114,8 @@ export function createLyzrClient(
 	}
 
 	return {
+		getAgent: (agentId: string) => request("GET", `/v3/agents/${encodeURIComponent(agentId)}`),
+
 		listUserTools: () => request("GET", "/v3/tools/"),
 
 		listAllUserTools: () => request("GET", "/v3/tools/all/user"),

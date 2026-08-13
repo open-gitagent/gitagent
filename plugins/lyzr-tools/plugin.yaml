@@ -21,21 +21,16 @@ config:
       env: LYZR_BASE_URL
     agent_id:
       type: string
-      description: Lyzr agent ID used for agent-level tool execution (POST /v3/inference/tools/execute).
+      description: Lyzr agent ID whose own tool_configs (GET /v3/agents/{agent_id}) are the source of tool discovery, and which is used for agent-level tool execution (POST /v3/inference/tools/execute). Required for any tool discovery to happen.
       env: GITAGENT_LYZR_AGENT_ID
     user_id:
       type: string
-      description: Lyzr user ID used to look up connected accounts and authorization status.
+      description: Lyzr user ID used to look up connected accounts as a secondary authorization signal.
       env: LYZR_USER_ID
     workspace_id:
       type: string
       description: Optional Lyzr workspace/org ID, for future scoping needs.
       env: LYZR_WORKSPACE_ID
-    providers:
-      type: string
-      description: Comma-separated Lyzr provider identifiers to discover actions for.
-      default: "gmail,slack"
-      env: LYZR_TOOL_PROVIDERS
     include_mcp:
       type: boolean
       description: Also discover and register tools exposed through Lyzr MCP servers.
@@ -43,10 +38,6 @@ config:
     prefer_lyzr_tools:
       type: boolean
       description: Add prompt guidance telling the model to prefer Lyzr-backed tools over local duplicate skills.
-      default: true
-    persist_auth:
-      type: boolean
-      description: Passed through as ToolConfig.persist_auth on agent-level tool execution requests.
       default: true
     timeout_ms:
       type: number

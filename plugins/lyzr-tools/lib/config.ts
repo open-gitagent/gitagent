@@ -5,17 +5,10 @@
 import type { ResolvedConfig } from "./types.ts";
 
 const DEFAULT_BASE_URL = "https://agent-prod.studio.lyzr.ai";
-const DEFAULT_PROVIDERS = "gmail,slack";
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 export function resolveConfig(raw: Record<string, any> | undefined): ResolvedConfig {
 	const cfg = raw ?? {};
-
-	const providersRaw = typeof cfg.providers === "string" && cfg.providers.trim() ? cfg.providers : DEFAULT_PROVIDERS;
-	const providers = providersRaw
-		.split(",")
-		.map((p: string) => p.trim())
-		.filter(Boolean);
 
 	const timeoutMs = Number(cfg.timeout_ms);
 
@@ -25,10 +18,8 @@ export function resolveConfig(raw: Record<string, any> | undefined): ResolvedCon
 		agentId: cfg.agent_id ? String(cfg.agent_id) : undefined,
 		userId: cfg.user_id ? String(cfg.user_id) : undefined,
 		workspaceId: cfg.workspace_id ? String(cfg.workspace_id) : undefined,
-		providers,
 		includeMcp: cfg.include_mcp !== false,
 		preferLyzrTools: cfg.prefer_lyzr_tools !== false,
-		persistAuth: cfg.persist_auth !== false,
 		timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS,
 	};
 }

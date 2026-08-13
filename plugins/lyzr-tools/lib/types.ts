@@ -6,10 +6,8 @@ export interface ResolvedConfig {
 	agentId?: string;
 	userId?: string;
 	workspaceId?: string;
-	providers: string[];
 	includeMcp: boolean;
 	preferLyzrTools: boolean;
-	persistAuth: boolean;
 	timeoutMs: number;
 }
 
@@ -31,14 +29,28 @@ export interface LyzrDiscoveredTool {
 	inputSchema: { properties: Record<string, any>; required?: string[] };
 	/** Which Lyzr execution surface this tool must be routed through. */
 	execSource: "agent" | "mcp";
-	/** Normalized provider key, e.g. "gmail", used for auth lookups and dedupe hints. */
+	/**
+	 * Best-effort provider key inferred from the observed
+	 * "<provider>-<label>" naming convention Lyzr Studio uses for a
+	 * connected integration's tool_name (e.g. "gmail-Akshat Gmail
+	 * Integration" -> "gmail"). Used only for auth-message wording and
+	 * dedupe-prompt/local-skill matching — never sent back to Lyzr.
+	 */
 	provider?: string;
-	/** Provider/tool-source identifier as understood by Lyzr's ToolConfig. */
+	/** Real Lyzr tool_source value for this tool_config ("composio" | "aci"), taken verbatim from the agent's own config. */
 	toolSource?: string;
 	actionName?: string;
 	actionNames?: string[];
 	providerUuid?: string;
 	credentialId?: string;
+	/**
+	 * The exact tool_config entry as returned by GET /v3/agents/{agent_id}
+	 * for this integration (tool_name, tool_source, action_names,
+	 * persist_auth, provider_uuid, credential_id, ...). Sent back verbatim
+	 * as `tool_configs[0]` on execution, since it is already the
+	 * pre-validated config a human wired up in Lyzr Studio — see execute.ts.
+	 */
+	rawToolConfig?: Record<string, unknown>;
 	/** MCP server id, only set when execSource === "mcp". */
 	serverId?: string;
 	/** Whether Lyzr currently reports this provider/tool as authorized for the configured user. */

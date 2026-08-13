@@ -79,27 +79,21 @@ async function executeAgentTool(
 ): Promise<ToolCallResult> {
 	const traceId = `lyzr-tools-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-	// NOTE: the exact pairing between the top-level `tool_name` and
-	// `ToolConfig` fields is not fully pinned down by the Swagger response
-	// schema for POST /v3/inference/tools/execute (flagged as a "Remaining
-	// API Alignment Item" in docs/lyzr-tool-auth-rca.md). This mapping is
-	// our best-effort interpretation: `tool_name` is the specific action to
-	// invoke, and `tool_configs[0]` describes the provider/credential
-	// context that action runs under.
+	// tool_configs[0] is the agent's own tool_config entry (see discover.ts),
+	// sent back verbatim — it's already the pre-validated config a human
+	// wired up in Lyzr Studio, so there's nothing left to reconstruct/guess
+	// (tool_name is the connected-integration label, not a generic provider
+	// id; provider_uuid/credential_id are already correct).
+	//
+	// What's still a best-effort assumption (flagged in docs/lyzr-tool-auth-rca.md
+	// as a "Remaining API Alignment Item"): the pairing between the
+	// top-level `tool_name` and `tool_configs` — we treat the top-level one
+	// as "the specific action to invoke" and `tool_configs[0]` as "the
+	// provider/credential context that action runs under."
 	const res = await client.executeInferenceTool({
 		agent_id: config.agentId || undefined,
 		tool_name: tool.actionName ?? tool.rawName,
-		tool_configs: [
-			{
-				tool_name: tool.toolSource ?? tool.provider ?? tool.rawName,
-				tool_source: tool.toolSource ?? tool.provider ?? "unknown",
-				action_names:
-					tool.actionNames && tool.actionNames.length > 0 ? tool.actionNames : [tool.actionName ?? tool.rawName],
-				persist_auth: config.persistAuth,
-				provider_uuid: tool.providerUuid,
-				credential_id: tool.credentialId,
-			},
-		],
+		tool_configs: [tool.rawToolConfig ?? fallbackToolConfig(tool)],
 		arguments: args,
 		trace_id: traceId,
 	});
@@ -111,6 +105,18 @@ async function executeAgentTool(
 
 	const data = res.data as { result?: unknown; trace_id?: string } | undefined;
 	return successResult(tool, data?.result, data?.trace_id ?? traceId);
+}
+
+// Only used if a tool somehow lacks rawToolConfig (e.g. hand-built in a
+// test); real discovery always sets it from the agent's own tool_configs.
+function fallbackToolConfig(tool: LyzrDiscoveredTool): Record<string, unknown> {
+	return {
+		tool_name: tool.provider ?? tool.rawName,
+		tool_source: tool.toolSource ?? "unknown",
+		action_names: tool.actionNames && tool.actionNames.length > 0 ? tool.actionNames : [tool.actionName ?? tool.rawName],
+		provider_uuid: tool.providerUuid,
+		credential_id: tool.credentialId,
+	};
 }
 
 // ── Result builders ──────────────────────────────────────────────────────

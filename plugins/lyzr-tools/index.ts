@@ -48,7 +48,7 @@ export async function registerWithClient(
 		tools = discovered.tools;
 
 		api.logger.info(
-			`Discovered ${tools.length} Lyzr-backed tool(s) across ${discovered.stats.providersQueried} provider(s) and ${discovered.stats.mcpServersQueried} MCP server(s); ${discovered.stats.unauthorized} not yet authorized.`,
+			`Discovered ${tools.length} Lyzr-backed tool(s) from ${discovered.stats.agentToolConfigsFound} configured integration(s) and ${discovered.stats.mcpServersQueried} MCP server(s); ${discovered.stats.unauthorized} not yet authorized.`,
 		);
 		if (discovered.stats.errors.length > 0) {
 			api.logger.warn(`Some discovery calls failed: ${discovered.stats.errors.join("; ")}`);

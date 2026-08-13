@@ -49,6 +49,7 @@ function fakeClient(overrides: Partial<LyzrClient> = {}): LyzrClient & { calls: 
 		};
 
 	const defaults: LyzrClient = {
+		getAgent: async () => ok({ tool_configs: [] }),
 		listUserTools: async () => ok([]),
 		listAllUserTools: async () => ok([]),
 		listConnectedAccounts: async () => ok([]),
@@ -77,11 +78,26 @@ function baseConfig(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
 		baseUrl: "https://agent-prod.studio.lyzr.ai",
 		agentId: "agent-1",
 		userId: "user-1",
-		providers: ["gmail", "slack"],
 		includeMcp: true,
 		preferLyzrTools: true,
-		persistAuth: true,
 		timeoutMs: 5000,
+		...overrides,
+	};
+}
+
+// Mirrors the real tool_configs shape observed on a live Lyzr agent
+// (GET /v3/agents/{agent_id}): a human-named connected-integration label as
+// tool_name, UPPERCASE_SNAKE_CASE action_names, and a pre-resolved
+// provider_uuid/credential_id.
+function gmailToolConfig(overrides: Record<string, unknown> = {}) {
+	return {
+		tool_name: "gmail-Akshat Gmail Integration",
+		tool_source: "composio",
+		action_names: ["GMAIL_SEND_EMAIL"],
+		persist_auth: true,
+		server_id: null,
+		provider_uuid: "6980d819100ddff45dec4e80",
+		credential_id: "82be4f7e-cred-1",
 		...overrides,
 	};
 }
@@ -145,66 +161,104 @@ describe("redactSecrets", () => {
 // ── discover.ts ────────────────────────────────────────────────────────
 
 describe("discoverLyzrTools", () => {
-	it("discovers provider actions and marks authorization from connected accounts", async () => {
+	it("discovers one tool per action from the agent's own tool_configs, verbatim", async () => {
 		const client = fakeClient({
-			listConnectedAccounts: async () =>
-				ok([
-					{ provider: "gmail", status: "connected", credential_id: "cred-gmail-1", provider_uuid: "puid-1" },
-				]),
-			listProviderActions: async (providerId: string) => {
-				if (providerId === "gmail") {
-					return ok({ actions: [{ name: "send_email", description: "Send an email via Gmail." }] });
-				}
-				if (providerId === "slack") {
-					return ok({ actions: [{ name: "send_message", description: "Send a Slack message." }] });
-				}
-				return ok({ actions: [] });
+			getAgent: async (agentId: string) => {
+				assert.equal(agentId, "agent-1");
+				return ok({
+					tool_configs: [
+						gmailToolConfig(),
+						{
+							tool_name: "composio_search",
+							tool_source: "composio",
+							action_names: ["COMPOSIO_SEARCH_SEARCH"],
+							persist_auth: true,
+							provider_uuid: "puid-search",
+							credential_id: "",
+						},
+					],
+				});
 			},
+			listConnectedAccounts: async () =>
+				ok([{ provider: "composio_search", status: "connected", credential_id: "cred-search-1" }]),
 		});
 
 		const { tools, stats } = await discoverLyzrTools(client, baseConfig(), silentLogger());
 
 		assert.equal(tools.length, 2);
-		const gmail = tools.find((t) => t.provider === "gmail")!;
-		const slack = tools.find((t) => t.provider === "slack")!;
+		const gmail = tools.find((t) => t.actionName === "GMAIL_SEND_EMAIL")!;
+		const search = tools.find((t) => t.actionName === "COMPOSIO_SEARCH_SEARCH")!;
 
 		assert.equal(gmail.toolName, "lyzr_gmail_send_email");
-		assert.equal(gmail.authorized, true);
-		assert.equal(gmail.credentialId, "cred-gmail-1");
+		assert.equal(gmail.authorized, true); // credential_id present on the tool_config itself
+		assert.equal(gmail.provider, "gmail"); // inferred from "gmail-<label>"
+		assert.equal(gmail.toolSource, "composio");
+		assert.equal(gmail.providerUuid, "6980d819100ddff45dec4e80");
+		assert.deepEqual(gmail.rawToolConfig, gmailToolConfig());
 		assert.equal(gmail.execSource, "agent");
 
-		assert.equal(slack.toolName, "lyzr_slack_send_message");
-		assert.equal(slack.authorized, false); // not present in connected accounts
-		assert.equal(stats.unauthorized, 1);
-		assert.equal(stats.providerActionsFound, 2);
+		assert.equal(search.toolName, "lyzr_composio_search_search");
+		assert.equal(search.authorized, true); // falls back to connected_accounts since credential_id is empty
+		assert.equal(search.credentialId, "cred-search-1");
+
+		assert.equal(stats.agentToolConfigsFound, 2);
+		assert.equal(stats.agentActionsFound, 2);
+		assert.equal(stats.unauthorized, 0);
 	});
 
-	it("returns no tools when providers have no actions", async () => {
-		const client = fakeClient({ listProviderActions: async () => ok({ actions: [] }) });
-		const { tools, stats } = await discoverLyzrTools(client, baseConfig(), silentLogger());
-		assert.equal(tools.length, 0);
-		assert.equal(stats.providerActionsFound, 0);
-		assert.equal(stats.errors.length, 0);
-	});
-
-	it("degrades gracefully when a provider call fails, without throwing", async () => {
+	it("marks a tool unauthorized when neither credential_id nor connected_accounts confirm it", async () => {
 		const client = fakeClient({
-			listProviderActions: async (providerId: string) => {
-				if (providerId === "gmail") return fail(401, { error: "invalid api key" });
-				return ok({ actions: [{ name: "send_message", description: "Send a Slack message." }] });
-			},
+			getAgent: async () => ok({ tool_configs: [gmailToolConfig({ credential_id: "" })] }),
 		});
 
 		const { tools, stats } = await discoverLyzrTools(client, baseConfig(), silentLogger());
 		assert.equal(tools.length, 1);
-		assert.equal(tools[0].provider, "slack");
+		assert.equal(tools[0].authorized, false);
+		assert.equal(stats.unauthorized, 1);
+	});
+
+	it("registers one tool per action_names entry when a single tool_config lists multiple actions", async () => {
+		const client = fakeClient({
+			getAgent: async () =>
+				ok({
+					tool_configs: [gmailToolConfig({ action_names: ["GMAIL_SEND_EMAIL", "GMAIL_FETCH_EMAILS"] })],
+				}),
+		});
+
+		const { tools } = await discoverLyzrTools(client, baseConfig(), silentLogger());
+		assert.equal(tools.length, 2);
+		assert.ok(tools.some((t) => t.toolName === "lyzr_gmail_send_email"));
+		assert.ok(tools.some((t) => t.toolName === "lyzr_gmail_fetch_emails"));
+	});
+
+	it("warns and discovers nothing when agent_id is not configured", async () => {
+		const client = fakeClient();
+		const logger = silentLogger();
+
+		const { tools, stats } = await discoverLyzrTools(client, baseConfig({ agentId: undefined }), logger);
+		assert.equal(tools.length, 0);
+		assert.equal(stats.agentToolConfigsFound, 0);
+		assert.ok(logger.messages.some((m) => /agent_id is not set/.test(m)));
+		assert.equal(client.calls.some((c) => c.method === "getAgent"), false);
+	});
+
+	it("degrades gracefully when GET /v3/agents/{agent_id} fails, without throwing", async () => {
+		const client = fakeClient({ getAgent: async () => fail(404, { error: "agent not found" }) });
+		const { tools, stats } = await discoverLyzrTools(client, baseConfig(), silentLogger());
+		assert.equal(tools.length, 0);
 		assert.equal(stats.errors.length, 1);
-		assert.match(stats.errors[0], /gmail/);
+		assert.match(stats.errors[0], /agent-1/);
+	});
+
+	it("returns no tools when the agent has an empty or missing tool_configs array", async () => {
+		const client = fakeClient({ getAgent: async () => ok({ name: "Some Agent" }) });
+		const { tools, stats } = await discoverLyzrTools(client, baseConfig(), silentLogger());
+		assert.equal(tools.length, 0);
+		assert.equal(stats.agentToolConfigsFound, 0);
 	});
 
 	it("discovers MCP server tools and treats non-oauth servers as authorized", async () => {
 		const client = fakeClient({
-			listProviderActions: async () => ok({ actions: [] }),
 			listMcpServers: async () => ok({ servers: [{ id: "srv-1", name: "Notion", auth_type: "api_key" }] }),
 			listMcpServerTools: async (serverId: string) => {
 				assert.equal(serverId, "srv-1");
@@ -223,7 +277,6 @@ describe("discoverLyzrTools", () => {
 
 	it("marks oauth MCP servers without an active token as unauthorized", async () => {
 		const client = fakeClient({
-			listProviderActions: async () => ok({ actions: [] }),
 			listMcpServers: async () =>
 				ok({ servers: [{ id: "srv-2", name: "Linear", auth_type: "oauth", has_active_token: false }] }),
 			listMcpServerTools: async () => ok({ server_name: "Linear", tools: [{ name: "create_issue" }] }),
@@ -235,7 +288,7 @@ describe("discoverLyzrTools", () => {
 	});
 
 	it("skips MCP discovery entirely when include_mcp is false", async () => {
-		const client = fakeClient({ listProviderActions: async () => ok({ actions: [] }) });
+		const client = fakeClient();
 		const { stats } = await discoverLyzrTools(client, baseConfig({ includeMcp: false }), silentLogger());
 		assert.equal(stats.mcpServersQueried, 0);
 		assert.equal(client.calls.some((c) => c.method === "listMcpServers"), false);
@@ -246,16 +299,19 @@ describe("discoverLyzrTools", () => {
 
 function makeTool(overrides: Partial<LyzrDiscoveredTool> = {}): LyzrDiscoveredTool {
 	return {
-		rawName: "send_email",
+		rawName: "GMAIL_SEND_EMAIL",
 		toolName: "lyzr_gmail_send_email",
-		displayName: "Gmail: Send Email",
+		displayName: "gmail-Akshat Gmail Integration: GMAIL_SEND_EMAIL",
 		description: "Send an email via Gmail.",
 		inputSchema: { properties: {} },
 		execSource: "agent",
 		provider: "gmail",
-		toolSource: "gmail",
-		actionName: "send_email",
-		actionNames: ["send_email"],
+		toolSource: "composio",
+		actionName: "GMAIL_SEND_EMAIL",
+		actionNames: ["GMAIL_SEND_EMAIL"],
+		providerUuid: "6980d819100ddff45dec4e80",
+		credentialId: "82be4f7e-cred-1",
+		rawToolConfig: gmailToolConfig(),
 		authorized: true,
 		...overrides,
 	};
@@ -297,11 +353,11 @@ describe("executeLyzrTool", () => {
 		assert.equal(client.calls.length, 0);
 	});
 
-	it("executes an authorized agent-level tool and returns the result", async () => {
+	it("executes an authorized agent-level tool, passing the agent's own tool_config verbatim", async () => {
 		const client = fakeClient({
 			executeInferenceTool: async (payload: any) => {
-				assert.equal(payload.tool_name, "send_email");
-				assert.equal(payload.tool_configs[0].tool_source, "gmail");
+				assert.equal(payload.tool_name, "GMAIL_SEND_EMAIL");
+				assert.deepEqual(payload.tool_configs[0], gmailToolConfig());
 				return ok({ result: "Email sent to qa@example.com", trace_id: "trace-123" });
 			},
 		});
@@ -385,19 +441,19 @@ describe("resolveConfig", () => {
 		const cfg = resolveConfig({});
 		assert.equal(cfg.apiKey, "");
 		assert.equal(cfg.baseUrl, "https://agent-prod.studio.lyzr.ai");
-		assert.deepEqual(cfg.providers, ["gmail", "slack"]);
+		assert.equal(cfg.agentId, undefined);
 		assert.equal(cfg.includeMcp, true);
 		assert.equal(cfg.preferLyzrTools, true);
-	});
-
-	it("splits and trims the providers list", () => {
-		const cfg = resolveConfig({ providers: " gmail , slack ,notion" });
-		assert.deepEqual(cfg.providers, ["gmail", "slack", "notion"]);
 	});
 
 	it("strips trailing slashes from base_url", () => {
 		const cfg = resolveConfig({ base_url: "https://example.com/" });
 		assert.equal(cfg.baseUrl, "https://example.com");
+	});
+
+	it("carries agent_id through as-is", () => {
+		const cfg = resolveConfig({ agent_id: "agent-42" });
+		assert.equal(cfg.agentId, "agent-42");
 	});
 });
 
@@ -433,15 +489,11 @@ function fakeApi(config: Record<string, any> = {}): GitagentPluginApi & {
 describe("registerWithClient", () => {
 	it("registers a lyzr_-prefixed tool per discovered action and adds dedupe prompt guidance", async () => {
 		const client = fakeClient({
-			listConnectedAccounts: async () => ok([{ provider: "gmail", status: "connected" }]),
-			listProviderActions: async (providerId: string) =>
-				providerId === "gmail"
-					? ok({ actions: [{ name: "send_email", description: "Send an email via Gmail." }] })
-					: ok({ actions: [] }),
+			getAgent: async () => ok({ tool_configs: [gmailToolConfig()] }),
 		});
 		const api = fakeApi();
 
-		const tools = await registerWithClient(api, baseConfig({ providers: ["gmail"] }), client);
+		const tools = await registerWithClient(api, baseConfig(), client);
 
 		assert.equal(tools.length, 1);
 		assert.equal(api.registeredTools.length, 1);
@@ -454,12 +506,11 @@ describe("registerWithClient", () => {
 
 	it("registered tool handlers proxy execution through the client", async () => {
 		const client = fakeClient({
-			listConnectedAccounts: async () => ok([{ provider: "gmail", status: "connected" }]),
-			listProviderActions: async () => ok({ actions: [{ name: "send_email", description: "Send email." }] }),
+			getAgent: async () => ok({ tool_configs: [gmailToolConfig()] }),
 			executeInferenceTool: async () => ok({ result: "sent!" }),
 		});
 		const api = fakeApi();
-		await registerWithClient(api, baseConfig({ providers: ["gmail"] }), client);
+		await registerWithClient(api, baseConfig(), client);
 
 		const handlerResult = await api.registeredTools[0].handler({ to: "qa@example.com" });
 		assert.equal(handlerResult.text, "sent!");
@@ -467,7 +518,7 @@ describe("registerWithClient", () => {
 	});
 
 	it("registers nothing and does not throw when discovery finds no tools", async () => {
-		const client = fakeClient({ listProviderActions: async () => ok({ actions: [] }) });
+		const client = fakeClient({ getAgent: async () => ok({ tool_configs: [] }) });
 		const api = fakeApi();
 
 		const tools = await registerWithClient(api, baseConfig(), client);
