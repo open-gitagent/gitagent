@@ -29,6 +29,7 @@ import { context as otelContext } from "@opentelemetry/api";
 import {
 	wrapToolWithOtel,
 	startSessionSpan,
+	startTurnTrace,
 	recordGenAiCall,
 } from "./telemetry.js";
 
@@ -151,7 +152,10 @@ export function query(options: QueryOptions): Query {
 		}
 
 		// 1. Load agent
-		const loaded = await loadAgent(dir, options.model, options.env);
+		// options.sessionId, when given, becomes the agent's session id — so a host
+		// that already tracks a conversation sees its own id on the model requests
+		// rather than a fresh one per run.
+		const loaded = await loadAgent(dir, options.model, options.env, options.sessionId);
 		_manifest = loaded.manifest;
 		_sessionId = _sessionId || loaded.sessionId;
 
@@ -515,6 +519,7 @@ export function query(options: QueryOptions): Query {
 					return;
 				}
 			}
+			startTurnTrace(loaded.model);
 			await otelContext.with(_session.ctx, () =>
 				agent.prompt(options.prompt as string),
 			);
@@ -539,6 +544,7 @@ export function query(options: QueryOptions): Query {
 						return;
 					}
 				}
+				startTurnTrace(loaded.model);
 				await otelContext.with(_session.ctx, () =>
 					agent.prompt(userMsg.content),
 				);

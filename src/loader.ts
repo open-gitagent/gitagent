@@ -117,8 +117,10 @@ async function ensureGitagentDir(agentDir: string): Promise<string> {
 	return gitagentDir;
 }
 
-async function writeSessionState(gitagentDir: string): Promise<string> {
-	const sessionId = randomUUID();
+async function writeSessionState(gitagentDir: string, override?: string): Promise<string> {
+	// A caller-supplied id wins so an embedding host (Studio, a web UI, a test)
+	// can tie this run to a session it already knows about.
+	const sessionId = override || randomUUID();
 	const state = {
 		session_id: sessionId,
 		started_at: new Date().toISOString(),
@@ -239,6 +241,7 @@ export async function loadAgent(
 	agentDir: string,
 	modelFlag?: string,
 	envFlag?: string,
+	sessionIdOverride?: string,
 ): Promise<LoadedAgent> {
 	// Parse agent.yaml
 	const manifestRaw = await readFile(join(agentDir, "agent.yaml"), "utf-8");
@@ -249,7 +252,7 @@ export async function loadAgent(
 
 	// Ensure .gitagent/ directory and write session state
 	const gitagentDir = await ensureGitagentDir(agentDir);
-	const sessionId = await writeSessionState(gitagentDir);
+	const sessionId = await writeSessionState(gitagentDir, sessionIdOverride);
 
 	// Resolve inheritance (Phase 2.4)
 	let parentRules = "";
@@ -404,6 +407,19 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 		// Standard registered model
 		model = getModel(provider as any, modelId as any);
 	}
+
+	// One run is many model requests: every turn of the agent loop, plus the
+	// off-loop reflection, repair and compaction calls. A gateway that groups
+	// telemetry per request sees each of those as a separate session unless the
+	// client says otherwise, so carry this run's id on every request.
+	//
+	// Cloned rather than mutated — getModel() returns a shared registry object,
+	// and writing to it would leak this run's id into every other model built in
+	// the same process.
+	model = {
+		...model,
+		headers: { ...(model as any).headers, "X-Session-Id": sessionId },
+	};
 
 	// For custom providers not in pi-ai's env key map, ensure an API key is available.
 	// pi-ai calls getEnvApiKey(model.provider) which only knows built-in providers.

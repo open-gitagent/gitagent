@@ -31,6 +31,7 @@ import {
 	initTelemetry,
 	wrapToolWithOtel,
 	startSessionSpan,
+	startTurnTrace,
 	recordGenAiCall,
 	shutdownTelemetry,
 } from "./telemetry.js";
@@ -52,6 +53,7 @@ interface ParsedArgs {
 	repo?: string;
 	pat?: string;
 	session?: string;
+	sessionId?: string;
 	voice?: string;
 }
 
@@ -67,6 +69,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 	let repo: string | undefined;
 	let pat: string | undefined;
 	let session: string | undefined;
+	let sessionId: string | undefined;
 	let voice: string | undefined;
 
 	for (let i = 0; i < args.length; i++) {
@@ -107,6 +110,11 @@ function parseArgs(argv: string[]): ParsedArgs {
 			case "--session":
 				session = args[++i];
 				break;
+			// Distinct from --session (a git branch for repo/sandbox mode): this is
+			// the id carried on model requests so a gateway can group the run.
+			case "--session-id":
+				sessionId = args[++i];
+				break;
 			case "--voice":
 			case "-v":
 				// Accept optional backend name: --voice, --voice openai, --voice gemini
@@ -124,7 +132,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 		}
 	}
 
-	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken, repo, pat, session, voice };
+	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken, repo, pat, session, sessionId, voice };
 }
 
 function handleEvent(
@@ -321,7 +329,7 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch, voice } = parseArgs(process.argv);
+	const { model, dir: rawDir, prompt, env, sandbox: useSandbox, sandboxRepo, sandboxToken, repo, pat, session: sessionBranch, sessionId: sessionIdFlag, voice } = parseArgs(process.argv);
 
 	// If --repo is given, derive a default dir from the repo URL (skip interactive prompt)
 	let dir = rawDir;
@@ -465,7 +473,7 @@ async function main(): Promise<void> {
 
 	let loaded;
 	try {
-		loaded = await loadAgent(dir, model, env);
+		loaded = await loadAgent(dir, model, env, sessionIdFlag);
 	} catch (err: any) {
 		console.error(red(`Error: ${err.message}`));
 		process.exit(1);
@@ -643,6 +651,7 @@ async function main(): Promise<void> {
 	// Single-shot mode
 	if (prompt) {
 		try {
+			startTurnTrace(loaded.model);
 			await otelContext.with(_session.ctx, () => agent.prompt(prompt));
 		} catch (err: any) {
 			auditLogger?.logError(err.message).catch(() => {});
@@ -804,6 +813,7 @@ async function main(): Promise<void> {
 			}
 
 			try {
+				startTurnTrace(loaded.model);
 				await otelContext.with(_session.ctx, () => agent.prompt(promptText));
 			} catch (err: any) {
 				console.error(red(`Error: ${err.message}`));

@@ -24,6 +24,7 @@ import type {
 	Counter,
 } from "@opentelemetry/api";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import { randomBytes } from "crypto";
 
 // ── Public types ───────────────────────────────────────────────────────
 
@@ -182,6 +183,33 @@ export async function shutdownTelemetry(): Promise<void> {
 
 export function isTelemetryEnabled(): boolean {
 	return _initialized;
+}
+
+// ── Turn-scoped trace propagation ──────────────────────────────────────
+
+/**
+ * Start a new W3C trace for one user turn.
+ *
+ * A single user message costs several HTTP calls to the model gateway — one
+ * that comes back with a tool call, another with the answer, and so on. Each
+ * call is a separate request, so a gateway that traces per request records one
+ * trace per call and the turn arrives split across several of them. Sending the
+ * same `traceparent` on every call of the turn lets the gateway stitch them
+ * into one trace.
+ *
+ * No-op once telemetry is initialised: the undici instrumentation already
+ * injects `traceparent` from the active span, and a header written here would
+ * fight it.
+ */
+export function startTurnTrace(model: unknown): void {
+	try {
+		if (_initialized || !model) return;
+		const m = model as { headers?: Record<string, string> };
+		const traceparent = `00-${randomBytes(16).toString("hex")}-${randomBytes(8).toString("hex")}-01`;
+		m.headers = { ...(m.headers ?? {}), traceparent };
+	} catch {
+		// Telemetry must never break a run.
+	}
 }
 
 // ── Tracer / meter accessors ───────────────────────────────────────────
