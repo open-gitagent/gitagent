@@ -132,6 +132,7 @@ gitagent --repo https://github.com/org/repo "Add unit tests"
 | `--repo <url>` | `-r` | GitHub repo URL to clone and work on |
 | `--pat <token>` | | GitHub PAT (or set `GITHUB_TOKEN` / `GIT_TOKEN`) |
 | `--session <branch>` | | Resume an existing session branch |
+| `--session-id <id>` | | Session id sent on model requests, so a gateway groups the run (default: generated) |
 | `--model <provider:model>` | `-m` | Override model (e.g. `anthropic:claude-sonnet-4-5-20250929`) |
 | `--sandbox` | `-s` | Run in sandbox VM |
 | `--prompt <text>` | `-p` | Single-shot prompt (skip REPL) |
