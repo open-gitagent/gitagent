@@ -312,6 +312,11 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 	return absDir;
 }
 
+// The REPL outlives main(): main() resolves once the prompt loop is wired up, so
+// telemetry must be flushed by whichever exit path the user actually takes, not
+// when main()'s promise settles.
+let _replActive = false;
+
 async function main(): Promise<void> {
 	// Handle plugin subcommand: gitagent plugin <install|list|remove|...>
 	if (process.argv[2] === "plugin") {
@@ -864,11 +869,6 @@ async function main(): Promise<void> {
 	ask();
 }
 
-// The REPL outlives main(): main() resolves once the prompt loop is wired up,
-// so telemetry must be flushed by whichever exit path the user actually takes,
-// not when main()'s promise settles.
-let _replActive = false;
-
 // Flush OpenTelemetry exporters on SIGTERM. No-op when telemetry is disabled.
 process.on("SIGTERM", () => {
 	shutdownTelemetry().catch(() => {}).finally(() => process.exit(0));
@@ -877,6 +877,8 @@ process.on("SIGTERM", () => {
 main()
   .finally(() => {
     // Single-shot mode ends here; the REPL flushes from its own exit paths.
+    // finally runs before the catch below, so a prompt that throws still
+    // flushes before process.exit discards anything pending.
     if (!_replActive) shutdownTelemetry().catch(() => {});
   })
   .catch((err) => {

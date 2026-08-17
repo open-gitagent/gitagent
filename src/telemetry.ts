@@ -200,6 +200,13 @@ export function isTelemetryEnabled(): boolean {
  * No-op once telemetry is initialised: the undici instrumentation already
  * injects `traceparent` from the active span, and a header written here would
  * fight it.
+ *
+ * Writes through to the model rather than returning a header map. The Agent is
+ * constructed with this exact object and pi-ai reads `headers` at request time,
+ * so a copy made here would never be seen. That is safe because the model is
+ * already this run's own: `loadAgent` clones it off the shared registry, and
+ * every `query()` loads its own, so concurrent runs never share one. Turns
+ * within a run are sequential, so the only writer per object is this function.
  */
 export function startTurnTrace(model: unknown): void {
 	try {
