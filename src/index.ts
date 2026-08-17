@@ -711,6 +711,7 @@ async function main(): Promise<void> {
 				} catch {
 					/* ignore */
 				}
+				await shutdownTelemetry().catch(() => {});
 				process.exit(0);
 			}
 
@@ -853,12 +854,20 @@ async function main(): Promise<void> {
 			try {
 				_session.end({ "gitagent.cost_usd": _totalCostUsd });
 			} catch { /* ignore */ }
-			Promise.all([mcpSetup.cleanup(), stopSandbox()]).finally(() => process.exit(0));
+			Promise.all([mcpSetup.cleanup(), stopSandbox()])
+				.finally(() => shutdownTelemetry().catch(() => {}))
+				.finally(() => process.exit(0));
 		}
 	});
 
+	_replActive = true;
 	ask();
 }
+
+// The REPL outlives main(): main() resolves once the prompt loop is wired up,
+// so telemetry must be flushed by whichever exit path the user actually takes,
+// not when main()'s promise settles.
+let _replActive = false;
 
 // Flush OpenTelemetry exporters on SIGTERM. No-op when telemetry is disabled.
 process.on("SIGTERM", () => {
@@ -866,7 +875,10 @@ process.on("SIGTERM", () => {
 });
 
 main()
-  .finally(() => shutdownTelemetry().catch(() => {}))
+  .finally(() => {
+    // Single-shot mode ends here; the REPL flushes from its own exit paths.
+    if (!_replActive) shutdownTelemetry().catch(() => {});
+  })
   .catch((err) => {
     console.error(red(`Fatal: ${err.message}`));
     process.exit(1);
