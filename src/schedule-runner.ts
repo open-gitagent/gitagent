@@ -16,8 +16,24 @@ export interface SchedulerOptions {
 }
 
 const activeTasks = new Map<string, ScheduledTask>();
-const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+export const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const runningJobs = new Set<string>();
+
+// setTimeout's delay is a 32-bit signed int under the hood — anything past
+// this fires almost immediately instead of waiting (Node clamps it to 1ms
+// and emits a TimeoutOverflowWarning). Chunk long waits into safe segments.
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+export function scheduleAt(id: string, targetTime: number, onDue: () => void): void {
+	const remaining = targetTime - Date.now();
+	if (remaining <= 0) {
+		activeTimers.delete(id);
+		onDue();
+		return;
+	}
+	const timer = setTimeout(() => scheduleAt(id, targetTime, onDue), Math.min(remaining, MAX_TIMEOUT_MS));
+	activeTimers.set(id, timer);
+}
 
 export async function startScheduler(opts: SchedulerOptions): Promise<void> {
 	const schedules = await discoverSchedules(opts.agentDir);
@@ -33,10 +49,9 @@ export async function startScheduler(opts: SchedulerOptions): Promise<void> {
 				console.log(dim(`[scheduler] "${schedule.id}" runAt is in the past — skipping`));
 				continue;
 			}
-			const timer = setTimeout(() => {
+			scheduleAt(schedule.id, new Date(schedule.runAt).getTime(), () => {
 				executeScheduledJob(schedule, opts, true);
-			}, delay);
-			activeTimers.set(schedule.id, timer);
+			});
 			const when = new Date(schedule.runAt).toLocaleString();
 			console.log(dim(`[scheduler] "${schedule.id}" scheduled once at ${when} (in ${Math.round(delay / 1000)}s)`));
 			activeCount++;
