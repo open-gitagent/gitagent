@@ -141,11 +141,18 @@ export function query(options: QueryOptions): Query {
 			if (!token) {
 				throw new Error("repo.token, GITHUB_TOKEN, or GIT_TOKEN is required with repo option");
 			}
+			const repoDir = options.repo.dir ?? options.dir;
+			if (!repoDir) {
+				throw new Error(
+					"repo mode requires an explicit `dir` (top-level `dir` or `repo.dir`) — refusing to default to the current working directory",
+				);
+			}
 			localSession = initLocalSession({
 				url: options.repo.url,
 				token,
-				dir: options.repo.dir || dir,
+				dir: repoDir,
 				session: options.repo.session,
+				readOnly: options.repo.readOnly,
 			});
 			dir = localSession.dir;
 		}

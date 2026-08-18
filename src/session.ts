@@ -1,5 +1,5 @@
-import { execSync } from "child_process";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { execSync, execFileSync } from "child_process";
+import { existsSync, mkdirSync, writeFileSync, realpathSync } from "fs";
 import { resolve } from "path";
 import { randomBytes } from "crypto";
 
@@ -10,6 +10,7 @@ export interface LocalRepoOptions {
 	token: string;
 	dir: string;
 	session?: string;
+	readOnly?: boolean;
 }
 
 export interface LocalSession {
@@ -29,7 +30,7 @@ function authedUrl(url: string, token: string): string {
 }
 
 function cleanUrl(url: string): string {
-	return url.replace(/^https:\/\/[^@]+@/, "https://");
+	return url.replace(/^https:\/\/[^@]+@/, "https://").replace(/\.git$/, "");
 }
 
 function git(args: string, cwd: string): string {
@@ -56,6 +57,9 @@ function getDefaultBranch(cwd: string): string {
 
 export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 	const { url, token, session } = opts;
+	if (!opts.dir) {
+		throw new Error("repo.dir is required — refusing to guess a working directory for repo mode");
+	}
 	const dir = resolve(opts.dir);
 	const aUrl = authedUrl(url, token);
 
@@ -63,7 +67,39 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 	if (!existsSync(dir)) {
 		execSync(`git clone --depth 1 --no-single-branch ${aUrl} ${dir}`, { stdio: "pipe" });
 	} else {
-		git(`remote set-url origin ${aUrl}`, dir);
+		// Refuse to operate unless `dir` is a git repo root in its own right.
+		// If `dir` has no local .git, git commands here would silently resolve
+		// to whatever ancestor repo does have one — e.g. a monorepo root.
+		let topLevel: string;
+		try {
+			topLevel = execSync("git rev-parse --show-toplevel", { cwd: dir, stdio: "pipe", encoding: "utf-8" }).trim();
+		} catch {
+			throw new Error(`${dir} exists but is not a git repository — refusing to operate on it`);
+		}
+		if (realpathSync(topLevel) !== realpathSync(dir)) {
+			throw new Error(
+				`${dir} has no .git of its own — git commands here would escape to the ancestor repo at ${topLevel}. Refusing to run destructive commands.`,
+			);
+		}
+
+		// Refuse to reset a repo that's already tracking a different remote —
+		// it isn't the clone this call expects, even if the folder exists.
+		let existingOrigin = "";
+		try {
+			existingOrigin = execSync("git remote get-url origin", { cwd: dir, stdio: "pipe", encoding: "utf-8" }).trim();
+		} catch {
+			// no origin configured yet — fine, we're about to set one
+		}
+		if (existingOrigin && cleanUrl(existingOrigin) !== cleanUrl(url)) {
+			throw new Error(
+				`${dir} already tracks a different remote (${cleanUrl(existingOrigin)}), not ${url}. Refusing to overwrite it.`,
+			);
+		}
+
+		// `set-url` only updates an existing remote — it errors if `origin`
+		// isn't configured yet, which happens if `dir` is a repo the caller
+		// created themselves rather than one gitagent cloned previously.
+		git(`remote ${existingOrigin ? "set-url" : "add"} origin ${aUrl}`, dir);
 		git("fetch origin", dir);
 
 		// Reset local default branch to latest remote
@@ -133,9 +169,12 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 				git("diff --cached --quiet", dir);
 				// Nothing staged — skip
 			} catch {
-				// There are staged changes
+				// There are staged changes. Use execFileSync with an argv array
+				// (not the shell-interpolated `git()` helper) since commitMsg may
+				// be an arbitrary caller-supplied string containing quotes, `$()`,
+				// backticks, etc.
 				const commitMsg = msg || `gitagent: auto-commit (${branch})`;
-				git(`commit -m "${commitMsg}"`, dir);
+				execFileSync("git", ["commit", "-m", commitMsg], { cwd: dir, stdio: "pipe" });
 			}
 		},
 
@@ -144,9 +183,11 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 		},
 
 		finalize() {
-			localSession.commitChanges();
-			localSession.push();
-			// Strip PAT from remote URL
+			if (!opts.readOnly) {
+				localSession.commitChanges();
+				localSession.push();
+			}
+			// Strip PAT from remote URL regardless of readOnly
 			git(`remote set-url origin ${cleanUrl(url)}`, dir);
 		},
 	};
