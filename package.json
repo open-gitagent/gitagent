@@ -1,6 +1,6 @@
 {
   "name": "@open-gitagent/gitagent",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "A universal git-native multimodal always learning AI Agent (TinyHuman)",
   "author": "shreyaskapale",
   "license": "MIT",
