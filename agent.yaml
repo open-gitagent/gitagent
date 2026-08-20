@@ -12,3 +12,11 @@ tools:
   - memory
 runtime:
   max_turns: 56
+plugins:
+  lyzr-tools:
+    enabled: true
+    # No-ops with a single warning log line if LYZR_API_KEY isn't set —
+    # it never makes a network call without an API key. See
+    # plugins/lyzr-tools/README.md for full configuration options.
+    config:
+      api_key: "${LYZR_API_KEY}"

@@ -1,0 +1,48 @@
+id: lyzr-tools
+name: Lyzr Tool Bridge
+version: 0.1.0
+description: Discovers tools already authorized in Lyzr (Gmail, Slack, and other connected apps) and proxies execution through Lyzr instead of requiring local credentials.
+author: open-gitagent
+license: MIT
+
+provides:
+  prompt: prompt.md
+
+config:
+  properties:
+    api_key:
+      type: string
+      description: Lyzr API key, sent as the x-api-key header on every request.
+      env: LYZR_API_KEY
+    base_url:
+      type: string
+      description: Lyzr Agent API base URL.
+      default: "https://agent-prod.studio.lyzr.ai"
+      env: LYZR_BASE_URL
+    agent_id:
+      type: string
+      description: Lyzr agent ID whose own tool_configs (GET /v3/agents/{agent_id}) are the source of tool discovery, and which is used for agent-level tool execution (POST /v3/inference/tools/execute). Required for any tool discovery to happen.
+      env: GITAGENT_LYZR_AGENT_ID
+    user_id:
+      type: string
+      description: Lyzr user ID used to look up connected accounts as a secondary authorization signal.
+      env: LYZR_USER_ID
+    workspace_id:
+      type: string
+      description: Optional Lyzr workspace/org ID, for future scoping needs.
+      env: LYZR_WORKSPACE_ID
+    include_mcp:
+      type: boolean
+      description: Also discover and register tools exposed through Lyzr MCP servers.
+      default: true
+    prefer_lyzr_tools:
+      type: boolean
+      description: Add prompt guidance telling the model to prefer Lyzr-backed tools over local duplicate skills.
+      default: true
+    timeout_ms:
+      type: number
+      description: HTTP request timeout for Lyzr API calls, in milliseconds.
+      default: 10000
+  required: [api_key]
+
+entry: index.ts
