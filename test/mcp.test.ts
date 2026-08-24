@@ -165,3 +165,34 @@ describe("setupMcp", () => {
 		await result.cleanup();
 	});
 });
+
+
+describe("Parallel Search opt-in", () => {
+	it("does not connect by default", async () => {
+		let calls = 0;
+		const result = await setupMcp(undefined, new Set(), { connect: async () => { calls++; return null; } });
+		assert.equal(calls, 0);
+		assert.deepEqual(result.tools, []);
+	});
+
+	it("connects and discovers tools only when explicitly enabled", async () => {
+		let received: any;
+		const client = { listTools: async () => ({ tools: [{ name: "web_search", inputSchema: {} }] }), callTool: async () => ({ content: [] }) };
+		const result = await setupMcp(undefined, new Set(), { parallelSearch: true, connect: async (name, config) => {
+			received = { name, config };
+			return { name, client: client as any, close: async () => {} };
+		} });
+
+		assert.deepEqual(received, { name: "parallel-search", config: { type: "http", url: "https://search.parallel.ai/mcp" } });
+		assert.deepEqual(result.tools.map((tool) => tool.name), ["parallel-search__web_search"]);
+		await result.cleanup();
+	});
+
+	it("preserves an existing server with the reserved name", async () => {
+		let received: any;
+		await setupMcp({ "parallel-search": { type: "http", url: "https://user.example/mcp", headers: { "X-Test": "kept" } } }, new Set(), { parallelSearch: true, connect: async (name, config) => { received = { name, config }; return null; } });
+
+		assert.equal(received.config.url, "https://user.example/mcp");
+		assert.deepEqual(received.config.headers, { "X-Test": "kept" });
+	});
+});

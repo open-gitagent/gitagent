@@ -9,6 +9,13 @@ const _require = createRequire(import.meta.url);
 const { version: PACKAGE_VERSION } = _require("../../package.json") as { version: string };
 
 const DEFAULT_TIMEOUT_MS = 30000;
+const PARALLEL_SEARCH_URL = "https://search.parallel.ai/mcp";
+
+export interface McpSetupOptions {
+	parallelSearch?: boolean;
+	/** Test seam for exercising discovery without network access. */
+	connect?: (name: string, config: McpServerConfig) => Promise<McpConnection | null>;
+}
 
 /** A live connection to one MCP server. */
 interface McpConnection {
@@ -214,14 +221,20 @@ async function connectServer(name: string, rawCfg: McpServerConfig): Promise<Mcp
 export async function setupMcp(
 	servers: Record<string, McpServerConfig> | undefined,
 	existingToolNames: Set<string>,
+	options: McpSetupOptions = {},
 ): Promise<McpSetupResult> {
-	const entries = Object.entries(servers ?? {});
+	const resolved = { ...servers };
+	if (options.parallelSearch && !("parallel-search" in resolved)) {
+		resolved["parallel-search"] = { type: "http", url: PARALLEL_SEARCH_URL };
+	}
+	const entries = Object.entries(resolved);
 	if (entries.length === 0) {
 		return { tools: [], cleanup: async () => {} };
 	}
 
+	const connect = options.connect ?? connectServer;
 	const settled = await Promise.allSettled(
-		entries.map(([name, cfg]) => connectServer(name, cfg)),
+		entries.map(([name, cfg]) => connect(name, cfg)),
 	);
 	const connections = settled
 		.map((s) => (s.status === "fulfilled" ? s.value : null))

@@ -217,7 +217,7 @@ export function query(options: QueryOptions): Query {
 
 		// MCP tools — merge manifest + SDK server configs (SDK wins on key collision)
 		const mcpServers = { ...loaded.manifest.mcp_servers, ...options.mcpServers };
-		mcpSetup = await setupMcp(mcpServers, existingToolNames);
+		mcpSetup = await setupMcp(mcpServers, existingToolNames, { parallelSearch: options.parallelSearch });
 		tools = [...tools, ...mcpSetup.tools];
 
 		// SDK-provided tools

@@ -148,6 +148,8 @@ export interface QueryOptions {
 	sessionId?: string;
 	/** MCP servers to connect to. Merged with manifest `mcp_servers` (these win on key collision). */
 	mcpServers?: Record<string, McpServerConfig>;
+	/** Opt in to the credential-free Parallel Search MCP server. Existing `parallel-search` config wins. */
+	parallelSearch?: boolean;
 	constraints?: {
 		temperature?: number;
 		maxTokens?: number;

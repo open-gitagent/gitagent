@@ -661,6 +661,10 @@ for await (const msg of query({
 
 SDK `mcpServers` are merged with any `agent.yaml` `mcp_servers` (the SDK value wins on a key collision).
 
+### Parallel Search opt-in
+
+Set `parallelSearch: true` in `query()` to connect to the credential-free Streamable HTTP endpoint `https://search.parallel.ai/mcp`; it is disabled by default and preserves an `parallel-search` server (including headers). When its tools are used, user-provided search objectives, search queries, and requested URLs are sent to Parallel. See [Search MCP docs](https://docs.parallel.ai/integrations/mcp/search-mcp).
+
 ### Behavior & guarantees
 
 - **Fail-soft:** a server that can't start (or times out) is logged and skipped — other servers and built-in tools keep working.
