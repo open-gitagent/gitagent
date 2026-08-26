@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://gitagent.dev/spec/workflow.schema.json",
+  "title": "Gitagent SkillFlow Workflow",
+  "description": "A SkillFlow workflow: a named sequence of steps, where each step invokes a skill with a prompt. Runtime semantics are defined by src/workflows.ts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "description", "steps"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Kebab-case identifier for the workflow. Used as the file name.",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line description of what the workflow does.",
+      "minLength": 1
+    },
+    "steps": {
+      "type": "array",
+      "description": "Ordered list of steps. Steps execute top-to-bottom.",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/step" }
+    }
+  },
+  "definitions": {
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skill", "prompt"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Optional snake_case identifier for the step. Used when other steps reference this one via depends_on.",
+          "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+        },
+        "skill": {
+          "type": "string",
+          "description": "Name of an installed skill (kebab-case) the step will invoke. Must match an entry in the agent's skills/ directory, or 'approval' for a human-review step.",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The natural-language instruction passed to the skill for this step.",
+          "minLength": 1
+        },
+        "channel": {
+          "type": "string",
+          "description": "Optional channel/destination for the step output (e.g. a Slack channel name).",
+          "minLength": 1
+        },
+        "depends_on": {
+          "type": "array",
+          "description": "Optional list of step ids that must complete before this step runs.",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(_[a-z0-9]+)*$"
+          },
+          "uniqueItems": true
+        },
+        "requires_approval": {
+          "type": "boolean",
+          "description": "If true, the workflow pauses for human approval before this step runs."
+        }
+      }
+    }
+  }
+}

@@ -26,6 +26,8 @@ import type { LocalSession } from "./session.js";
 // Imported dynamically below so the slim core has no static dependency on it —
 // users without voice get a clean install + a clear error if they try --voice.
 import { handlePluginCommand } from "./plugin-cli.js";
+import { handleWorkflowCommand } from "./commands/workflow.js";
+import { loadDotEnvFiles, maybeInitTelemetry } from "./utils/bootstrap.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	initTelemetry,
@@ -311,6 +313,12 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 let _replActive = false;
 
 async function main(): Promise<void> {
+	// Handle workflow subcommand: gitagent workflow <generate|...>
+	if (process.argv[2] === "workflow") {
+		await handleWorkflowCommand(process.argv.slice(2));
+		return;
+	}
+
 	// Handle plugin subcommand: gitagent plugin <install|list|remove|...>
 	if (process.argv[2] === "plugin") {
 		const allArgs = process.argv.slice(3);
@@ -385,31 +393,10 @@ async function main(): Promise<void> {
 		dir = resolve(dir);
 	}
 
-	// Env precedence (lowest → highest): inherited env → ~/.gitagent/.env (global fallback) → agent-dir .env (winner).
-	// loadEnvPath is called in that order so the LAST source wins; agent .env still beats a shell placeholder.
-	const loadEnvPath = (envPath: string): void => {
-		if (!existsSync(envPath)) return;
-		const envContent = readFileSync(envPath, "utf-8");
-		for (const rawLine of envContent.split("\n")) {
-			const line = rawLine.trim();
-			if (!line || line.startsWith("#")) continue;
-			const eq = line.indexOf("=");
-			if (eq <= 0) continue;
-			const key = line.slice(0, eq).trim();
-			let val = line.slice(eq + 1).trim();
-			if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-				val = val.slice(1, -1);
-			}
-			process.env[key] = val;
-		}
-	};
-	loadEnvPath(join(homedir(), ".gitagent", ".env"));
-	loadEnvPath(resolve(dir, ".env"));
+	loadDotEnvFiles(dir);
 
 	// Auto-init telemetry after .env is loaded so OTEL_* vars set in .env are picked up.
-	if ((process.env.OTEL_EXPORTER_OTLP_ENDPOINT || process.env.OTEL_TRACES_EXPORTER === "console") && process.env.GITAGENT_OTEL_ENABLED !== "false") {
-		await initTelemetry({});
-	}
+	await maybeInitTelemetry();
 
 	// Voice mode — dynamically load the @open-gitagent/voice package.
 	// Core ships without voice so the published tarball stays slim and supply-chain

@@ -465,6 +465,14 @@ export function recordGenAiCall(
 		const outputTokens = Number(
 			msg.usage?.output ?? msg.usage?.outputTokens ?? 0,
 		);
+		// Prompt caching means `usage.input` counts only the uncached prefix, so a
+		// large system prompt shows up as cacheWrite/cacheRead instead. Reporting
+		// input_tokens alone made a 1500-token call look like 3 tokens while the
+		// cost attribute (which does include cache) disagreed. Emitted separately
+		// so existing input_tokens semantics are unchanged and the total is
+		// reconstructable.
+		const cacheReadTokens = Number(msg.usage?.cacheRead ?? 0);
+		const cacheWriteTokens = Number(msg.usage?.cacheWrite ?? 0);
 		const cost = Number(
 			msg.usage?.cost?.total ?? msg.usage?.cost ?? 0,
 		);
@@ -478,6 +486,8 @@ export function recordGenAiCall(
 				"gen_ai.response.finish_reasons": [String(finishReason)],
 				"gen_ai.usage.input_tokens": inputTokens,
 				"gen_ai.usage.output_tokens": outputTokens,
+				"gen_ai.usage.cache_read_input_tokens": Number.isFinite(cacheReadTokens) ? cacheReadTokens : 0,
+				"gen_ai.usage.cache_creation_input_tokens": Number.isFinite(cacheWriteTokens) ? cacheWriteTokens : 0,
 				"gitagent.cost_usd": Number.isFinite(cost) ? cost : 0,
 			},
 		});
