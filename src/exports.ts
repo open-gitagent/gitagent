@@ -90,6 +90,9 @@ export {
 	saveFlowDefinition,
 	deleteFlowDefinition,
 } from "./workflows.js";
+// Model routing — consumed by @open-gitagent/voice to pick a per-step model.
+export { resolveRoutedModel } from "./model-routing.js";
+export type { ModelTier, RoutingConfig, RouteInput, RouteResult, RouteQuery, RouteDeps } from "./model-routing.js";
 export {
 	discoverSchedules,
 	saveSchedule,

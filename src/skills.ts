@@ -11,6 +11,7 @@ export interface SkillMetadata {
 	usage_count?: number;
 	success_count?: number;
 	failure_count?: number;
+	model?: string;
 }
 
 export interface ParsedSkill extends SkillMetadata {
@@ -96,6 +97,7 @@ export async function discoverSkills(agentDir: string): Promise<SkillMetadata[]>
 		if (typeof frontmatter.usage_count === "number") meta.usage_count = frontmatter.usage_count;
 		if (typeof frontmatter.success_count === "number") meta.success_count = frontmatter.success_count;
 		if (typeof frontmatter.failure_count === "number") meta.failure_count = frontmatter.failure_count;
+		if (typeof frontmatter.model === "string") meta.model = frontmatter.model;
 
 		skills.push(meta);
 	}
