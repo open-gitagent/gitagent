@@ -11,6 +11,13 @@ export interface SchedulerOptions {
 	model?: string;
 	env?: string;
 	runPrompt: (prompt: string) => Promise<string>;
+	/**
+	 * Run a SkillFlow by name, with the schedule's prompt as its input. Required
+	 * for schedules that set `flow`. The caller owns the approval policy — pass
+	 * a `requestApproval` through to `executeFlow` to allow unattended gates,
+	 * otherwise gates deny and the job reports why.
+	 */
+	runFlow?: (flowName: string, input: string) => Promise<string>;
 	broadcastToBrowsers: (msg: ServerMessage) => void;
 	appendToHistory: (msg: any) => void;
 }
@@ -105,12 +112,19 @@ export async function executeScheduledJob(schedule: ScheduleDefinition, opts: Sc
 
 	try {
 	// Broadcast schedule start to chat
-	const startMsg = { type: "schedule_start", id: schedule.id, prompt: schedule.prompt, ts } as any;
+	const startMsg = { type: "schedule_start", id: schedule.id, prompt: schedule.prompt, ...(schedule.flow ? { flow: schedule.flow } : {}), ts } as any;
 	opts.broadcastToBrowsers(startMsg as ServerMessage);
 	opts.appendToHistory(startMsg);
 
 	try {
-		result = await opts.runPrompt(schedule.prompt);
+		if (schedule.flow) {
+			if (!opts.runFlow) {
+				throw new Error(`Schedule "${schedule.id}" runs flow "${schedule.flow}" but this runtime has no flow executor`);
+			}
+			result = await opts.runFlow(schedule.flow, schedule.prompt);
+		} else {
+			result = await opts.runPrompt(schedule.prompt);
+		}
 	} catch (err: any) {
 		result = err.message || "Unknown error";
 		success = false;

@@ -5,7 +5,10 @@ import yaml from "js-yaml";
 
 export interface ScheduleDefinition {
 	id: string;
+	/** Free-text prompt to run. When `flow` is set this is the flow's input instead. */
 	prompt: string;
+	/** Name of a SkillFlow to run instead of a plain prompt. */
+	flow?: string;
 	cron: string;
 	mode: "repeat" | "once";
 	runAt?: string; // ISO datetime for "once" mode (alternative to cron)
@@ -39,10 +42,11 @@ export async function discoverSchedules(agentDir: string): Promise<ScheduleDefin
 		try {
 			const raw = await readFile(filePath, "utf-8");
 			const data = yaml.load(raw) as Record<string, any>;
-			if (data?.id && data?.prompt && (data?.cron || data?.runAt)) {
+			if (data?.id && (data?.prompt || data?.flow) && (data?.cron || data?.runAt)) {
 				schedules.push({
 					id: String(data.id),
-					prompt: String(data.prompt),
+					prompt: String(data.prompt || ""),
+					...(data.flow ? { flow: String(data.flow) } : {}),
 					cron: String(data.cron || ""),
 					mode: data.mode === "once" ? "once" : "repeat",
 					...(data.runAt ? { runAt: String(data.runAt) } : {}),
@@ -63,12 +67,13 @@ export async function discoverSchedules(agentDir: string): Promise<ScheduleDefin
 export async function loadSchedule(filePath: string): Promise<ScheduleDefinition> {
 	const raw = await readFile(filePath, "utf-8");
 	const data = yaml.load(raw) as Record<string, any>;
-	if (!data?.id || !data?.prompt || (!data?.cron && !data?.runAt)) {
-		throw new Error("Invalid schedule definition: missing id, prompt, or cron/runAt");
+	if (!data?.id || (!data?.prompt && !data?.flow) || (!data?.cron && !data?.runAt)) {
+		throw new Error("Invalid schedule definition: missing id, prompt/flow, or cron/runAt");
 	}
 	return {
 		id: String(data.id),
-		prompt: String(data.prompt),
+		prompt: String(data.prompt || ""),
+		...(data.flow ? { flow: String(data.flow) } : {}),
 		cron: String(data.cron || ""),
 		mode: data.mode === "once" ? "once" : "repeat",
 		...(data.runAt ? { runAt: String(data.runAt) } : {}),
@@ -83,8 +88,11 @@ export async function saveSchedule(agentDir: string, schedule: ScheduleDefinitio
 	if (!KEBAB_RE.test(schedule.id)) {
 		throw new Error("Schedule id must be kebab-case (e.g. daily-standup)");
 	}
-	if (!schedule.prompt || (!schedule.cron && !schedule.runAt)) {
-		throw new Error("Schedule must have a prompt and cron expression or runAt time");
+	if ((!schedule.prompt && !schedule.flow) || (!schedule.cron && !schedule.runAt)) {
+		throw new Error("Schedule must have a prompt or flow, and a cron expression or runAt time");
+	}
+	if (schedule.flow && !KEBAB_RE.test(schedule.flow)) {
+		throw new Error("Schedule flow must be a kebab-case flow name (e.g. daily-report)");
 	}
 	const schedulesDir = join(agentDir, "schedules");
 	mkdirSync(schedulesDir, { recursive: true });
@@ -92,6 +100,7 @@ export async function saveSchedule(agentDir: string, schedule: ScheduleDefinitio
 	const content = yaml.dump({
 		id: schedule.id,
 		prompt: schedule.prompt,
+		...(schedule.flow ? { flow: schedule.flow } : {}),
 		cron: schedule.cron || "",
 		mode: schedule.mode || "repeat",
 		...(schedule.runAt ? { runAt: schedule.runAt } : {}),

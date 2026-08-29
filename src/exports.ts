@@ -90,6 +90,15 @@ export {
 	saveFlowDefinition,
 	deleteFlowDefinition,
 } from "./workflows.js";
+export type { SkillFlowStep, SkillFlowDefinition } from "./workflows.js";
+// Flow execution lives in core so the CLI, scheduler, SDK and voice all run
+// SkillFlows through the same loop; callers inject their own side effects.
+export { executeFlow, APPROVAL_GATE } from "./flow-runner.js";
+export type { FlowRunDeps, FlowEvent, FlowResult, FlowStepResult } from "./flow-runner.js";
+// The batteries-included form: runFlow supplies the default "run this step in
+// this agent" behaviour so callers don't hand-write it.
+export { runFlow } from "./run-flow.js";
+export type { RunFlowOptions, RunFlowResult, ApprovalPolicy, StepUsage } from "./run-flow.js";
 export {
 	discoverSchedules,
 	saveSchedule,
