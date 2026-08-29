@@ -25,6 +25,7 @@ import type {
 	SandboxOptions,
 } from "./sdk-types.js";
 import { CostTracker } from "./cost-tracker.js";
+import { createLoopGuard } from "./loop-guard.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	wrapToolWithOtel,
@@ -308,11 +309,19 @@ export function query(options: QueryOptions): Query {
 			if (c.top_k !== undefined) modelOptions.topK = c.top_k;
 		}
 
-		if (options.maxTurns !== undefined) {
-			modelOptions.maxTurns = options.maxTurns;
-		}
+		// Resolve the tool-use turn cap. pi-agent-core does not enforce a bound
+		// itself, so gitagent must — otherwise a provider that re-requests the
+		// same tool call loops forever (issue #58). Precedence: explicit option
+		// > agent manifest runtime.max_turns > safe default.
+		const DEFAULT_MAX_TURNS = 50;
+		const maxTurns =
+			options.maxTurns ?? loaded.manifest.runtime?.max_turns ?? DEFAULT_MAX_TURNS;
+		// Reflect the effective cap in agent state so telemetry/inspection shows
+		// the limit the loop guard actually enforces, not just when it was passed.
+		modelOptions.maxTurns = maxTurns;
 
 		// 8. Create Agent
+		const loopGuard = createLoopGuard({ maxTurns });
 		const agent = new Agent({
 			initialState: {
 				systemPrompt,
@@ -320,6 +329,7 @@ export function query(options: QueryOptions): Query {
 				tools,
 				...modelOptions,
 			},
+			afterToolCall: loopGuard.afterToolCall,
 		});
 		agentRef = agent;
 		// Wire cancellation: q.abort() (via ac) and any consumer-supplied
