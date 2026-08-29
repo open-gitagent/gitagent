@@ -24,7 +24,7 @@ import type {
 	QueryOptions,
 	SandboxOptions,
 } from "./sdk-types.js";
-import { CostTracker } from "./cost-tracker.js";
+import { CostTracker, computeCostUsd } from "./cost-tracker.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	wrapToolWithOtel,
@@ -393,6 +393,39 @@ export function query(options: QueryOptions): Query {
 
 					const { text, thinking } = extractContent(msg);
 
+					// Resolve cost. Providers that call pi-ai's calculateCost supply
+					// msg.usage.cost.total; the openai-completions path and custom
+					// models do not, leaving it 0 even when tokens were billed
+					// (issue #67). When it's missing, recompute from the model's own
+					// per-million-token rates. costResolved is false only when tokens
+					// were used but no pricing exists — so callers can distinguish
+					// "unknown" from a real $0.
+					let costUsd = 0;
+					let costResolved = true;
+					if (msg.usage) {
+						const tokens = {
+							inputTokens: msg.usage.input ?? 0,
+							outputTokens: msg.usage.output ?? 0,
+							cacheReadTokens: msg.usage.cacheRead ?? 0,
+							cacheWriteTokens: msg.usage.cacheWrite ?? 0,
+						};
+						const providerCost = msg.usage.cost?.total ?? 0;
+						const rates = loaded.model.cost;
+						if (providerCost > 0) {
+							costUsd = providerCost;
+						} else if (!rates) {
+							// Model object carries no cost table at all — can't price it.
+							costResolved = false;
+						} else {
+							const computed = computeCostUsd(tokens, rates);
+							if (computed === null) {
+								costResolved = false; // tokens used, no pricing → unknown
+							} else {
+								costUsd = computed;
+							}
+						}
+					}
+
 					const assistantMsg: GCAssistantMessage = {
 						type: "assistant",
 						content: text || accText,
@@ -407,7 +440,7 @@ export function query(options: QueryOptions): Query {
 							cacheReadTokens: msg.usage.cacheRead ?? 0,
 							cacheWriteTokens: msg.usage.cacheWrite ?? 0,
 							totalTokens: msg.usage.totalTokens ?? 0,
-							costUsd: msg.usage.cost?.total ?? 0,
+							costUsd,
 						} : undefined,
 					};
 					pushMsg(assistantMsg);
@@ -417,6 +450,7 @@ export function query(options: QueryOptions): Query {
 						costTracker.add(
 							`${assistantMsg.provider}:${assistantMsg.model}`,
 							assistantMsg.usage,
+							costResolved,
 						);
 						_totalCostUsd += assistantMsg.usage.costUsd ?? 0;
 					}
