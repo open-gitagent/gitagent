@@ -191,6 +191,13 @@ export function query(options: QueryOptions): Query {
 				sandbox: sandboxCtx,
 				gitagentDir: loaded.gitagentDir,
 				pluginMemoryLayers: pluginMemoryLayers.length > 0 ? pluginMemoryLayers : undefined,
+				model: loaded.model,
+				autoRepair: options.autoRepair,
+				onUsage: (msg) => {
+					if (!msg.usage) return;
+					costTracker.add(`${msg.provider}:${msg.model}`, msg.usage);
+					_totalCostUsd += msg.usage.costUsd ?? 0;
+				},
 			});
 		}
 

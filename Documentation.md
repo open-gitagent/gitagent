@@ -552,6 +552,83 @@ The agent can learn new skills automatically:
 5. Future tasks search for matching skills
 6. Confidence adjusts based on success/failure outcomes
 
+### Human-in-the-loop Skill Approval
+
+Two skill decisions belong to the user, not the model. When stdin is a TTY, the
+agent pauses mid-tool-call and asks.
+
+**1. A matching skill is flagged unreliable** (confidence < 0.4), raised by
+`task_tracker` action `begin`:
+
+```
+⚠️  Skill "laptop-setup-checklist" matches this task but is flagged as unreliable
+  laptop-setup-checklist — Generate a new laptop setup checklist…
+  confidence 0.3 · 2 success / 5 failure
+  recent failures:
+    - Saved the checklist outside the workspace directory
+    - Assumed macOS and emitted Windows-invalid steps
+
+  [p] proceed — use the skill as-is (default)
+  [r] repair — rewrite its steps first (you review the change)
+  [s] skip — ignore the skill, solve from scratch
+→ choose [p/r/s]:
+```
+
+The choice is handed to the model as a `USER DECISION:` instruction, so it can't
+quietly repair a skill you told it to use, or use one you told it to skip.
+
+**2. A repair is proposed**, raised by `skill_learner` action `repair`. The
+rewritten steps are generated but *nothing is written or committed* until you
+accept:
+
+```
+Proposed repair for skill "laptop-setup-checklist" (attempt 1/3)
+  --- current steps
+  +++ proposed steps
+  - 1. Identify the workspace directory path…
+  + 1. Determine the absolute path of the workspace directory…
+
+  based on 2 recorded failure(s):
+    - Saved the checklist outside the workspace directory
+
+  [a] accept — write SKILL.md and commit (default)
+  [e] edit — open the proposed steps in $EDITOR first
+  [c] cancel — leave the skill unchanged
+→ choose [a/e/c]:
+```
+
+- `[e]` opens the proposed steps in `$VISUAL`/`$EDITOR` (falls back to `vi`),
+  then re-shows the diff of what you saved so you confirm before it lands.
+- `[c]` leaves `SKILL.md` untouched, does not increment `repair_count`, and tells
+  the model not to retry the repair.
+- The repair history records who approved: `(user-approved)`, `(user-edited,
+  approved)`, or `(unattended)`.
+
+### Headless / SDK: `autoRepair`
+
+When nobody can be prompted — no TTY, `GITAGENT_APPROVAL=auto`, or programmatic
+`query()` — a single flag decides whether the agent may rewrite its own skills:
+
+| | flagged skill match | `skill_learner` "repair" |
+|---|---|---|
+| **default** (`autoRepair` off) | reported as unreliable; repair declared off-limits | refused, no LLM call, `SKILL.md` untouched |
+| `autoRepair` on | told to repair first, then use it | rewrites, commits, resets confidence to 0.6 |
+
+```ts
+import { query } from "@open-gitagent/gitagent";
+
+for await (const msg of query({
+  prompt: "Set up a new laptop",
+  autoRepair: true,   // omit (or false) and flagged skills are never modified
+})) { /* … */ }
+```
+
+CLI equivalents: `gitagent --auto-repair` or `GITAGENT_AUTO_REPAIR=1` (useful for
+cron/CI). On a TTY the interactive prompts take precedence over the flag.
+
+Runnable end-to-end demo of both paths, including the throwaway agent fixture:
+[examples/skill-approval.ts](examples/skill-approval.ts).
+
 ---
 
 ## Workflows & SkillFlows

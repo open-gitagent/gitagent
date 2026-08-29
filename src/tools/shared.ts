@@ -58,7 +58,7 @@ export const capturePhotoSchema = Type.Object({
 });
 
 export const skillLearnerSchema = Type.Object({
-	action: Type.Union([Type.Literal("evaluate"), Type.Literal("crystallize"), Type.Literal("status"), Type.Literal("review"), Type.Literal("update"), Type.Literal("delete")], { description: "Action to perform" }),
+	action: Type.Union([Type.Literal("evaluate"), Type.Literal("crystallize"), Type.Literal("status"), Type.Literal("review"), Type.Literal("repair"), Type.Literal("update"), Type.Literal("delete")], { description: "Action to perform" }),
 	task_id: Type.Optional(Type.String({ description: "Task ID (for evaluate/crystallize)" })),
 	skill_name: Type.Optional(Type.String({ description: "Skill name (for crystallize/update/delete)" })),
 	skill_description: Type.Optional(Type.String({ description: "Skill description (for crystallize)" })),

@@ -3,8 +3,12 @@ import { join } from "path";
 import { randomUUID } from "crypto";
 import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { Model } from "@mariozechner/pi-ai";
+import type { GCAssistantMessage } from "../sdk-types.js";
 import { taskTrackerSchema } from "./shared.js";
 import { adjustConfidence, loadSkillStats, saveSkillStats } from "../learning/reinforcement.js";
+import { reflectOnFailure } from "../learning/reflection.js";
+import type { Elicitor } from "../elicit.js";
 import yaml from "js-yaml";
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -72,6 +76,10 @@ interface SkillMatch {
 	confidence?: number;
 	source: "local" | "marketplace";
 	relevance: number;
+	/** Local skills only — shown to the user when a flagged match needs a decision. */
+	successCount?: number;
+	failureCount?: number;
+	negativeExamples?: string[];
 }
 
 async function searchLocalSkills(agentDir: string, objective: string): Promise<SkillMatch[]> {
@@ -116,6 +124,11 @@ async function searchLocalSkills(agentDir: string, objective: string): Promise<S
 				confidence: typeof frontmatter.confidence === "number" ? frontmatter.confidence : undefined,
 				source: "local",
 				relevance: Math.round(relevance * 100) / 100,
+				successCount: typeof frontmatter.success_count === "number" ? frontmatter.success_count : undefined,
+				failureCount: typeof frontmatter.failure_count === "number" ? frontmatter.failure_count : undefined,
+				negativeExamples: Array.isArray(frontmatter.negative_examples)
+					? (frontmatter.negative_examples as string[])
+					: undefined,
 			});
 		}
 	}
@@ -149,7 +162,38 @@ async function searchSkillsMP(objective: string): Promise<SkillMatch[]> {
 
 // ── Tool factory ────────────────────────────────────────────────────────
 
-export function createTaskTrackerTool(agentDir: string, gitagentDir: string): AgentTool<typeof taskTrackerSchema> {
+/** Renders the evidence a human needs to decide whether a flagged skill is worth using. */
+function describeFlaggedSkill(match: SkillMatch): string {
+	const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
+	const lines = [`  ${match.name} — ${match.description}`];
+
+	const stats: string[] = [];
+	if (match.confidence !== undefined) stats.push(`confidence ${match.confidence}`);
+	if (match.successCount !== undefined && match.failureCount !== undefined) {
+		stats.push(`${match.successCount} success / ${match.failureCount} failure`);
+	}
+	if (stats.length > 0) lines.push(dim(`  ${stats.join(" · ")}`));
+
+	const recent = (match.negativeExamples ?? []).slice(-3);
+	if (recent.length > 0) {
+		lines.push(dim("  recent failures:"));
+		for (const n of recent) {
+			const short = n.length > 160 ? `${n.slice(0, 160)}…` : n;
+			lines.push(dim(`    - ${short}`));
+		}
+	}
+
+	return lines.join("\n");
+}
+
+export function createTaskTrackerTool(
+	agentDir: string,
+	gitagentDir: string,
+	model?: Model<any>,
+	onUsage?: (msg: GCAssistantMessage) => void,
+	elicit?: Elicitor,
+	autoRepair?: boolean,
+): AgentTool<typeof taskTrackerSchema> {
 	return {
 		name: "task_tracker",
 		label: "task_tracker",
@@ -224,13 +268,62 @@ export function createTaskTrackerTool(agentDir: string, gitagentDir: string): Ag
 						}
 					}
 
+					// "p" | "r" | "s" once a human has ruled on a flagged match; null otherwise.
+					let flaggedDecision: string | null = null;
+
 					if (allMatches.length > 0) {
 						const topMatch = allMatches[0];
 						const topConf = topMatch.confidence !== undefined ? ` (confidence: ${topMatch.confidence})` : "";
-						response += `\n\n⚡ SKILL MATCH FOUND — YOU MUST USE IT:`;
-						response += `\n  → ${topMatch.name}: ${topMatch.description}${topConf} [${topMatch.source}]`;
-						response += `\n\nACTION REQUIRED: Load skills/${topMatch.name}/SKILL.md NOW and follow its instructions.`;
-						response += `\nDo NOT proceed with a manual approach — the skill handles this task.`;
+						// Matches isSkillFlagged()'s threshold in reinforcement.ts — don't push
+						// a known-unreliable skill as mandatory without surfacing that first.
+						const topFlagged = topMatch.confidence !== undefined && topMatch.confidence < 0.4;
+
+						if (topFlagged) {
+							// A flagged skill is a judgement call, not a mechanical one: ask the
+							// human which way to go and hand the model their decision, instead of
+							// letting it pick repair-vs-proceed on its own. With no terminal, the
+							// autoRepair flag decides whether repair is even on the table.
+							const decision = flaggedDecision = elicit?.interactive
+								? await elicit.select({
+									title: `⚠️  Skill "${topMatch.name}" matches this task but is flagged as unreliable`,
+									body: describeFlaggedSkill(topMatch),
+									choices: [
+										{ key: "p", label: "proceed — use the skill as-is" },
+										{ key: "r", label: "repair — rewrite its steps first (you review the change)" },
+										{ key: "s", label: "skip — ignore the skill, solve from scratch" },
+									],
+									defaultKey: "p",
+									signal,
+								})
+								: null;
+
+							response += `\n\n⚠️ SKILL MATCH FOUND, BUT IT'S FLAGGED AS UNRELIABLE:`;
+							response += `\n  → ${topMatch.name}: ${topMatch.description}${topConf} [${topMatch.source}]`;
+
+							if (decision === "p") {
+								response += `\n\nUSER DECISION: proceed with the flagged skill as-is.`;
+								response += `\nACTION REQUIRED: Load skills/${topMatch.name}/SKILL.md NOW and follow its instructions.`;
+								response += `\nDo NOT call skill_learner action "repair" — the user declined that. Report the real outcome via task_tracker "end" with skill_used "${topMatch.name}".`;
+							} else if (decision === "r") {
+								response += `\n\nUSER DECISION: repair the skill before using it.`;
+								response += `\nACTION REQUIRED: Call skill_learner action "repair" with skill_name "${topMatch.name}" NOW. The user reviews and approves the rewritten steps.`;
+								response += `\nIf the repair is approved, load skills/${topMatch.name}/SKILL.md and follow the repaired steps. If the user cancels the repair, do not use the skill — solve the task from scratch.`;
+							} else if (decision === "s") {
+								response += `\n\nUSER DECISION: skip the skill entirely.`;
+								response += `\nACTION REQUIRED: Do NOT read or use skills/${topMatch.name}/SKILL.md, and do NOT call skill_learner "repair". Solve this task from scratch and do not pass skill_used to task_tracker "end".`;
+							} else if (autoRepair) {
+								response += `\n\nThis skill has a low confidence score from repeated failures, and automatic repair is ENABLED for this run.`;
+								response += `\nACTION REQUIRED: Call skill_learner action "repair" with skill_name "${topMatch.name}" first, then load skills/${topMatch.name}/SKILL.md and follow the repaired steps.`;
+							} else {
+								response += `\n\nThis skill has a low confidence score from repeated failures, and repair is DISABLED for this run.`;
+								response += `\nDo NOT call skill_learner action "repair" — it will be refused. Either load skills/${topMatch.name}/SKILL.md and use it with caution (reporting the real outcome via task_tracker "end"), or solve the task from scratch.`;
+							}
+						} else {
+							response += `\n\n⚡ SKILL MATCH FOUND — YOU MUST USE IT:`;
+							response += `\n  → ${topMatch.name}: ${topMatch.description}${topConf} [${topMatch.source}]`;
+							response += `\n\nACTION REQUIRED: Load skills/${topMatch.name}/SKILL.md NOW and follow its instructions.`;
+							response += `\nDo NOT proceed with a manual approach — the skill handles this task.`;
+						}
 						if (allMatches.length > 1) {
 							response += `\n\nOther matching skills:`;
 							for (const m of allMatches.slice(1, 5)) {
@@ -244,7 +337,7 @@ export function createTaskTrackerTool(agentDir: string, gitagentDir: string): Ag
 
 					return {
 						content: [{ type: "text", text: response }],
-						details: { task_id: task.id, matches: allMatches },
+						details: { task_id: task.id, matches: allMatches, flagged_decision: flaggedDecision ?? undefined },
 					};
 				}
 
@@ -277,10 +370,33 @@ export function createTaskTrackerTool(agentDir: string, gitagentDir: string): Ag
 					if (task.status !== "active") throw new Error(`Task ${params.task_id} is not active (status: ${task.status})`);
 
 					const outcome = params.outcome as "success" | "failure" | "partial";
+
+					// Reflexion-style reflection: on any non-success outcome, replace the
+					// model's own one-line failure report with a grounded root-cause +
+					// next-strategy reflection generated from the task's actual recorded
+					// steps. Fails soft — any error here keeps the raw string exactly as
+					// before this reflection step existed.
+					let effectiveFailureReason = params.failure_reason;
+					if (outcome !== "success" && model) {
+						try {
+							effectiveFailureReason = await reflectOnFailure(
+								model,
+								{
+									objective: task.objective,
+									steps: task.steps.map((s) => s.description),
+									failureReason: params.failure_reason,
+								},
+								onUsage,
+							);
+						} catch {
+							// fail-soft — keep the raw one-liner
+						}
+					}
+
 					task.outcome = outcome;
 					task.status = outcome === "success" ? "succeeded" : "failed";
 					task.ended_at = new Date().toISOString();
-					task.failure_reason = params.failure_reason;
+					task.failure_reason = effectiveFailureReason;
 					task.skill_used = params.skill_used;
 
 					// Trigger reinforcement if a skill was used
@@ -289,7 +405,7 @@ export function createTaskTrackerTool(agentDir: string, gitagentDir: string): Ag
 						const skillDir = join(agentDir, "skills", params.skill_used);
 						try {
 							const stats = await loadSkillStats(skillDir);
-							const updated = adjustConfidence(stats, outcome, params.failure_reason);
+							const updated = adjustConfidence(stats, outcome, effectiveFailureReason);
 							await saveSkillStats(skillDir, updated);
 							reinforcementMsg = `\nSkill "${params.skill_used}" confidence: ${stats.confidence} → ${updated.confidence}`;
 						} catch {
@@ -312,7 +428,7 @@ export function createTaskTrackerTool(agentDir: string, gitagentDir: string): Ag
 					return {
 						content: [{
 							type: "text",
-							text: `Task ${task.id} ${outcome}. Reason: ${params.failure_reason || "not specified"}.${reinforcementMsg}\n\nConsider a different approach. Call task_tracker action "begin" with the same objective to retry.`,
+							text: `Task ${task.id} ${outcome}. Reason: ${effectiveFailureReason || "not specified"}.${reinforcementMsg}\n\nConsider a different approach. Call task_tracker action "begin" with the same objective to retry.`,
 						}],
 						details: { task_id: task.id },
 					};

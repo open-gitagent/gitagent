@@ -143,6 +143,13 @@ export interface QueryOptions {
 	repo?: LocalRepoOptions;
 	sandbox?: SandboxOptions | boolean;
 	hooks?: GCHooks;
+	/**
+	 * Allow the agent to rewrite and commit its own unreliable skills (confidence < 0.4)
+	 * without a human in the loop. Default false: a flagged skill is reported as
+	 * unreliable and `skill_learner` "repair" refuses, leaving SKILL.md untouched.
+	 * The CLI ignores this when stdin is a TTY — there it prompts instead.
+	 */
+	autoRepair?: boolean;
 	maxTurns?: number;
 	abortController?: AbortController;
 	sessionId?: string;
