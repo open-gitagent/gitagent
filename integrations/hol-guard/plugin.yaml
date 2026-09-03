@@ -1,0 +1,30 @@
+id: hol-guard
+name: HOL Guard
+version: 0.1.0
+description: Gate GitAgent CLI tool calls through HOL Guard before execution
+author: Hashgraph Online
+license: MIT
+engine: ">=2.2.0"
+entry: index.mjs
+
+config:
+  properties:
+    binary:
+      type: string
+      description: HOL Guard executable to invoke
+      env: HOL_GUARD_BIN
+      default: hol-guard
+    guard_home:
+      type: string
+      description: Optional HOL Guard state directory
+      env: HOL_GUARD_HOME
+    home:
+      type: string
+      description: Optional home directory passed to HOL Guard
+    workspace:
+      type: string
+      description: Workspace path evaluated by HOL Guard
+    timeout_ms:
+      type: number
+      description: Maximum time to wait for a Guard decision
+      default: 6000
