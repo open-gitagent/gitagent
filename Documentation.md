@@ -19,6 +19,7 @@
 - [Workflows & SkillFlows](#workflows--skillflows)
 - [Hooks](#hooks)
 - [Plugins](#plugins)
+- [Versioning & Rollback](#version-cli)
 - [Memory System](#memory-system)
 - [Schedules & Cron](#schedules--cron)
 - [Integrations](#integrations)
@@ -121,6 +122,10 @@ gitagent --model anthropic:claude-opus-4-6 --voice --dir ~/assistant
 | `--repo` | `-r` | Clone and work on remote repository | — |
 | `--pat` | — | GitHub/GitLab personal access token | `GITHUB_TOKEN` env |
 | `--session` | — | Git branch name for session isolation | auto-generated |
+| `--version` | — | Print the gitagent version (`-v` is taken by `--voice`) | — |
+
+> `plugin` and `version` are subcommands, so a prompt starting with either word must be
+> quoted or passed via `-p`: `gitagent -p "version this repo"`.
 
 ### REPL Commands
 
@@ -145,6 +150,78 @@ gitagent plugin disable my-plugin --dir ~/assistant
 gitagent plugin remove my-plugin --dir ~/assistant
 gitagent plugin init my-plugin --dir ~/assistant
 ```
+
+### Version CLI
+
+Snapshot, inspect and restore an agent's configuration. Versions are annotated git tags under
+`refs/tags/agentcfg/`, so the storage is the agent's own repo — nothing extra on disk.
+
+```bash
+gitagent version save v1.0 -m "baseline"     # tag current config
+gitagent version save                        # name defaults to v<agent.yaml version>
+gitagent version save v1.1 --commit          # commit dirty config first, then tag
+gitagent version list --json
+gitagent version show v1.0 --files
+gitagent version diff v1.0                   # against the working tree
+gitagent version diff v1.0 v1.1 --stat
+gitagent version rollback v1.0 --dry-run
+gitagent version rollback v1.0 --yes
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `save [<name>]` | Tag the current config. Aliases: `tag` |
+| `list` | List saved versions, newest first. Aliases: `ls` |
+| `show <name>` | Version metadata, file inventory, drift since |
+| `diff <a> [<b>]` | Config diff between versions or against the working tree |
+| `rollback <name>` | Restore config from a version as a new commit. Aliases: `restore` |
+
+| Flag | Applies to | Description |
+|------|-----------|-------------|
+| `-m`, `--message` | `save`, `rollback` | Tag or commit message |
+| `--commit` | `save` | Commit uncommitted config before tagging |
+| `--force` | `save` | Move an existing tag |
+| `--force` | `rollback` | Discard local config changes; allow detached HEAD |
+| `--dry-run` | `rollback` | Print the plan, change nothing |
+| `--yes` | `rollback` | Skip confirmation (required when stdin is not a TTY) |
+| `--json` | `list` | Machine-readable output |
+| `--files` | `show` | List every file rather than the first 20 |
+| `--stat`, `--name-only` | `diff` | Passed through to `git diff` |
+| `--dir`, `-d` | all | Agent directory (default: cwd) |
+
+**What is versioned.** Only configuration:
+
+```
+agent.yaml  SOUL.md  RULES.md  DUTIES.md  AGENTS.md
+config/  tools/  hooks/  knowledge/  examples/
+compliance/  agents/  workflows/  schedules/  plugins/
+```
+
+**What is never touched.** `memory/` and `skills/`. The agent commits to `memory/` on every save and
+`skill_learner` rewrites `skills/` at runtime, so those commits interleave with config commits
+throughout history. Restoring them would silently destroy knowledge the agent gained after the tag
+was cut. A rollback therefore reverts *how the agent is configured*, never *what it has learned*.
+
+**How rollback works.** It diffs the tag against `HEAD` scoped to the config paths, deletes files
+added since, restores files that changed or were removed, and records the result as a **new commit**.
+History is never rewritten — no `reset --hard`, no branch switching — so a rollback is itself visible
+in `git log` and can be reverted like any other commit.
+
+**Edge-case behavior.**
+
+| Situation | Behavior |
+|-----------|----------|
+| Uncommitted config changes | `save` refuses (offers `--commit`); `rollback` refuses unless `--force`. Dirty `memory/` never blocks either |
+| Staged changes in the index | Refused, so unrelated staged files can't ride along in the commit |
+| Detached HEAD | `rollback` refuses unless `--force` |
+| No git identity configured | An identity is injected per-invocation; your git config is never modified |
+| Rollback with nothing to change | Reports "already at" and creates no empty commit |
+| Agent in a repo subdirectory | Supported; only the agent's own paths are versioned |
+| Shallow clone (`--repo` mode) | Warns that tags may be missing — `git fetch --unshallow --tags` |
+
+**Known limitations.** Tags are repo-global, so two agents sharing one repo share the `agentcfg/`
+namespace. Gitignored config files are not captured. Pushing tags is manual —
+`git push origin refs/tags/agentcfg/v1.0`.
 
 ---
 

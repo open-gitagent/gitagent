@@ -26,6 +26,8 @@ import type { LocalSession } from "./session.js";
 // Imported dynamically below so the slim core has no static dependency on it —
 // users without voice get a clean install + a clear error if they try --voice.
 import { handlePluginCommand } from "./plugin-cli.js";
+import { handleVersionCommand, printToolVersion } from "./version-cli.js";
+import { isGitRepo } from "./git.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	initTelemetry,
@@ -128,6 +130,20 @@ function parseArgs(argv: string[]): ParsedArgs {
 	return { model, dir, prompt, env, sandbox, sandboxRepo, sandboxToken, repo, pat, session, voice };
 }
 
+/** Pull --dir/-d out of a subcommand's args; subcommands don't use parseArgs. */
+function extractDirFlag(args: string[]): { agentDir: string; rest: string[] } {
+	let agentDir = process.cwd();
+	const rest: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		if ((args[i] === "--dir" || args[i] === "-d") && args[i + 1]) {
+			agentDir = args[++i];
+		} else {
+			rest.push(args[i]);
+		}
+	}
+	return { agentDir: resolve(agentDir), rest };
+}
+
 function handleEvent(
 	event: AgentEvent,
 	hooksConfig: HooksConfig | null,
@@ -196,15 +212,6 @@ function summarizeArgs(args: any): string {
 			return `${k}: ${short}`;
 		})
 		.join(", ");
-}
-
-function isGitRepo(dir: string): boolean {
-	try {
-		execSync("git rev-parse --is-inside-work-tree", { cwd: dir, stdio: "pipe" });
-		return true;
-	} catch {
-		return false;
-	}
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -311,19 +318,23 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 let _replActive = false;
 
 async function main(): Promise<void> {
-	// Handle plugin subcommand: gitagent plugin <install|list|remove|...>
+	// Subcommands are dispatched before parseArgs, since parseArgs treats any bare
+	// word as the prompt.
 	if (process.argv[2] === "plugin") {
-		const allArgs = process.argv.slice(3);
-		let agentDir = process.cwd();
-		const pluginArgs: string[] = [];
-		for (let i = 0; i < allArgs.length; i++) {
-			if ((allArgs[i] === "--dir" || allArgs[i] === "-d") && allArgs[i + 1]) {
-				agentDir = allArgs[++i];
-			} else {
-				pluginArgs.push(allArgs[i]);
-			}
-		}
-		await handlePluginCommand(resolve(agentDir), pluginArgs);
+		const { agentDir, rest } = extractDirFlag(process.argv.slice(3));
+		await handlePluginCommand(agentDir, rest);
+		return;
+	}
+
+	// gitagent version <save|list|show|diff|rollback>
+	if (process.argv[2] === "version") {
+		const { agentDir, rest } = extractDirFlag(process.argv.slice(3));
+		await handleVersionCommand(agentDir, rest);
+		return;
+	}
+
+	if (process.argv.includes("--version")) {
+		printToolVersion();
 		return;
 	}
 

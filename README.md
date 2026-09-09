@@ -24,7 +24,8 @@
   <a href="#tools">Tools</a> &bull;
   <a href="#hooks">Hooks</a> &bull;
   <a href="#skills">Skills</a> &bull;
-  <a href="#plugins">Plugins</a>
+  <a href="#plugins">Plugins</a> &bull;
+  <a href="#versioning--rollback">Versioning</a>
 </p>
 
 ---
@@ -136,6 +137,10 @@ gitagent --repo https://github.com/org/repo "Add unit tests"
 | `--sandbox` | `-s` | Run in sandbox VM |
 | `--prompt <text>` | `-p` | Single-shot prompt (skip REPL) |
 | `--env <name>` | `-e` | Environment config |
+| `--version` | | Print the gitagent version (`-v` is `--voice`) |
+
+`plugin` and `version` are subcommands, so a prompt starting with either word needs
+`-p` or quotes: `gitagent -p "version this repo"`.
 
 ### SDK
 
@@ -606,6 +611,52 @@ my-plugin/
 ├── prompt.md            # System prompt addition
 └── index.ts             # Programmatic entry point
 ```
+
+## Versioning & Rollback
+
+Because the agent is a git repo, a "version" is just a tag. `gitagent version` wraps that so you can
+snapshot a known-good configuration, see what drifted, and restore it — without hand-running git.
+
+```bash
+gitagent version save v1.0 -m "baseline before model swap"
+gitagent version list
+gitagent version show v1.0
+gitagent version diff v1.0                  # v1.0 vs working tree
+gitagent version diff v1.0 v1.1             # version vs version
+gitagent version rollback v1.0 --dry-run
+gitagent version rollback v1.0
+```
+
+| Command | Description |
+|---|---|
+| `save [<name>]` | Tag the current config. Name defaults to `v` + `version` from `agent.yaml` |
+| `list` | List saved versions (`--json` for scripting) |
+| `show <name>` | Version details, file inventory, and what changed since |
+| `diff <a> [<b>]` | Config diff between versions, or against the working tree |
+| `rollback <name>` | Restore config from a version as a new commit |
+
+| Flag | Applies to | Description |
+|---|---|---|
+| `-m <msg>` | `save`, `rollback` | Tag / commit message |
+| `--commit` | `save` | Commit uncommitted config before tagging |
+| `--force` | `save`, `rollback` | Move an existing tag / discard local config changes |
+| `--dry-run` | `rollback` | Show the plan without changing anything |
+| `--yes` | `rollback` | Skip the confirmation prompt (required when not a TTY) |
+| `--json` | `list` | Machine-readable output |
+
+**Three things worth knowing:**
+
+- **Rollback restores config only.** `memory/` and `skills/` are never modified. The agent commits to
+  `memory/` on every save and rewrites `skills/` as it learns, so those commits interleave with config
+  commits — restoring them wholesale would destroy everything the agent learned after the tag was cut.
+  Versioned paths are: `agent.yaml`, `SOUL.md`, `RULES.md`, `DUTIES.md`, `AGENTS.md`, `config/`,
+  `tools/`, `hooks/`, `knowledge/`, `examples/`, `compliance/`, `agents/`, `workflows/`, `schedules/`,
+  `plugins/`.
+- **Rollback is forward-only.** It writes a new commit rather than rewriting history, so nothing is
+  lost and the rollback itself shows up in `git log`. No `reset --hard`, ever.
+- **Versions are local git tags** under `agentcfg/`, namespaced so they never collide with a repo's
+  release tags. They stay local until you push them:
+  `git push origin refs/tags/agentcfg/v1.0`.
 
 ## MCP (Model Context Protocol)
 
