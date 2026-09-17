@@ -55,22 +55,27 @@ async function withTelemetry(
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
-test("wrapToolWithOtel happy path produces gitagent.tool.execute span with status=ok", async () => {
+test("wrapToolWithOtel preserves the runtime tool call ID and emits GenAI tool attributes", async () => {
 	await withTelemetry(async (exporter) => {
 		const tool: any = {
 			name: "echo",
 			description: "echo",
 			parameters: {} as any,
-			execute: async (args: any) => `hello ${args.name}`,
+			execute: async (toolCallId: string, args: any) => `${toolCallId}: hello ${args.name}`,
 		};
 		const wrapped = wrapToolWithOtel(tool);
-		const result = await (wrapped as any).execute({ name: "world" });
-		assert.equal(result, "hello world");
+		const result = await (wrapped as any).execute("tool-call-123", { name: "world" });
+		assert.equal(result, "tool-call-123: hello world");
 
 		const spans = exporter.getFinishedSpans();
 		const toolSpan = spans.find((s) => s.name === "gitagent.tool.execute");
 		assert.ok(toolSpan, "expected gitagent.tool.execute span");
 		assert.equal(toolSpan!.attributes["tool.name"], "echo");
+		assert.equal(toolSpan!.attributes["tool.call_id"], "tool-call-123");
+		assert.equal(toolSpan!.attributes["gen_ai.operation.name"], "execute_tool");
+		assert.equal(toolSpan!.attributes["gen_ai.tool.name"], "echo");
+		assert.equal(toolSpan!.attributes["gen_ai.tool.type"], "function");
+		assert.equal(toolSpan!.attributes["gen_ai.tool.call.id"], "tool-call-123");
 		assert.equal(toolSpan!.attributes["tool.status"], "ok");
 	});
 });
@@ -87,7 +92,7 @@ test("wrapToolWithOtel error path sets status=error and records error message", 
 		};
 		const wrapped = wrapToolWithOtel(tool);
 		await assert.rejects(
-			() => (wrapped as any).execute({}),
+			() => (wrapped as any).execute("tool-call-error", {}),
 			/kaboom/,
 		);
 		const spans = exporter.getFinishedSpans();
@@ -115,7 +120,7 @@ test("startSessionSpan + child tool span produce a parent/child relationship", a
 		const wrapped = wrapToolWithOtel(tool);
 		// Run the tool inside the session's active context — mirrors what
 		// sdk.ts/index.ts do via otelContext.with(_session.ctx, agent.prompt).
-		await otelContext.with(session.ctx, () => (wrapped as any).execute({}));
+		await otelContext.with(session.ctx, () => (wrapped as any).execute("tool-call-child", {}));
 		session.end();
 
 		const spans = exporter.getFinishedSpans();
@@ -224,7 +229,7 @@ test("no-ops without init: no spans emitted, no throws", async () => {
 	const wrapped = wrapToolWithOtel(tool);
 	// wrapped should be the *same* object since telemetry is disabled
 	assert.equal(wrapped, tool);
-	const result = await (wrapped as any).execute({});
+	const result = await (wrapped as any).execute("tool-call-noop", {});
 	assert.equal(result, "still works");
 
 	// recordGenAiCall must not throw

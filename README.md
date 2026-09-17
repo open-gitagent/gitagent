@@ -732,7 +732,7 @@ Three layers of signals:
 
 1. **HTTP-level** — `@opentelemetry/instrumentation-undici` auto-patches `fetch`/`undici`, so every LLM provider call (Anthropic, OpenAI, Google, …) gets a client span with URL, status code, and timing.
 2. **`gen_ai.chat` spans** — emitted on every assistant `message_end`. Carry `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, and `gitagent.cost_usd`. Span/metric content never contains the prompt or completion text.
-3. **`gitagent.tool.execute` spans** — wrap every tool call with `tool.name`, `tool.call_id`, `tool.status` (`ok`/`error`), and `tool.error_message` on failure.
+3. **`gitagent.tool.execute` spans** — wrap every tool call with `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, and the runtime `gen_ai.tool.call.id`, alongside the existing `tool.name`, `tool.call_id`, `tool.status` (`ok`/`error`), and `tool.error_message` on failure. Tool inputs and outputs are never exported.
 
 A root `gitagent.agent.session` span opens at agent construction and closes on every exit path (success, hook-block, SIGINT, error).
 
@@ -780,7 +780,7 @@ await shutdownTelemetry();
 | Name | Kind | Key attributes |
 |------|------|----------------|
 | `gitagent.agent.session` | INTERNAL | `gitagent.entry` (`sdk` / `cli`), `gitagent.cost_usd`, `gitagent.session.duration_ms` |
-| `gitagent.tool.execute` | INTERNAL | `tool.name`, `tool.call_id`, `tool.status`, `tool.error_message` |
+| `gitagent.tool.execute` | INTERNAL | `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `tool.name`, `tool.call_id`, `tool.status`, `tool.error_message` |
 | `gen_ai.chat` | CLIENT | `gen_ai.system`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `gitagent.cost_usd` |
 | `HTTP …` | CLIENT | URL, status code, duration (auto from `instrumentation-undici`) |
 

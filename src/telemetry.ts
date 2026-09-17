@@ -374,25 +374,43 @@ export function wrapToolWithOtel<T extends AgentTool<any>>(tool: T): T {
 	const original = (tool as any).execute;
 	if (typeof original !== "function") return tool;
 
-	const wrapped = async function (this: any, args: any, ...rest: any[]) {
+	const wrapped = async function (
+		this: any,
+		toolCallId: string,
+		params: unknown,
+		signal?: AbortSignal,
+		onUpdate?: unknown,
+	) {
 		const tracer = getTracer();
 		const startedAt = Date.now();
-		const callId =
-			(rest && rest[0] && (rest[0] as any).toolCallId) ||
-			`call_${Math.random().toString(36).slice(2, 10)}`;
+		const callId = String(toolCallId);
 
 		return await tracer.startActiveSpan(
 			"gitagent.tool.execute",
 			{
 				kind: SpanKind.INTERNAL,
 				attributes: {
+					// Standard GenAI attributes let trace backends render this as a
+					// tool operation instead of an undifferentiated internal span.
+					// Do not add tool arguments or results here: they can contain
+					// credentials or other user data.
+					"gen_ai.operation.name": "execute_tool",
+					"gen_ai.tool.name": tool.name,
+					"gen_ai.tool.type": "function",
+					"gen_ai.tool.call.id": callId,
+					// Keep the original project attributes for existing dashboards.
 					"tool.name": tool.name,
-					"tool.call_id": String(callId),
+					"tool.call_id": callId,
 				},
 			},
 			async (span) => {
 				try {
-					const result = await original.apply(this, [args, ...rest]);
+					const result = await original.apply(this, [
+						toolCallId,
+						params,
+						signal,
+						onUpdate,
+					]);
 					try {
 						span.setAttribute("tool.status", "ok");
 						span.setStatus({ code: SpanStatusCode.OK });
