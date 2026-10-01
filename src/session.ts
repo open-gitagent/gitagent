@@ -36,6 +36,15 @@ function git(args: string, cwd: string): string {
 	return execSync(`git ${args}`, { cwd, stdio: "pipe", encoding: "utf-8" }).trim();
 }
 
+function normalizeRepoUrl(repoUrl: string): string {
+    return repoUrl
+        .trim()
+        .replace(/^https:\/\/[^@]+@/, "https://")
+        .replace(/^git@([^:]+):/, "https://$1/")
+        .replace(/\.git$/, "")
+        .replace(/\/+$/, "");
+}
+
 function getDefaultBranch(cwd: string): string {
 	try {
 		// e.g. "origin/main" → "main"
@@ -62,15 +71,23 @@ export function initLocalSession(opts: LocalRepoOptions): LocalSession {
 	// Clone or update
 	if (!existsSync(dir)) {
 		execSync(`git clone --depth 1 --no-single-branch ${aUrl} ${dir}`, { stdio: "pipe" });
-	} else {
-		git(`remote set-url origin ${aUrl}`, dir);
-		git("fetch origin", dir);
+} else {
+    const currentUrl = git("remote get-url origin", dir);
 
-		// Reset local default branch to latest remote
-		const defaultBranch = getDefaultBranch(dir);
-		git(`checkout ${defaultBranch}`, dir);
-		git(`reset --hard origin/${defaultBranch}`, dir);
-	}
+    if (normalizeRepoUrl(currentUrl) !== normalizeRepoUrl(url)) {
+        throw new Error(
+            `Existing directory origin does not match requested repository: ${currentUrl}`,
+        );
+    }
+
+    git(`remote set-url origin ${aUrl}`, dir);
+    git("fetch origin", dir);
+
+    // Reset local default branch to latest remote
+    const defaultBranch = getDefaultBranch(dir);
+    git(`checkout ${defaultBranch}`, dir);
+    git(`reset --hard origin/${defaultBranch}`, dir);
+}
 
 	// Determine branch
 	let branch: string;
