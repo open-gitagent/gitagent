@@ -99,10 +99,59 @@ describe("G20 hook stdin EPIPE", () => {
 		mkdirSync(join(dir, "hooks"), { recursive: true });
 		writeFileSync(join(dir, "hooks", "exit0.sh"), "exit 0\n");
 		// Run several times to shake out the write→EPIPE race.
+		// Empty stdout is invalid JSON → fail-closed for pre_tool_use (G5).
 		for (let i = 0; i < 5; i++) {
 			const res = await runHooks([{ script: "exit0.sh" } as any], dir, { event: "pre_tool_use", tool: "cli", args: {} } as any);
-			assert.equal(res.action, "allow");
+			assert.equal(res.action, "block");
 		}
+		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
+// ── G5: safety hooks fail closed; observational hooks stay fail-open ─────
+
+describe("G5 hooks fail-closed", () => {
+	function hookDir(scripts: Record<string, string>) {
+		const dir = mkdtempSync(join(tmpdir(), "gitagent-g5-"));
+		mkdirSync(join(dir, "hooks"), { recursive: true });
+		for (const [name, body] of Object.entries(scripts)) {
+			writeFileSync(join(dir, "hooks", name), body);
+		}
+		return dir;
+	}
+
+	it("pre_tool_use fails closed on non-zero exit", async () => {
+		const dir = hookDir({ "boom.sh": "#!/bin/sh\nexit 1\n" });
+		const res = await runHooks(
+			[{ script: "boom.sh" }],
+			dir,
+			{ event: "pre_tool_use", tool: "cli", args: { command: "echo PWNED" } },
+		);
+		assert.equal(res.action, "block");
+		assert.match(res.reason || "", /failed|exited with code 1/i);
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("pre_tool_use fails closed on invalid JSON", async () => {
+		const dir = hookDir({ "badjson.sh": "#!/bin/sh\necho NOT_JSON\n" });
+		const res = await runHooks(
+			[{ script: "badjson.sh" }],
+			dir,
+			{ event: "pre_tool_use", tool: "cli", args: {} },
+		);
+		assert.equal(res.action, "block");
+		assert.match(res.reason || "", /failed|invalid JSON|valid JSON/i);
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("post_response still fails open on non-zero exit", async () => {
+		const dir = hookDir({ "boom.sh": "#!/bin/sh\nexit 1\n" });
+		const res = await runHooks(
+			[{ script: "boom.sh" }],
+			dir,
+			{ event: "post_response", content: "hi" },
+		);
+		assert.equal(res.action, "allow");
 		rmSync(dir, { recursive: true, force: true });
 	});
 });

@@ -124,12 +124,13 @@ async function executeHook(
 				const result = JSON.parse(stdout.trim()) as HookResult;
 				promiseResolve(result);
 			} catch {
-				// If hook doesn't return JSON, treat as allow
-				promiseResolve({ action: "allow" });
+				reject(new Error(`Hook "${hook.script}" did not return valid JSON: ${stdout.trim()}`));
 			}
 		});
 	});
 }
+
+const FAIL_CLOSED = new Set(["pre_tool_use", "on_session_start", "pre_query"]);
 
 export async function runHooks(
 	hooks: HookDefinition[] | undefined,
@@ -139,6 +140,8 @@ export async function runHooks(
 	if (!hooks || hooks.length === 0) {
 		return { action: "allow" };
 	}
+
+	const failClosed = FAIL_CLOSED.has(input.event);
 
 	for (const hook of hooks) {
 		try {
@@ -151,7 +154,12 @@ export async function runHooks(
 			}
 		} catch (err: any) {
 			console.error(`Hook error: ${err.message}`);
-			// Hook errors don't block execution by default
+			if (failClosed) {
+				return {
+					action: "block",
+					reason: `Hook "${hook.description || hook.script}" failed: ${err.message}`,
+				};
+			}
 		}
 	}
 
