@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AgentManifest } from "./loader.js";
 import type { SessionCosts } from "./cost-tracker.js";
 import type { McpServerConfig } from "./mcp/types.js";
@@ -129,6 +130,15 @@ export interface SandboxOptions {
 
 // ── Query options ──────────────────────────────────────────────────────
 
+export interface CompactionOptions {
+	/** Enable automatic context compaction (default true). */
+	enabled?: boolean;
+	/** Fraction of model.contextWindow used as the send budget (default 0.75). */
+	budgetRatio?: number;
+	/** Fold aged turns into a summary (default true). false = truncate-only. */
+	summarize?: boolean;
+}
+
 export interface QueryOptions {
 	prompt: string | AsyncIterable<GCUserMessage>;
 	dir?: string;
@@ -146,6 +156,15 @@ export interface QueryOptions {
 	maxTurns?: number;
 	abortController?: AbortController;
 	sessionId?: string;
+	/**
+	 * Seed the engine transcript before the first prompt.
+	 * Use with `resume: true` to continue a prior conversation.
+	 */
+	messages?: AgentMessage[];
+	/** When true, treat `messages` as a resumed transcript (same as seeding today). */
+	resume?: boolean;
+	/** Context-window compaction (G13). Default: enabled. */
+	compaction?: CompactionOptions;
 	/** MCP servers to connect to. Merged with manifest `mcp_servers` (these win on key collision). */
 	mcpServers?: Record<string, McpServerConfig>;
 	constraints?: {

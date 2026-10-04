@@ -35,6 +35,7 @@ import {
 	recordGenAiCall,
 	shutdownTelemetry,
 } from "./telemetry.js";
+import { Compactor, createTransformContext } from "./compactor.js";
 
 // ANSI helpers
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -597,6 +598,10 @@ async function main(): Promise<void> {
 	let _llmCallStart = 0;
 	let _totalCostUsd = 0;
 
+	const contextWindow =
+		(loaded.model as { contextWindow?: number }).contextWindow ?? 128_000;
+	const compactor = new Compactor({ contextWindow });
+
 	const agent = new Agent({
 		initialState: {
 			systemPrompt,
@@ -604,6 +609,7 @@ async function main(): Promise<void> {
 			tools,
 			...modelOptions,
 		},
+		transformContext: createTransformContext(compactor),
 	});
 
 	agent.subscribe((event) => {
@@ -622,6 +628,8 @@ async function main(): Promise<void> {
 					/* never let telemetry break the agent */
 				}
 				_totalCostUsd += Number(raw.usage?.cost?.total ?? 0) || 0;
+				const inputTokens = Number(raw.usage?.input ?? 0) || 0;
+				if (inputTokens > 0) compactor.observeUsage(inputTokens);
 				_llmCallStart = 0;
 			}
 		}
@@ -644,7 +652,7 @@ async function main(): Promise<void> {
 	if (loaded.plugins.length > 0) {
 		console.log(dim(`Plugins: ${loaded.plugins.map((p) => p.manifest.id).join(", ")}`));
 	}
-	console.log(dim('Type /skills to list skills, /plugins to list plugins, /memory to view memory, /quit to exit\n'));
+	console.log(dim('Type /skills, /plugins, /memory, /clear, /quit — or chat\n'));
 
 	// Single-shot mode
 	if (prompt) {
@@ -711,6 +719,14 @@ async function main(): Promise<void> {
 				}
 				await shutdownTelemetry().catch(() => {});
 				process.exit(0);
+			}
+
+			if (trimmed === "/clear") {
+				agent.reset();
+				compactor.reset();
+				console.log(dim("Session cleared."));
+				ask();
+				return;
 			}
 
 			if (trimmed === "/memory") {

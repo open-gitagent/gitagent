@@ -25,7 +25,8 @@ export function estimateMessageTokens(messages: GCMessage[]): number {
 				total += estimateTokens(msg.content);
 				break;
 			case "delta":
-				total += estimateTokens(msg.content);
+				// Streaming fragments are already counted via the final assistant
+				// message — do not double-count (G16).
 				break;
 			case "system":
 				total += estimateTokens(msg.content);
@@ -37,12 +38,19 @@ export function estimateMessageTokens(messages: GCMessage[]): number {
 
 // ── Compaction checks ─────────────────────────────────────────────────
 
-/** Check if messages are approaching context limit and need compaction */
+/**
+ * Check if messages are approaching context limit and need compaction.
+ * Pass `usageInput` (last provider usage.input) to floor the estimate when the
+ * real count is higher than the chars/4 heuristic (G16).
+ */
 export function needsCompaction(
 	messages: GCMessage[],
 	contextWindow: number = 200000,
+	usageInput?: number,
 ): { needed: boolean; tokenEstimate: number; ratio: number } {
-	const tokenEstimate = estimateMessageTokens(messages);
+	const estimated = estimateMessageTokens(messages);
+	const tokenEstimate =
+		usageInput != null && usageInput > estimated ? usageInput : estimated;
 	const ratio = tokenEstimate / contextWindow;
 	return { needed: ratio > 0.75, tokenEstimate, ratio };
 }

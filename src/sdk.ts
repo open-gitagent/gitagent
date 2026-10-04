@@ -25,6 +25,7 @@ import type {
 	SandboxOptions,
 } from "./sdk-types.js";
 import { CostTracker } from "./cost-tracker.js";
+import { Compactor, createTransformContext } from "./compactor.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	wrapToolWithOtel,
@@ -312,7 +313,20 @@ export function query(options: QueryOptions): Query {
 			modelOptions.maxTurns = options.maxTurns;
 		}
 
-		// 8. Create Agent
+		// 8. Create Agent — wire transformContext so oversized transcripts are
+		// compacted before each LLM call (G13). Stored transcript stays intact.
+		const compactionOpts = options.compaction;
+		const compactionEnabled = compactionOpts?.enabled !== false;
+		const contextWindow =
+			(loaded.model as { contextWindow?: number }).contextWindow ?? 128_000;
+		const compactor = compactionEnabled
+			? new Compactor({
+					contextWindow,
+					budgetRatio: compactionOpts?.budgetRatio,
+					summarize: compactionOpts?.summarize,
+				})
+			: null;
+
 		const agent = new Agent({
 			initialState: {
 				systemPrompt,
@@ -320,8 +334,16 @@ export function query(options: QueryOptions): Query {
 				tools,
 				...modelOptions,
 			},
+			...(compactor
+				? { transformContext: createTransformContext(compactor) }
+				: {}),
 		});
 		agentRef = agent;
+
+		// Seed / resume engine transcript when provided (G13 remediation).
+		if (options.messages?.length) {
+			agent.state.messages = options.messages;
+		}
 		// Wire cancellation: q.abort() (via ac) and any consumer-supplied
 		// options.abortController now actually stop the running agent. Previously
 		// ac.abort() was a no-op because the signal was never threaded here.
@@ -412,13 +434,14 @@ export function query(options: QueryOptions): Query {
 					};
 					pushMsg(assistantMsg);
 
-					// Track costs per model
+					// Track costs per model; feed usage.input into the overflow guard.
 					if (assistantMsg.usage) {
 						costTracker.add(
 							`${assistantMsg.provider}:${assistantMsg.model}`,
 							assistantMsg.usage,
 						);
 						_totalCostUsd += assistantMsg.usage.costUsd ?? 0;
+						compactor?.observeUsage(assistantMsg.usage.inputTokens);
 					}
 
 					// Emit gen_ai.chat span (no-op if telemetry disabled).

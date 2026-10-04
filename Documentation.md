@@ -1016,21 +1016,46 @@ query({
 
 ## Context Compaction
 
-Utilities for managing context window limits in long conversations.
+Long sessions are compacted automatically before each LLM call via pi-agent-core's
+`transformContext` hook (G13). The engine transcript is left intact; only the
+messages **sent to the model** are pruned.
+
+### Automatic (SDK + CLI)
+
+`query()` and the REPL construct a `Compactor` sized to `model.contextWindow`
+(default budget 75%, recent tail 40%). Strategy:
+
+1. Fold aged turns into a summary user message; keep the recent tail verbatim
+2. If still over budget, middle-truncate tool results / assistant text (never drop messages)
+
+Provider `usage.input` is observed each turn and floors the estimate when higher
+than the chars/3.5 heuristic. REPL: `/clear` calls `agent.reset()` + `compactor.reset()`.
+
+```typescript
+import { query, Compactor } from "gitagent";
+
+// Automatic — enabled by default
+const q = query({
+  prompt: "...",
+  dir: "...",
+  messages: priorTranscript, // optional seed / resume
+  resume: true,
+  compaction: { enabled: true, summarize: true },
+});
+
+// Manual Compactor (advanced)
+const compactor = new Compactor({ contextWindow: 128_000 });
+const pruned = await compactor.compact(agentMessages);
+```
+
+### GCMessage helpers (caller-driven)
 
 ```typescript
 import { estimateTokens, estimateMessageTokens, needsCompaction, truncateToolResults, buildCompactPrompt } from "gitagent";
 
-// Estimate tokens
-const tokens = estimateTokens("Hello world");  // ~3
-
-// Check if compaction needed (triggers at 75% of context window)
-const { needed, ratio } = needsCompaction(messages, 200000);
-
-// Truncate oversized tool results (keeps first + last half)
+const tokens = estimateTokens("Hello world");  // ~3 (chars/4)
+const { needed, ratio } = needsCompaction(messages, 200000, usageInput);
 const trimmed = truncateToolResults(messages, 10000);
-
-// Build a summarization prompt
 const prompt = buildCompactPrompt(messages);
 ```
 

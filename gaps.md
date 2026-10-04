@@ -32,10 +32,10 @@ gitagent ships the *vocabulary* of a safe, managed agent runtime — `abort`, `s
 
 ## TIER 2 — No context management (session-killing)
 
-- **G13 · Zero context-window management; overflow bricks the session.** `compact.ts` is dead code; the engine's purpose-built `transformContext` hook is never passed (`sdk.ts:310`). Overflow → provider `stopReason:"error"`, no retry/truncate/fallback, and a **poison-pill empty-assistant message** makes every subsequent turn fail. REPL has no `/clear`. Ctrl+C mid-tool orphans a `tool_use` → permanent 400.
+- **G13 · ~~Zero context-window management; overflow bricks the session.~~ FIXED.** `Compactor` (`src/compactor.ts`) is wired via `transformContext` in `sdk.ts` + `index.ts`; usage.input floors the budget; REPL `/clear` resets transcript + compactor; `QueryOptions.messages`/`resume` seed the engine. Remaining: Ctrl+C mid-tool can still orphan a `tool_use` → 400 (pair repair not yet added).
 - **G14 · Tool-result caps are per-call, inconsistent, and *absent* for SDK/plugin tools** (`toAgentTool` bypasses `buildTool` — `tool-utils.ts:15`). ~6–8 large `cli`/`read` results ≈ 200k tokens → G13. Nothing prunes old results.
 - **G15 · System prompt can blow the window before the first token** — unbounded SOUL/RULES/knowledge `always_load`/every `examples/*.md`, no length check vs `model.contextWindow` (`loader.ts:271-382`); custom models hardcode `contextWindow:128000` (an 8k local model lies).
-- **G16 · Token estimate is `chars/4`** — 33–54% under on JSON, ignores system prompt + tool schemas, hardcodes 200k, double-counts deltas (`compact.ts`). Exact per-turn `usage.input` is captured but used only for cost, never for an overflow guard.
+- **G16 · ~~Token estimate unused for overflow.~~ PARTIAL.** Engine `Compactor` uses chars/3.5 + `usage.input` floor vs `model.contextWindow`. Public `compact.ts` helpers still use chars/4 for GCMessage API compat; deltas no longer double-counted; `needsCompaction` accepts optional `usageInput`. Still ignores system prompt + tool schemas in the estimate.
 
 ## TIER 3 — Leaks, crashes & multi-tenant unsafety
 
@@ -68,7 +68,7 @@ gitagent ships the *vocabulary* of a safe, managed agent runtime — `abort`, `s
 6. Call `mcpSetup.cleanup()` on `SIGTERM` (**G26**)
 
 ### Structural (the real work)
-7. Wire `transformContext` → `truncateToolResults` + drop-oldest + a real `usage`-based token guard (**G13, G14, G16**); add `/clear` + `QueryOptions.messages`/`resume`.
+7. ~~Wire `transformContext` → Compactor + usage-based token guard; add `/clear` + `QueryOptions.messages`/`resume`.~~ **Done (G13, partial G16).** G14 (SDK/plugin tool-result caps) still open.
 8. Realpath filesystem jail + `cli` allow/deny policy on main; gate plugin/MCP spawn + MCP tools behind operator opt-in / permissions (**G3, G6, G7**).
 9. Move `finalize`/sandbox-stop into `finally`; fix cleanup ordering; process-group kill + SIGKILL + settle-on-`exit` in `cli` (**G17, G18**).
 10. Multi-tenant: stop mutating `process.env`, per-instance telemetry, per-agentDir scheduler state — or **mandate process-per-tenant** for JPMC (**G22**).

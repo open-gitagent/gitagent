@@ -27,6 +27,14 @@ describe("estimateMessageTokens", () => {
 		assert.equal(compact.estimateMessageTokens(msgs), 55);
 	});
 
+	it("does not double-count streaming deltas (G16)", () => {
+		const msgs = [
+			{ type: "assistant", content: "abcd" }, // 1
+			{ type: "delta", deltaType: "text", content: "xxxx".repeat(100) },
+		] as any;
+		assert.equal(compact.estimateMessageTokens(msgs), 1);
+	});
+
 	it("returns 0 for an empty conversation", () => {
 		assert.equal(compact.estimateMessageTokens([]), 0);
 	});
@@ -46,6 +54,13 @@ describe("needsCompaction", () => {
 		const r = compact.needsCompaction(small, 200000);
 		assert.equal(r.needed, false);
 		assert.ok(r.ratio < 0.75);
+	});
+
+	it("floors the estimate with usageInput when higher (G16)", () => {
+		const small = [{ type: "user", content: "hi" }] as any;
+		const r = compact.needsCompaction(small, 1000, 900);
+		assert.equal(r.needed, true);
+		assert.equal(r.tokenEstimate, 900);
 	});
 });
 
