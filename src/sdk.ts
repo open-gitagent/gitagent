@@ -93,6 +93,10 @@ export function query(options: QueryOptions): Query {
 	const collectedMessages: GCMessage[] = [];
 	const ac = options.abortController ?? new AbortController();
 	const costTracker = new CostTracker();
+	let removeAbortForwarder: (() => void) | undefined;
+	const abortQuery = () => {
+		ac.abort();
+	};
 
 	// These are set once the agent is loaded (async init below)
 	let _sessionId = options.sessionId ?? "";
@@ -131,6 +135,11 @@ export function query(options: QueryOptions): Query {
 	// Async initialization + run
 	const runPromise = (async () => {
 		try {
+			if (options.timeoutMs !== undefined &&
+				(!Number.isFinite(options.timeoutMs) || options.timeoutMs <= 0)) {
+				throw new Error("timeoutMs must be a finite number greater than zero");
+			}
+
 		// Validate mutually exclusive options
 		if (options.repo && options.sandbox) {
 			throw new Error("repo and sandbox options are mutually exclusive");
@@ -322,14 +331,23 @@ export function query(options: QueryOptions): Query {
 			},
 		});
 		agentRef = agent;
-		// Wire cancellation: q.abort() (via ac) and any consumer-supplied
-		// options.abortController now actually stop the running agent. Previously
-		// ac.abort() was a no-op because the signal was never threaded here.
-		const onAbort = () => {
+		const forwardAbort = () => {
 			try { agent.abort(); } catch { /* already stopped */ }
 		};
-		if (ac.signal.aborted) onAbort();
-		else ac.signal.addEventListener("abort", onAbort, { once: true });
+		ac.signal.addEventListener("abort", forwardAbort, { once: true });
+		removeAbortForwarder = () => ac.signal.removeEventListener("abort", forwardAbort);
+
+		const promptWithTimeout = async (prompt: string) => {
+			if (ac.signal.aborted) return;
+			const timer = options.timeoutMs === undefined
+				? undefined
+				: setTimeout(abortQuery, options.timeoutMs);
+			try {
+				await otelContext.with(_session.ctx, () => agent.prompt(prompt));
+			} finally {
+				if (timer !== undefined) clearTimeout(timer);
+			}
+		};
 
 		// 9. Subscribe to events and map to GCMessage
 		agent.subscribe((event: AgentEvent) => {
@@ -509,10 +527,42 @@ export function query(options: QueryOptions): Query {
 			}
 		});
 
+		const emitAbortedResponse = () => {
+			pushMsg({
+				type: "assistant",
+				content: "",
+				model: (loaded.model as any).id ?? "unknown",
+				provider: (loaded.model as any).provider ?? "unknown",
+				stopReason: "aborted",
+				usage: {
+					inputTokens: 0,
+					outputTokens: 0,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+					totalTokens: 0,
+					costUsd: 0,
+				},
+			});
+		};
+		const finishAbortedQuery = () => {
+			emitAbortedResponse();
+			channel.finish();
+		};
+
 		// 10. Send prompt — run inside the session span's context so that
 		// gen_ai.chat and gitagent.tool.execute spans become children of
 		// gitagent.agent.session.
 		if (typeof options.prompt === "string") {
+			if (ac.signal.aborted) {
+				pushMsg({
+					type: "system",
+					subtype: "session_start",
+					content: `Agent ${loaded.manifest.name} initialized`,
+					metadata: { sessionId: _sessionId },
+				});
+				finishAbortedQuery();
+				return;
+			}
 			// Fire pre_query hook before sending to LLM
 			if (hooksConfig?.hooks.pre_query) {
 				const result = await runHooks(hooksConfig.hooks.pre_query, loaded.agentDir, {
@@ -531,12 +581,18 @@ export function query(options: QueryOptions): Query {
 				}
 			}
 			startTurnTrace(loaded.model);
-			await otelContext.with(_session.ctx, () =>
-				agent.prompt(options.prompt as string),
-			);
+			await promptWithTimeout(options.prompt as string);
+			if (ac.signal.aborted) {
+				finishAbortedQuery();
+				return;
+			}
 		} else {
 			// Multi-turn: iterate the async iterable
 			for await (const userMsg of options.prompt) {
+				if (ac.signal.aborted) {
+					finishAbortedQuery();
+					return;
+				}
 				pushMsg({ type: "user", content: userMsg.content });
 				// Fire pre_query hook for each turn
 				if (hooksConfig?.hooks.pre_query) {
@@ -556,15 +612,19 @@ export function query(options: QueryOptions): Query {
 					}
 				}
 				startTurnTrace(loaded.model);
-				await otelContext.with(_session.ctx, () =>
-					agent.prompt(userMsg.content),
-				);
+				await promptWithTimeout(userMsg.content);
+				if (ac.signal.aborted) {
+					finishAbortedQuery();
+					return;
+				}
 			}
 		}
 
 		// Ensure channel finishes even if no agent_end event
 		channel.finish();
 		} finally {
+			removeAbortForwarder?.();
+			removeAbortForwarder = undefined;
 			// Cleanup on EVERY exit path — success, hook-block early-return, abort,
 			// and error (this finally runs before the .catch() below). Previously
 			// finalize/sandbox-stop lived only on the success and error paths, so a
@@ -609,7 +669,7 @@ export function query(options: QueryOptions): Query {
 	// Build the Query object (AsyncGenerator + helpers)
 	const generator: Query = {
 		abort() {
-			ac.abort();
+			abortQuery();
 		},
 
 		steer(message: string) {

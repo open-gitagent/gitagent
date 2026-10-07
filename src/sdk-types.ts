@@ -145,6 +145,8 @@ export interface QueryOptions {
 	hooks?: GCHooks;
 	maxTurns?: number;
 	abortController?: AbortController;
+	/** Maximum duration of each model turn before the query is aborted; this is not a whole-query timeout. */
+	timeoutMs?: number;
 	sessionId?: string;
 	/** MCP servers to connect to. Merged with manifest `mcp_servers` (these win on key collision). */
 	mcpServers?: Record<string, McpServerConfig>;
