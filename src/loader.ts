@@ -2,6 +2,8 @@ import { readFile, mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { execFileSync } from "child_process";
+import { existsSync, rmSync } from "fs";
+import { isSafePathSegment } from "./safe-path.js";
 import { getModel } from "@mariozechner/pi-ai";
 import type { Model } from "@mariozechner/pi-ai";
 import yaml from "js-yaml";
@@ -173,13 +175,41 @@ function deepMerge(base: Record<string, any>, override: Record<string, any>): Re
 export function cloneGitRepo(url: string, dest: string, opts: { cwd: string; branch?: string }): boolean {
 	const args = ["clone", "--depth", "1"];
 	if (opts.branch) args.push("--branch", opts.branch);
-	args.push(url, dest);
+	args.push("--", url, dest);
 	try {
 		execFileSync("git", args, { cwd: opts.cwd, stdio: "pipe" });
 		return true;
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * Clone `url` into `dest`, or reuse an existing clone of the same URL there.
+ * An existing clone is refreshed with a fast-forward pull; network failures
+ * are ignored so a cached copy keeps working offline. Returns false only if
+ * no usable checkout exists.
+ */
+export function syncGitRepo(url: string, dest: string, opts: { cwd: string; branch?: string }): boolean {
+	if (existsSync(dest)) {
+		let origin = "";
+		try {
+			origin = execFileSync("git", ["-C", dest, "remote", "get-url", "origin"], { stdio: "pipe", encoding: "utf-8" }).trim();
+		} catch {
+			// Not a git checkout
+		}
+		if (origin === url) {
+			try {
+				execFileSync("git", ["-C", dest, "pull", "--ff-only", "-q"], { stdio: "pipe", timeout: 60_000 });
+			} catch {
+				// Offline or diverged — keep using the cached checkout
+			}
+			return true;
+		}
+		// Stale or different source: replace it
+		rmSync(dest, { recursive: true, force: true });
+	}
+	return cloneGitRepo(url, dest, opts);
 }
 
 async function resolveInheritance(
@@ -195,10 +225,11 @@ async function resolveInheritance(
 	await mkdir(depsDir, { recursive: true });
 
 	// Clone parent into .gitagent/deps/
-	const parentName = manifest.extends.split("/").pop()?.replace(/\.git$/, "") || "parent";
+	const derivedName = manifest.extends.split("/").pop()?.replace(/\.git$/, "") || "";
+	const parentName = isSafePathSegment(derivedName) ? derivedName : "parent";
 	const parentDir = join(depsDir, parentName);
 
-	if (!cloneGitRepo(manifest.extends, parentDir, { cwd: agentDir })) {
+	if (!syncGitRepo(manifest.extends, parentDir, { cwd: agentDir })) {
 		// Clone failed, continue without parent
 		return { manifest, parentRules: "" };
 	}
@@ -238,9 +269,13 @@ async function resolveDependencies(
 	await mkdir(depsDir, { recursive: true });
 
 	for (const dep of manifest.dependencies) {
+		if (!isSafePathSegment(String(dep.name))) {
+			console.warn(`Skipping dependency with invalid name: ${JSON.stringify(dep.name)}`);
+			continue;
+		}
 		const depDir = join(depsDir, dep.name);
 		// Clone failure is non-fatal; skip this dependency.
-		cloneGitRepo(dep.source, depDir, { cwd: agentDir, branch: dep.version });
+		syncGitRepo(dep.source, depDir, { cwd: agentDir, branch: dep.version });
 	}
 }
 
@@ -403,16 +438,24 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 	const envBaseUrl = process.env.GITAGENT_MODEL_BASE_URL;
 
 	let model: Model<any>;
-	if (modelId.includes("@")) {
-		// Custom endpoint: provider:model-id@base-url
-		const atIndex = modelId.indexOf("@");
-		model = createCustomModel(provider, modelId.slice(0, atIndex), modelId.slice(atIndex + 1));
+	// Custom endpoint: provider:model-id@https://base-url. Only an "@" followed
+	// by an http(s) URL is a base-URL override; model ids may contain "@"
+	// themselves (e.g. Vertex "claude-x@20241022").
+	const baseUrlMatch = modelId.match(/^(.*?)@(https?:\/\/.+)$/);
+	if (baseUrlMatch) {
+		model = createCustomModel(provider, baseUrlMatch[1], baseUrlMatch[2]);
 	} else if (envBaseUrl) {
 		// Environment-specified base URL overrides all providers
 		model = createCustomModel(provider, modelId, envBaseUrl);
 	} else {
 		// Standard registered model
-		model = getModel(provider as any, modelId as any);
+		const registered = getModel(provider as any, modelId as any) as Model<any> | undefined;
+		if (!registered) {
+			throw new Error(
+				`Unknown model ${provider}:${modelId}. Check the provider and model id, or use provider:model@https://base-url for a custom endpoint.`,
+			);
+		}
+		model = registered;
 	}
 
 	// One run is many model requests: every turn of the agent loop, plus the

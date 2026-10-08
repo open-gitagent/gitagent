@@ -7,7 +7,7 @@ mod tui;
 
 
 use clap::Parser;
-use ira::sdk::env::load_env;
+use ira::sdk::env::{load_env, load_user_env};
 use ira::sdk::goal::Goal;
 use ira::sdk::query::QueryOptions;
 use ira::sdk::session::{repo_name, RepoOptions};
@@ -29,6 +29,11 @@ struct Args {
     /// GitHub PAT (or set GITHUB_TOKEN / GIT_TOKEN).
     #[arg(long)]
     pat: Option<String>,
+    /// With --repo: also run code the repository supplies (mcp.yaml servers,
+    /// hooks.yaml, tools/*.yaml) and load its .env. Off by default. Same as
+    /// GITAGENT_TRUST_REPO=1.
+    #[arg(long)]
+    trust_repo: bool,
     /// Resume an existing session branch (e.g. gitagent/session-abc12345).
     #[arg(long)]
     session: Option<String>,
@@ -73,7 +78,12 @@ async fn main() {
     }
 
     // Load ~/.gitagent/.env then <dir>/.env (API keys, GITAGENT_MODEL_BASE_URL).
-    load_env(&PathBuf::from(&args.dir));
+    // A --repo working copy is untrusted: only the user's own .env is loaded.
+    if args.repo.is_some() && !trust_repo(&args) {
+        load_user_env();
+    } else {
+        load_env(&PathBuf::from(&args.dir));
+    }
 
     let code = match (args.verify.clone(), args.prompt.clone()) {
         // Test-driven goal loop (needs a prompt + a verify command).
@@ -119,6 +129,12 @@ async fn main() {
     std::process::exit(code);
 }
 
+/// Whether the user opted in to running repository-supplied code.
+fn trust_repo(args: &Args) -> bool {
+    args.trust_repo
+        || std::env::var("GITAGENT_TRUST_REPO").map(|v| matches!(v.trim(), "1" | "true" | "yes")).unwrap_or(false)
+}
+
 /// Build repo options when --repo is given.
 fn build_repo(args: &Args) -> Option<RepoOptions> {
     let url = args.repo.as_ref()?;
@@ -130,5 +146,11 @@ fn build_repo(args: &Args) -> Option<RepoOptions> {
         .unwrap_or_default();
     // Clone into --dir if given, else ./<repo-name>.
     let clone_dir = if args.dir == "." { PathBuf::from(repo_name(url)) } else { PathBuf::from(&args.dir) };
-    Some(RepoOptions { url: url.clone(), token, dir: clone_dir, session: args.session.clone() })
+    Some(RepoOptions {
+        url: url.clone(),
+        token,
+        dir: clone_dir,
+        session: args.session.clone(),
+        trust_repo: trust_repo(args),
+    })
 }

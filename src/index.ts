@@ -26,6 +26,7 @@ import type { LocalSession } from "./session.js";
 // Imported dynamically below so the slim core has no static dependency on it —
 // users without voice get a clean install + a clear error if they try --voice.
 import { handlePluginCommand } from "./plugin-cli.js";
+import { createSamplingStreamFn, enforceMaxTurns, maxTurnsMessage, samplingFromConstraints } from "./model-options.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	initTelemetry,
@@ -579,16 +580,9 @@ async function main(): Promise<void> {
 	// isn't initialised (wrapToolWithOtel returns the tool unchanged).
 	tools = tools.map(wrapToolWithOtel);
 
-	// Build model options from manifest constraints
-	const modelOptions: Record<string, any> = {};
-	if (manifest.model.constraints) {
-		const c = manifest.model.constraints;
-		if (c.temperature !== undefined) modelOptions.temperature = c.temperature;
-		if (c.max_tokens !== undefined) modelOptions.maxTokens = c.max_tokens;
-		if (c.top_p !== undefined) modelOptions.topP = c.top_p;
-		if (c.top_k !== undefined) modelOptions.topK = c.top_k;
-		if (c.stop_sequences !== undefined) modelOptions.stopSequences = c.stop_sequences;
-	}
+	// Sampling options from manifest constraints. pi-agent-core ignores these
+	// in initialState, so they are applied per LLM call via a stream function.
+	const streamFn = createSamplingStreamFn(samplingFromConstraints(manifest.model.constraints));
 
 	// OpenTelemetry session span — covers the whole CLI lifetime.
 	const _session = startSessionSpan("gitagent.agent.session", {
@@ -602,8 +596,11 @@ async function main(): Promise<void> {
 			systemPrompt,
 			model: loaded.model,
 			tools,
-			...modelOptions,
 		},
+		...(streamFn ? { streamFn } : {}),
+	});
+	enforceMaxTurns(agent, manifest.runtime?.max_turns, (limit) => {
+		process.stderr.write(red(`\n${maxTurnsMessage(limit)}\n`));
 	});
 
 	agent.subscribe((event) => {
@@ -872,7 +869,8 @@ main()
     // Single-shot mode ends here; the REPL flushes from its own exit paths.
     // finally runs before the catch below, so a prompt that throws still
     // flushes before process.exit discards anything pending.
-    if (!_replActive) shutdownTelemetry().catch(() => {});
+    // Return the promise so .finally() waits for the flush.
+    if (!_replActive) return shutdownTelemetry().catch(() => {});
   })
   .catch((err) => {
     console.error(red(`Fatal: ${err.message}`));

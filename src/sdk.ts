@@ -25,6 +25,7 @@ import type {
 	SandboxOptions,
 } from "./sdk-types.js";
 import { CostTracker } from "./cost-tracker.js";
+import { createSamplingStreamFn, enforceMaxTurns, maxTurnsMessage, samplingFromConstraints } from "./model-options.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
 	wrapToolWithOtel,
@@ -294,23 +295,14 @@ export function query(options: QueryOptions): Query {
 			}
 		}
 
-		// 7. Build model options from constraints
-		const modelOptions: Record<string, any> = {};
-		const constraints = options.constraints ?? loaded.manifest.model.constraints;
-		if (constraints) {
-			const c = constraints as any;
-			if (c.temperature !== undefined) modelOptions.temperature = c.temperature;
-			if (c.maxTokens !== undefined) modelOptions.maxTokens = c.maxTokens;
-			if (c.max_tokens !== undefined) modelOptions.maxTokens = c.max_tokens;
-			if (c.topP !== undefined) modelOptions.topP = c.topP;
-			if (c.top_p !== undefined) modelOptions.topP = c.top_p;
-			if (c.topK !== undefined) modelOptions.topK = c.topK;
-			if (c.top_k !== undefined) modelOptions.topK = c.top_k;
-		}
-
-		if (options.maxTurns !== undefined) {
-			modelOptions.maxTurns = options.maxTurns;
-		}
+		// 7. Build model options from constraints. pi-agent-core ignores
+		// sampling fields in initialState, so they are applied per LLM call
+		// through a wrapping stream function.
+		const sampling = samplingFromConstraints(
+			(options.constraints ?? loaded.manifest.model.constraints) as Record<string, any> | undefined,
+		);
+		const streamFn = createSamplingStreamFn(sampling);
+		const maxTurns = options.maxTurns ?? loaded.manifest.runtime?.max_turns;
 
 		// 8. Create Agent
 		const agent = new Agent({
@@ -318,8 +310,16 @@ export function query(options: QueryOptions): Query {
 				systemPrompt,
 				model: loaded.model,
 				tools,
-				...modelOptions,
 			},
+			...(streamFn ? { streamFn } : {}),
+		});
+		enforceMaxTurns(agent, maxTurns, (limit) => {
+			pushMsg({
+				type: "system",
+				subtype: "max_turns",
+				content: maxTurnsMessage(limit),
+				metadata: { maxTurns: limit },
+			});
 		});
 		agentRef = agent;
 		// Wire cancellation: q.abort() (via ac) and any consumer-supplied
@@ -504,7 +504,8 @@ export function query(options: QueryOptions): Query {
 						content: `Agent ${loaded.manifest.name} finished`,
 						metadata: { sessionId: _sessionId },
 					});
-					channel.finish();
+					// Do not finish the channel here: in multi-turn mode more
+					// prompts follow. The channel is finished after the prompt loop.
 					break;
 			}
 		});

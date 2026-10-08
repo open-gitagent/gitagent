@@ -7,13 +7,14 @@ use crate::pi::event::{AgentEvent, DeltaKind};
 use crate::pi::gate::ToolGate;
 use crate::pi::message::StopReason;
 use crate::pi::provider::GenParams;
-use crate::pi::tool::ExecutionMode;
 use crate::sdk::hooks::load_hook_gate;
 use crate::sdk::manifest::PermissionConfig;
 use crate::sdk::permissions::PermissionGate;
 use crate::sdk::session::{init_local_session, LocalSession, RepoOptions};
 use crate::sdk::telemetry::Telemetry;
-use crate::sdk::{loader, tools::builtin_tools};
+use crate::sdk::proc::blocking;
+use crate::sdk::tools::{builtin_tools_with, DelegationPolicy, ToolOptions};
+use crate::sdk::loader;
 use futures_util::Stream;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -22,6 +23,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
 
 /// What the SDK surfaces to consumers.
 #[derive(Debug, Clone)]
@@ -58,6 +60,8 @@ pub struct RunUsage {
 pub struct QueryStream {
     inner: ReceiverStream<AgentEvent>,
     agent: Arc<Agent>,
+    /// This run's own cancel token.
+    cancel: CancellationToken,
     /// Present in repo mode; finalized (commit/push + PAT scrub) once, on Done or Drop.
     session: Option<LocalSession>,
     usage: RunUsage,
@@ -79,7 +83,7 @@ impl QueryStream {
     }
     fn finalize_session(&mut self) {
         if let Some(s) = self.session.take() {
-            let _ = s.finalize();
+            let _ = blocking(|| s.finalize());
         }
     }
 }
@@ -87,8 +91,8 @@ impl QueryStream {
 impl Drop for QueryStream {
     fn drop(&mut self) {
         // Breaking out of the stream cancels the underlying run (no runaway spend),
-        // then commits/pushes + scrubs the PAT (repo mode).
-        self.agent.abort();
+        // then commits/pushes (repo mode).
+        self.cancel.cancel();
         self.finalize_session();
     }
 }
@@ -170,18 +174,35 @@ fn build_agent(
     permission_mode: Option<String>,
 ) -> anyhow::Result<(Arc<Agent>, Option<LocalSession>, Option<Telemetry>)> {
     // Repo mode: clone + branch, then load the agent from the working copy.
-    let (dir, session) = match repo {
+    // A cloned repo is untrusted unless the user opted in (--trust-repo):
+    // its mcp.yaml servers, hooks.yaml and tools/*.yaml are not run.
+    let (dir, session, trusted) = match repo {
         Some(repo) => {
+            let trusted = repo.trust_repo;
             let s = init_local_session(repo)?;
-            (s.dir.clone(), Some(s))
+            (s.dir.clone(), Some(s), trusted)
         }
-        None => (dir, None),
+        None => (dir, None, true),
     };
+    if !trusted {
+        let skipped: Vec<&str> = ["mcp.yaml", "hooks.yaml", "tools"]
+            .into_iter()
+            .filter(|f| dir.join(f).exists())
+            .collect();
+        if !skipped.is_empty() {
+            eprintln!(
+                "note: not running repository-supplied {} (pass --trust-repo or set GITAGENT_TRUST_REPO=1 to allow)",
+                skipped.join(", ")
+            );
+        }
+    }
 
     let loaded = loader::load_agent(&dir)?;
     let model = model.unwrap_or_else(|| loaded.manifest.model.preferred.clone());
     // Tool allow-list: omitted → all; `[]` → none (tool-less models); list → those.
-    let mut tools = builtin_tools(&dir);
+    let delegation = DelegationPolicy { permission_mode: permission_mode.clone(), ..Default::default() };
+    let tool_opts = ToolOptions { skip_agent_executables: !trusted, delegation: delegation.clone() };
+    let mut tools = builtin_tools_with(&dir, &tool_opts);
     if let Some(allow) = loaded.manifest.tools.as_ref() {
         tools.retain(|t| allow.iter().any(|a| a == t.name()));
     }
@@ -196,21 +217,22 @@ fn build_agent(
         .unwrap_or_default();
 
     // Gates: permission rules/modes + script hooks. Mutating tools = those the
-    // engine already serializes (Sequential execution mode).
-    let mutating: HashSet<String> = tools
-        .iter()
-        .filter(|t| t.execution_mode() == ExecutionMode::Sequential)
-        .map(|t| t.name().to_string())
-        .collect();
+    // engine serializes (Sequential) plus delegation (run_agent).
+    let mutating: HashSet<String> =
+        tools.iter().filter(|t| t.is_mutating()).map(|t| t.name().to_string()).collect();
     let mut gates: Vec<Arc<dyn ToolGate>> = Vec::new();
     let perm_cfg = loaded.manifest.permissions.clone().unwrap_or_else(PermissionConfig::default);
-    let perm = PermissionGate::new(&perm_cfg, mutating, permission_mode.as_deref());
+    let perm = PermissionGate::new(&perm_cfg, mutating, permission_mode.as_deref()).with_root(&dir);
     if !perm.is_noop() {
         gates.push(Arc::new(perm));
     }
-    if let Some(hook) = load_hook_gate(&dir) {
-        gates.push(Arc::new(hook));
+    if trusted {
+        if let Some(hook) = load_hook_gate(&dir) {
+            gates.push(Arc::new(hook));
+        }
     }
+    // Sub-agents (run_agent) inherit exactly these gates.
+    *delegation.gates.write().unwrap_or_else(|e| e.into_inner()) = gates.clone();
 
     let telemetry = Telemetry::new(&dir);
     let agent = Arc::new(
@@ -225,9 +247,11 @@ fn build_agent(
 
 /// One-shot: run a single prompt to completion as a `Stream<Event>`.
 pub fn query(opts: QueryOptions) -> anyhow::Result<QueryStream> {
-    let (agent, session, telemetry) = build_agent(opts.dir, opts.model, opts.repo, opts.permission_mode)?;
-    let inner = agent.prompt(opts.prompt);
-    Ok(QueryStream { inner, agent, session, usage: RunUsage::default(), telemetry })
+    // Cloning, MCP handshakes etc. are blocking — keep them off async workers.
+    let (agent, session, telemetry) =
+        blocking(|| build_agent(opts.dir, opts.model, opts.repo, opts.permission_mode))?;
+    let (inner, cancel) = agent.prompt_with_cancel(opts.prompt);
+    Ok(QueryStream { inner, agent, cancel, session, usage: RunUsage::default(), telemetry })
 }
 
 /// A persistent multi-turn session: conversation context carries across `send`
@@ -246,15 +270,15 @@ pub fn open_session(
     repo: Option<RepoOptions>,
     permission_mode: Option<String>,
 ) -> anyhow::Result<Session> {
-    let (agent, session, telemetry) = build_agent(dir, model, repo, permission_mode)?;
+    let (agent, session, telemetry) = blocking(|| build_agent(dir, model, repo, permission_mode))?;
     Ok(Session { agent, session, telemetry })
 }
 
 impl Session {
     /// Run one turn on the persistent transcript. Returns this turn's Events.
     pub fn send(&self, prompt: impl Into<String>) -> TurnStream {
-        let inner = self.agent.prompt(prompt.into());
-        TurnStream { inner, agent: self.agent.clone(), usage: RunUsage::default(), telemetry: self.telemetry.clone() }
+        let (inner, cancel) = self.agent.prompt_with_cancel(prompt.into());
+        TurnStream { inner, cancel, usage: RunUsage::default(), telemetry: self.telemetry.clone() }
     }
     /// Inject a message into the in-flight turn (steering).
     pub fn steer(&self, message: impl Into<String>) {
@@ -269,7 +293,7 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         if let Some(s) = self.session.take() {
-            let _ = s.finalize(); // commit/push + scrub PAT, once
+            let _ = blocking(|| s.finalize()); // commit/push, once
         }
     }
 }
@@ -278,7 +302,9 @@ impl Drop for Session {
 /// turn — the Session (and its transcript) stays alive for the next `send`.
 pub struct TurnStream {
     inner: ReceiverStream<AgentEvent>,
-    agent: Arc<Agent>,
+    /// This turn's own cancel token — dropping a finished turn's stream can't
+    /// cancel a later one.
+    cancel: CancellationToken,
     usage: RunUsage,
     telemetry: Option<Telemetry>,
 }
@@ -291,7 +317,7 @@ impl TurnStream {
 
 impl Drop for TurnStream {
     fn drop(&mut self) {
-        self.agent.abort(); // interrupting the stream cancels this turn only
+        self.cancel.cancel(); // interrupting the stream cancels this turn only
     }
 }
 

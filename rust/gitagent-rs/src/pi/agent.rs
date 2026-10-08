@@ -5,10 +5,11 @@ use crate::pi::agent_loop::{run_loop, LoopConfig, LoopContext};
 use crate::pi::compact::Compactor;
 use crate::pi::event::AgentEvent;
 use crate::pi::gate::ToolGate;
-use crate::pi::message::AgentMessage;
+use crate::pi::message::{AgentMessage, AssistantMessage, StopReason};
 use crate::pi::provider::{model_context_window, resolve_model, GenParams, ModelSpec};
 use crate::pi::tool::{AgentTool, ExecutionMode};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -21,7 +22,11 @@ pub struct Agent {
     messages: Arc<Mutex<Vec<AgentMessage>>>,
     steering: Arc<Mutex<VecDeque<AgentMessage>>>,
     follow_up: Arc<Mutex<VecDeque<AgentMessage>>>,
-    cancel: Arc<Mutex<Option<CancellationToken>>>,
+    /// The in-flight turn's (id, cancel token).
+    cancel: Arc<Mutex<Option<(u64, CancellationToken)>>>,
+    /// Set while a run is in flight; a second `prompt` is rejected.
+    busy: Arc<AtomicBool>,
+    turn_ids: AtomicU64,
     client: reqwest::Client,
     /// Preferred model first, then fallbacks (tried in order on error).
     specs: Vec<ModelSpec>,
@@ -58,6 +63,8 @@ impl Agent {
             steering: Arc::new(Mutex::new(VecDeque::new())),
             follow_up: Arc::new(Mutex::new(VecDeque::new())),
             cancel: Arc::new(Mutex::new(None)),
+            busy: Arc::new(AtomicBool::new(false)),
+            turn_ids: AtomicU64::new(0),
             client,
             specs: vec![spec],
             // Default parallel (like pi); per-tool Sequential still serializes
@@ -107,10 +114,29 @@ impl Agent {
     /// Start a run from a user prompt. Returns the lifecycle event stream. The
     /// run executes on a background task and appends to the transcript on finish.
     pub fn prompt(&self, user: String) -> ReceiverStream<AgentEvent> {
-        let cancel = CancellationToken::new();
-        *self.cancel.lock().unwrap() = Some(cancel.clone());
+        self.prompt_with_cancel(user).0
+    }
 
+    /// Like [`prompt`](Self::prompt), also returning this turn's own cancel
+    /// token (cancelling it can never affect a later turn). Only one run may
+    /// be in flight per Agent: a concurrent call gets an immediate error turn
+    /// and leaves the transcript untouched.
+    pub fn prompt_with_cancel(&self, user: String) -> (ReceiverStream<AgentEvent>, CancellationToken) {
+        let cancel = CancellationToken::new();
         let (tx, rx) = mpsc::channel(64);
+
+        if self.busy.swap(true, Ordering::SeqCst) {
+            let msg = AssistantMessage::failure(
+                StopReason::Error,
+                "agent is busy: a previous message is still running (wait for it or abort it)",
+            );
+            let _ = tx.try_send(AgentEvent::AgentStart);
+            let _ = tx.try_send(AgentEvent::MessageEnd(msg));
+            let _ = tx.try_send(AgentEvent::AgentEnd);
+            return (ReceiverStream::new(rx), cancel);
+        }
+        let turn_id = self.turn_ids.fetch_add(1, Ordering::SeqCst);
+        *self.cancel.lock().unwrap() = Some((turn_id, cancel.clone()));
 
         // Persist the user turn to the transcript, then seed the run from it.
         // (run_loop returns only the messages IT appends — assistant/tool/steer —
@@ -140,18 +166,26 @@ impl Agent {
             tool_timeout: self.tool_timeout,
         };
         let messages_arc = self.messages.clone();
+        let (busy, slot, run_cancel) = (self.busy.clone(), self.cancel.clone(), cancel.clone());
 
         // Keep a second sender alive so the channel (and thus the returned
         // stream) stays open until AFTER the transcript is committed — otherwise
         // a follow-up turn could read stale messages (multi-turn Session).
         let hold = tx.clone();
         tokio::spawn(async move {
-            let new_messages = run_loop(ctx, config, cancel, tx).await;
+            let new_messages = run_loop(ctx, config, run_cancel, tx).await;
             messages_arc.lock().unwrap().extend(new_messages);
+            {
+                let mut s = slot.lock().unwrap();
+                if s.as_ref().map(|(id, _)| *id) == Some(turn_id) {
+                    *s = None;
+                }
+            }
+            busy.store(false, Ordering::SeqCst);
             drop(hold);
         });
 
-        ReceiverStream::new(rx)
+        (ReceiverStream::new(rx), cancel)
     }
 
     /// Queue a message to be injected after the current assistant turn.
@@ -166,7 +200,7 @@ impl Agent {
 
     /// Abort the active run, if any.
     pub fn abort(&self) {
-        if let Some(c) = self.cancel.lock().unwrap().as_ref() {
+        if let Some((_, c)) = self.cancel.lock().unwrap().as_ref() {
             c.cancel();
         }
     }

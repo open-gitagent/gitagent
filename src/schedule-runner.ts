@@ -19,6 +19,30 @@ const activeTasks = new Map<string, ScheduledTask>();
 const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const runningJobs = new Set<string>();
 
+/** setTimeout's maximum delay (2^31-1 ms, ~24.8 days). Longer delays fire immediately. */
+export const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * Run `fn` at absolute time `targetMs`, chaining timers so delays beyond
+ * MAX_TIMEOUT_MS don't overflow. `onTimer` receives each new timer handle so
+ * the caller can track/cancel the current one.
+ */
+export function scheduleAt(
+	targetMs: number,
+	fn: () => void,
+	onTimer: (timer: ReturnType<typeof setTimeout>) => void,
+): void {
+	const remaining = targetMs - Date.now();
+	if (remaining <= 0) {
+		fn();
+		return;
+	}
+	const timer = setTimeout(() => {
+		scheduleAt(targetMs, fn, onTimer);
+	}, Math.min(remaining, MAX_TIMEOUT_MS));
+	onTimer(timer);
+}
+
 export async function startScheduler(opts: SchedulerOptions): Promise<void> {
 	const schedules = await discoverSchedules(opts.agentDir);
 	let activeCount = 0;
@@ -34,15 +58,21 @@ export async function startScheduler(opts: SchedulerOptions): Promise<void> {
 
 		if (schedule.mode === "once" && schedule.runAt) {
 			// One-time schedule via runAt datetime
-			const delay = new Date(schedule.runAt).getTime() - Date.now();
+			const runAtMs = new Date(schedule.runAt).getTime();
+			if (!Number.isFinite(runAtMs)) {
+				console.log(dim(`[scheduler] "${schedule.id}" has an invalid runAt — skipping`));
+				continue;
+			}
+			const delay = runAtMs - Date.now();
 			if (delay <= 0) {
 				console.log(dim(`[scheduler] "${schedule.id}" runAt is in the past — skipping`));
 				continue;
 			}
-			const timer = setTimeout(() => {
-				runJob(schedule, true);
-			}, delay);
-			activeTimers.set(schedule.id, timer);
+			scheduleAt(
+				runAtMs,
+				() => { runJob(schedule, true); },
+				(timer) => { activeTimers.set(schedule.id, timer); },
+			);
 			const when = new Date(schedule.runAt).toLocaleString();
 			console.log(dim(`[scheduler] "${schedule.id}" scheduled once at ${when} (in ${Math.round(delay / 1000)}s)`));
 			activeCount++;

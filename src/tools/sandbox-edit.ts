@@ -80,7 +80,8 @@ export function createSandboxEditTool(ctx: SandboxContext): AgentTool<typeof edi
 				if (replace_all) {
 					updated = original.split(old_string).join(new_string);
 				} else {
-					updated = original.replace(old_string, new_string);
+					// Function replacer: new_string is inserted literally (no `$&`/`$$` expansion)
+					updated = original.replace(old_string, () => new_string);
 				}
 			}
 

@@ -147,10 +147,15 @@ impl AgentTool for SkillLearner {
         if name.is_empty() {
             return Ok(ToolResult::text("Error: 'name' is required"));
         }
+        if !crate::sdk::loader::is_safe_name(&name) {
+            return Ok(ToolResult::text(
+                "Error: 'name' must be a simple skill name (letters, digits, '.', '_', '-')",
+            ));
+        }
         let path = self.skill_path(&name);
         match action {
             "save" => {
-                let desc = args.get("description").and_then(Value::as_str).unwrap_or_default();
+                let desc = args.get("description").and_then(Value::as_str).unwrap_or_default().replace(['\n', '\r'], " ");
                 let body = args.get("body").and_then(Value::as_str).unwrap_or_default();
                 let confidence = match tokio::fs::read_to_string(&path).await {
                     Ok(existing) => confidence_of(&split_frontmatter(&existing).0),

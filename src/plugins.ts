@@ -5,6 +5,7 @@ import { createRequire } from "module";
 import { homedir } from "os";
 import yaml from "js-yaml";
 import { interpolateEnvString } from "./env-utils.js";
+import { safeChildPath } from "./safe-path.js";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type {
 	PluginManifest,
@@ -131,12 +132,13 @@ export async function installPlugin(
 	targetDir: string,
 	version?: string,
 	force?: boolean,
+	pluginName?: string,
 ): Promise<string> {
+	// Use the explicit plugin name when given (it is the key the loader looks
+	// up), otherwise derive it from the source.
+	const name = pluginName || source.split("/").pop()?.replace(/\.git$/, "") || "plugin";
+	const pluginDir = safeChildPath(targetDir, name, "", "plugin name");
 	await mkdir(targetDir, { recursive: true });
-
-	// Derive plugin name from source
-	const name = source.split("/").pop()?.replace(/\.git$/, "") || "plugin";
-	const pluginDir = join(targetDir, name);
 
 	if (await dirExists(pluginDir)) {
 		// Verify it's a valid plugin directory
@@ -157,7 +159,7 @@ export async function installPlugin(
 	if (version) {
 		args.push("--branch", version);
 	}
-	args.push(source, pluginDir);
+	args.push("--", source, pluginDir);
 	try {
 		execFileSync("git", args, { stdio: "pipe" });
 	} catch (err: any) {
@@ -329,7 +331,7 @@ export async function discoverAndLoadPlugins(
 		if (pluginConf.source) {
 			const installDir = join(gitagentDir, "plugins");
 			try {
-				await installPlugin(pluginConf.source, installDir, pluginConf.version);
+				await installPlugin(pluginConf.source, installDir, pluginConf.version, false, pluginName);
 			} catch (err: any) {
 				console.warn(`Plugin "${pluginName}": install failed: ${err.message}`);
 				continue;

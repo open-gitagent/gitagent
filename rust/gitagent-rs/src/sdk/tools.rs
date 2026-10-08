@@ -3,6 +3,7 @@
 
 use crate::pi::agent::Agent;
 use crate::pi::event::{AgentEvent, DeltaKind};
+use crate::pi::gate::ToolGate;
 use crate::pi::message::ToolResult;
 use crate::pi::provider::GenParams;
 use crate::pi::tool::{AgentTool, ExecutionMode};
@@ -10,16 +11,46 @@ use crate::sdk::declarative::load_declarative_tools;
 use crate::sdk::learning::{SkillLearner, TaskTracker};
 use crate::sdk::loader::{discover_sub_agents, load_agent};
 use crate::sdk::mcp::load_mcp_tools;
+use crate::sdk::manifest::PermissionConfig;
 use crate::sdk::pdf::PdfTool;
+use crate::sdk::permissions::PermissionGate;
+use crate::sdk::proc::{new_group, GroupGuard};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use std::process::Stdio;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
+/// Safety policy a parent run hands to its `run_agent` sub-agents: the parent's
+/// gates (permission rules, hooks) and its permission-mode override.
+#[derive(Clone, Default)]
+pub struct DelegationPolicy {
+    /// Filled in by the parent once its gates exist (they are built after the
+    /// tool list). Applied to every sub-agent tool call.
+    pub gates: Arc<RwLock<Vec<Arc<dyn ToolGate>>>>,
+    /// The parent's permission mode override (plan | acceptEdits | …).
+    pub permission_mode: Option<String>,
+}
+
+/// How [`builtin_tools_with`] assembles the tool list.
+#[derive(Clone, Default)]
+pub struct ToolOptions {
+    /// Skip agent-supplied executables (`tools/*.yaml`, `mcp.yaml`) — for
+    /// agents cloned from a repository the user hasn't marked as trusted.
+    pub skip_agent_executables: bool,
+    pub delegation: DelegationPolicy,
+}
+
+/// The full builtin tool set for a (trusted, local) agent directory.
 pub fn builtin_tools(dir: &Path) -> Vec<Arc<dyn AgentTool>> {
+    builtin_tools_with(dir, &ToolOptions::default())
+}
+
+pub fn builtin_tools_with(dir: &Path, opts: &ToolOptions) -> Vec<Arc<dyn AgentTool>> {
     let mut tools: Vec<Arc<dyn AgentTool>> = vec![
         Arc::new(Cli { cwd: dir.to_path_buf(), sandbox: load_sandbox_wrapper(dir) }),
         Arc::new(Read { cwd: dir.to_path_buf() }),
@@ -33,7 +64,14 @@ pub fn builtin_tools(dir: &Path) -> Vec<Arc<dyn AgentTool>> {
     // Delegation: expose run_agent only when the agent actually has sub-agents.
     let subs = discover_sub_agents(dir);
     if !subs.is_empty() {
-        tools.push(Arc::new(RunAgent { base_dir: dir.to_path_buf(), sub_agents: subs }));
+        tools.push(Arc::new(RunAgent {
+            base_dir: dir.to_path_buf(),
+            sub_agents: subs,
+            policy: opts.delegation.clone(),
+        }));
+    }
+    if opts.skip_agent_executables {
+        return tools;
     }
     // Declarative tools (tools/*.yaml) — script-backed, discovered per directory.
     tools.extend(load_declarative_tools(dir));
@@ -42,10 +80,22 @@ pub fn builtin_tools(dir: &Path) -> Vec<Arc<dyn AgentTool>> {
     tools
 }
 
-fn resolve(cwd: &Path, p: &str) -> PathBuf {
+/// Resolve a tool path against the agent dir. Relative paths may not climb out
+/// of it with `..` (absolute paths are taken as given — permission rules are
+/// what restrict those).
+fn resolve(cwd: &Path, p: &str) -> anyhow::Result<PathBuf> {
     let path = Path::new(p);
-    if path.is_absolute() { path.to_path_buf() } else { cwd.join(path) }
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    match crate::sdk::permissions::normalize_relative(path) {
+        Some(rel) => Ok(cwd.join(rel)),
+        None => anyhow::bail!("path '{p}' escapes the agent directory"),
+    }
 }
+
+/// Largest file the `read` tool loads (documents are extracted from memory).
+const MAX_READ_BYTES: u64 = 32 * 1024 * 1024;
 
 /// Read `sandbox.wrapper` from agent.yaml (best-effort; None if unset/missing).
 fn load_sandbox_wrapper(dir: &Path) -> Option<Vec<String>> {
@@ -105,12 +155,23 @@ impl AgentTool for Cli {
     async fn execute(&self, _id: &str, args: Value, cancel: &CancellationToken) -> anyhow::Result<ToolResult> {
         let command = args.get("command").and_then(Value::as_str).unwrap_or_default().to_string();
         let mut cmd = self.command_for(&command);
-        let fut = cmd.current_dir(&self.cwd).kill_on_drop(true).output();
+        cmd.current_dir(&self.cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        // Own process group: abort/timeout (this future being dropped) kills
+        // the whole tree, not just `sh`.
+        new_group(&mut cmd);
+        let child = cmd.spawn()?;
+        let mut guard = GroupGuard::new(child.id());
+        let fut = child.wait_with_output();
         tokio::pin!(fut);
         let out = tokio::select! {
             _ = cancel.cancelled() => return Ok(ToolResult::text("(aborted)")),
             r = &mut fut => r?,
         };
+        guard.disarm();
         let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
         s.push_str(&String::from_utf8_lossy(&out.stderr));
         s = tail(&s, 100_000);
@@ -139,7 +200,18 @@ impl AgentTool for Read {
     fn execution_mode(&self) -> ExecutionMode { ExecutionMode::Parallel }
     async fn execute(&self, _id: &str, args: Value, _cancel: &CancellationToken) -> anyhow::Result<ToolResult> {
         let path = args.get("path").and_then(Value::as_str).unwrap_or_default();
-        let abs = resolve(&self.cwd, path);
+        let abs = resolve(&self.cwd, path)?;
+        // Regular files only (no devices/FIFOs), and bounded in size.
+        let meta = tokio::fs::metadata(&abs).await?;
+        if !meta.is_file() {
+            return Ok(ToolResult::text(format!("Error: {path} is not a regular file")));
+        }
+        if meta.len() > MAX_READ_BYTES {
+            return Ok(ToolResult::text(format!(
+                "Error: {path} is {} bytes; the read tool's limit is {MAX_READ_BYTES}. Use cli (head/tail/grep) for large files.",
+                meta.len()
+            )));
+        }
         // Documents: extract readable text instead of failing on binary bytes.
         if crate::sdk::extract::is_document(&abs) {
             let bytes = tokio::fs::read(&abs).await?;
@@ -173,7 +245,7 @@ impl AgentTool for WriteTool {
     async fn execute(&self, _id: &str, args: Value, _cancel: &CancellationToken) -> anyhow::Result<ToolResult> {
         let path = args.get("path").and_then(Value::as_str).unwrap_or_default();
         let content = args.get("content").and_then(Value::as_str).unwrap_or_default();
-        let abs = resolve(&self.cwd, path);
+        let abs = resolve(&self.cwd, path)?;
         if let Some(parent) = abs.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -245,7 +317,7 @@ impl AgentTool for EditTool {
         let old = args.get("old_string").and_then(Value::as_str).unwrap_or_default();
         let new = args.get("new_string").and_then(Value::as_str).unwrap_or_default();
         let all = args.get("replace_all").and_then(Value::as_bool).unwrap_or(false);
-        let abs = resolve(&self.cwd, path);
+        let abs = resolve(&self.cwd, path)?;
         let original = tokio::fs::read_to_string(&abs).await?;
         if old.is_empty() || !original.contains(old) {
             return Ok(ToolResult::text(format!("Error: old_string not found in {path}")));
@@ -266,6 +338,8 @@ impl AgentTool for EditTool {
 pub struct RunAgent {
     pub base_dir: PathBuf,
     pub sub_agents: Vec<String>,
+    /// The parent's gates + mode, enforced on the sub-agent too.
+    pub policy: DelegationPolicy,
 }
 
 #[async_trait]
@@ -283,6 +357,9 @@ impl AgentTool for RunAgent {
     // Parallel: each invocation gets an isolated workspace (below), so multiple
     // sub-agents fan out concurrently without racing on files.
     fn execution_mode(&self) -> ExecutionMode { ExecutionMode::Parallel }
+    // …but delegating can run any tool the sub-agent has, so it counts as
+    // mutating for plan mode.
+    fn is_mutating(&self) -> bool { true }
     async fn execute(&self, id: &str, args: Value, cancel: &CancellationToken) -> anyhow::Result<ToolResult> {
         let name = args.get("agent").and_then(Value::as_str).unwrap_or_default().to_string();
         let prompt = args.get("prompt").and_then(Value::as_str).unwrap_or_default().to_string();
@@ -291,7 +368,10 @@ impl AgentTool for RunAgent {
         }
         // Identity comes from the sub-agent's definition dir…
         let def_dir = self.base_dir.join("agents").join(&name);
-        let loaded = load_agent(&def_dir)?;
+        let loaded = {
+            let d = def_dir.clone();
+            tokio::task::spawn_blocking(move || load_agent(&d)).await??
+        };
         let model = loaded.manifest.model.preferred.clone();
 
         // …but its file tools operate in a fresh, isolated workspace keyed by the
@@ -307,10 +387,33 @@ impl AgentTool for RunAgent {
             .as_ref()
             .map(|c| GenParams { temperature: c.temperature, max_tokens: c.max_tokens, top_p: c.top_p })
             .unwrap_or_default();
-        let tools = builtin_tools(&workspace);
+        let mut tools = {
+            let (ws, opts) = (workspace.clone(), ToolOptions {
+                skip_agent_executables: false,
+                delegation: self.policy.clone(),
+            });
+            tokio::task::spawn_blocking(move || builtin_tools_with(&ws, &opts)).await?
+        };
+        // The sub-agent's own manifest still applies: tool allow-list…
+        if let Some(allow) = loaded.manifest.tools.as_ref() {
+            tools.retain(|t| allow.iter().any(|a| a == t.name()));
+        }
+        // …and gates: the parent's (rules, hooks, plan mode) plus the
+        // sub-agent's own permission rules under the parent's mode override.
+        let mut gates: Vec<Arc<dyn ToolGate>> =
+            self.policy.gates.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let mutating: HashSet<String> =
+            tools.iter().filter(|t| t.is_mutating()).map(|t| t.name().to_string()).collect();
+        let perm_cfg = loaded.manifest.permissions.clone().unwrap_or_else(PermissionConfig::default);
+        let perm = PermissionGate::new(&perm_cfg, mutating, self.policy.permission_mode.as_deref()).with_root(&workspace);
+        if !perm.is_noop() {
+            gates.push(Arc::new(perm));
+        }
         let agent = Agent::new(loaded.system_prompt, tools, &model)
             .with_fallbacks(&loaded.manifest.model.fallback)
-            .with_params(params);
+            .with_params(params)
+            .with_gates(gates)
+            .with_max_turns(loaded.manifest.max_turns());
 
         // Drive the sub-agent to completion, collecting its text.
         let mut stream = agent.prompt(prompt);

@@ -1,6 +1,6 @@
-import { readFile, writeFile, mkdir, readdir, rm } from "fs/promises";
+import { readFile, writeFile, mkdir, readdir, rm, stat } from "fs/promises";
 import { join } from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { skillLearnerSchema } from "./shared.js";
@@ -85,15 +85,22 @@ async function getExistingSkillDescriptions(agentDir: string): Promise<Array<{ n
 
 function gitCommit(agentDir: string, files: string[], message: string): void {
 	try {
-		for (const f of files) {
-			execSync(`git add "${f}"`, { cwd: agentDir, stdio: "pipe" });
-		}
-		execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
+		execFileSync("git", ["add", "--", ...files], { cwd: agentDir, stdio: "pipe" });
+		// Commit only the given paths so unrelated staged changes are left alone.
+		execFileSync("git", ["commit", "-m", message, "--", ...files], {
 			cwd: agentDir,
 			stdio: "pipe",
 		});
 	} catch {
 		// Not fatal — file was still written
+	}
+}
+
+const SKILL_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+function assertValidSkillName(name: string): void {
+	if (!SKILL_NAME_RE.test(name)) {
+		throw new Error("skill_name must be kebab-case (e.g., deploy-staging)");
 	}
 }
 
@@ -185,9 +192,7 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 					if (!params.skill_description) throw new Error("skill_description is required for crystallize action");
 
 					// Validate kebab-case
-					if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(params.skill_name)) {
-						throw new Error("skill_name must be kebab-case (e.g., deploy-staging)");
-					}
+					assertValidSkillName(params.skill_name);
 
 					const store = await loadTasks(gitagentDir);
 					const task = store.tasks.find((t) => t.id === params.task_id);
@@ -350,6 +355,7 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 				case "update": {
 					if (!params.skill_name) throw new Error("skill_name is required for update action");
 					if (!params.instructions) throw new Error("instructions is required for update action");
+					assertValidSkillName(params.skill_name);
 
 					const skillFile = join(agentDir, "skills", params.skill_name, "SKILL.md");
 					let content: string;
@@ -378,20 +384,35 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 				case "delete": {
 					if (!params.skill_name) throw new Error("skill_name is required for delete action");
 
+					assertValidSkillName(params.skill_name);
+
+					const skillRel = `skills/${params.skill_name}`;
 					const skillDir = join(agentDir, "skills", params.skill_name);
 					try {
-						await rm(skillDir, { recursive: true });
+						await stat(skillDir);
 					} catch {
 						throw new Error(`Skill not found: ${params.skill_name}`);
 					}
 
+					let removedViaGit = false;
 					try {
-						execSync(`git add -A && git commit -m "Delete skill: ${params.skill_name.replace(/"/g, '\\"')}"`, {
-							cwd: agentDir,
-							stdio: "pipe",
-						});
+						execFileSync("git", ["rm", "-r", "-q", "--", skillRel], { cwd: agentDir, stdio: "pipe" });
+						removedViaGit = true;
 					} catch {
-						// Not fatal
+						// Not tracked or not a git repo — fall back to a plain delete
+					}
+					// Remove anything git left behind (untracked files)
+					await rm(skillDir, { recursive: true, force: true });
+
+					if (removedViaGit) {
+						try {
+							execFileSync("git", ["commit", "-m", `Delete skill: ${params.skill_name}`, "--", skillRel], {
+								cwd: agentDir,
+								stdio: "pipe",
+							});
+						} catch {
+							// Not fatal
+						}
 					}
 
 					return {

@@ -91,7 +91,7 @@ export function createCliTool(cwd: string, defaultTimeout?: number): AgentTool<t
 					reject(err);
 				});
 
-				child.on("close", (code) => {
+				child.on("close", (code, killSignal) => {
 					clearTimeout(timeoutHandle);
 					if (forceKill) clearTimeout(forceKill);
 					if (signal) signal.removeEventListener("abort", onAbort);
@@ -117,7 +117,11 @@ export function createCliTool(cwd: string, defaultTimeout?: number): AgentTool<t
 						text = "(no output)";
 					}
 
-					if (code !== 0 && code !== null) {
+					if (code === null) {
+						// Killed by a signal (not our timeout/abort) — that's a failure.
+						text += `\n\nKilled by signal: ${killSignal ?? "unknown"}`;
+						reject(new Error(text));
+					} else if (code !== 0) {
 						text += `\n\nExit code: ${code}`;
 						reject(new Error(text));
 					} else {

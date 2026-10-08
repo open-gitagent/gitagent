@@ -2,6 +2,7 @@ import { readFile, readdir, stat, writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { mkdirSync } from "fs";
 import yaml from "js-yaml";
+import { safeChildPath } from "./safe-path.js";
 
 export interface ScheduleDefinition {
 	id: string;
@@ -105,12 +106,12 @@ export async function saveSchedule(agentDir: string, schedule: ScheduleDefinitio
 }
 
 export async function deleteSchedule(agentDir: string, id: string): Promise<void> {
-	const filePath = join(agentDir, "schedules", `${id}.yaml`);
+	const filePath = safeChildPath(join(agentDir, "schedules"), id, ".yaml", "schedule id");
 	await unlink(filePath);
 }
 
 export async function updateScheduleMeta(agentDir: string, id: string, updates: Partial<Pick<ScheduleDefinition, "lastRunAt" | "lastResult" | "enabled">>): Promise<void> {
-	const filePath = join(agentDir, "schedules", `${id}.yaml`);
+	const filePath = safeChildPath(join(agentDir, "schedules"), id, ".yaml", "schedule id");
 	const raw = await readFile(filePath, "utf-8");
 	const data = yaml.load(raw) as Record<string, any>;
 	Object.assign(data, updates);

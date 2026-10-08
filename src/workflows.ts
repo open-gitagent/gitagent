@@ -2,6 +2,7 @@ import { readFile, readdir, stat, writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { mkdirSync } from "fs";
 import yaml from "js-yaml";
+import { safeChildPath } from "./safe-path.js";
 
 export interface SkillFlowStep {
 	skill: string;
@@ -137,7 +138,7 @@ export async function saveFlowDefinition(agentDir: string, flow: SkillFlowDefini
 }
 
 export async function deleteFlowDefinition(agentDir: string, name: string): Promise<void> {
-	const filePath = join(agentDir, "workflows", `${name}.yaml`);
+	const filePath = safeChildPath(join(agentDir, "workflows"), name, ".yaml", "flow name");
 	await unlink(filePath);
 }
 

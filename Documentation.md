@@ -657,6 +657,18 @@ Scripts receive JSON on stdin and output JSON on stdout:
 
 **Actions:** `allow`, `block`, `modify` (with `args` field for modified arguments)
 
+**Failure handling:** `pre_tool_use` hooks fail closed: if a hook script cannot start, exits with a non-zero code, or times out (10s), the tool call is blocked and the hook error is returned as the reason. A hook that exits 0 without printing JSON is treated as `allow`. Hook failures for all other events are logged and ignored.
+
+To mark a `pre_tool_use` hook as advisory, so that its failure is logged but does not block the tool, set `fail_open: true` on that hook. The default is `fail_open: false`.
+
+```yaml
+hooks:
+  pre_tool_use:
+    - script: hooks/validate-command.sh   # guard: blocks on failure
+    - script: hooks/audit-log.sh
+      fail_open: true                     # advisory: failure is ignored
+```
+
 ### Programmatic Hooks (SDK)
 
 ```typescript

@@ -100,7 +100,13 @@ async function searchLocalSkills(agentDir: string, objective: string): Promise<S
 		const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
 		if (!fmMatch) continue;
 
-		const frontmatter = yaml.load(fmMatch[1]) as Record<string, any>;
+		let frontmatter: Record<string, any>;
+		try {
+			frontmatter = (yaml.load(fmMatch[1]) as Record<string, any>) ?? {};
+		} catch {
+			continue; // malformed frontmatter — skip this skill
+		}
+		if (typeof frontmatter !== "object") continue;
 		const name = frontmatter.name as string;
 		const description = (frontmatter.description as string) || "";
 

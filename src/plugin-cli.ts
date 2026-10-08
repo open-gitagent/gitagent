@@ -6,6 +6,7 @@ import yaml from "js-yaml";
 // preserves comments and formatting when editing agent.yaml.
 import { parseDocument } from "yaml";
 import { installPlugin, listAllPlugins } from "./plugins.js";
+import { isSafePathSegment, safeChildPath } from "./safe-path.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
@@ -54,6 +55,11 @@ async function handleInstall(agentDir: string, args: string[]): Promise<void> {
 	const force = args.includes("--force");
 	const noEnable = args.includes("--no-enable");
 
+	if (name !== undefined && !isSafePathSegment(name)) {
+		console.error(red(`Invalid plugin name: ${name}`));
+		process.exit(1);
+	}
+
 	// Determine if source is a git URL or local path
 	const isGitUrl = source.startsWith("http://") || source.startsWith("https://") || source.startsWith("git@") || source.endsWith(".git");
 
@@ -62,7 +68,7 @@ async function handleInstall(agentDir: string, args: string[]): Promise<void> {
 		const gitagentDir = await ensureGitagentDir(agentDir);
 		const installDir = join(gitagentDir, "plugins");
 		try {
-			const pluginDir = await installPlugin(source, installDir, undefined, force);
+			const pluginDir = await installPlugin(source, installDir, undefined, force, name);
 			const pluginName = name || pluginDir.split("/").pop()!;
 			console.log(green(`Installed plugin "${pluginName}" from ${source}`));
 			console.log(dim(`Location: ${pluginDir}`));
@@ -83,7 +89,11 @@ async function handleInstall(agentDir: string, args: string[]): Promise<void> {
 		}
 
 		const pluginName = name || sourcePath.split("/").pop()!;
-		const targetDir = join(agentDir, "plugins", pluginName);
+		if (!isSafePathSegment(pluginName)) {
+			console.error(red(`Invalid plugin name: ${pluginName}`));
+			process.exit(1);
+		}
+		const targetDir = safeChildPath(join(agentDir, "plugins"), pluginName, "", "plugin name");
 
 		if (force && await dirExists(targetDir)) {
 			await rm(targetDir, { recursive: true, force: true });
@@ -136,9 +146,14 @@ async function handleRemove(agentDir: string, args: string[]): Promise<void> {
 		process.exit(1);
 	}
 
+	if (!isSafePathSegment(name)) {
+		console.error(red(`Invalid plugin name: ${name}`));
+		process.exit(1);
+	}
+
 	// Try local first, then installed
-	const localDir = join(agentDir, "plugins", name);
-	const installedDir = join(agentDir, ".gitagent", "plugins", name);
+	const localDir = safeChildPath(join(agentDir, "plugins"), name, "", "plugin name");
+	const installedDir = safeChildPath(join(agentDir, ".gitagent", "plugins"), name, "", "plugin name");
 
 	let removed = false;
 	if (await dirExists(localDir)) {

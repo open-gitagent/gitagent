@@ -53,7 +53,7 @@ export interface GCToolResultMessage {
 export interface GCSystemMessage {
 	type: "system";
 	subtype: "session_start" | "session_end" | "hook_blocked"
-		| "compliance_warning" | "error";
+		| "compliance_warning" | "error" | "max_turns";
 	content: string;
 	metadata?: Record<string, any>;
 }
@@ -153,6 +153,7 @@ export interface QueryOptions {
 		maxTokens?: number;
 		topP?: number;
 		topK?: number;
+		stopSequences?: string[];
 	};
 }
 

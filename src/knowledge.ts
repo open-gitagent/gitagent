@@ -31,7 +31,13 @@ export async function loadKnowledge(agentDir: string): Promise<LoadedKnowledge> 
 		return { preloaded: [], available: [] };
 	}
 
-	const index = yaml.load(raw) as KnowledgeIndex;
+	let index: KnowledgeIndex;
+	try {
+		index = yaml.load(raw) as KnowledgeIndex;
+	} catch (err: any) {
+		console.warn(`Skipping knowledge: invalid knowledge/index.yaml: ${err.message}`);
+		return { preloaded: [], available: [] };
+	}
 	if (!index?.entries || !Array.isArray(index.entries)) {
 		return { preloaded: [], available: [] };
 	}
@@ -40,6 +46,10 @@ export async function loadKnowledge(agentDir: string): Promise<LoadedKnowledge> 
 	const available: KnowledgeEntry[] = [];
 
 	for (const entry of index.entries) {
+		if (!entry || typeof entry.path !== "string") {
+			console.warn("Skipping knowledge entry without a path in knowledge/index.yaml");
+			continue;
+		}
 		if (entry.always_load) {
 			try {
 				const content = await readFile(join(knowledgeDir, entry.path), "utf-8");
@@ -67,7 +77,8 @@ export function formatKnowledgeForPrompt(knowledge: LoadedKnowledge): string {
 	if (knowledge.available.length > 0) {
 		const entries = knowledge.available
 			.map((e) => {
-				const tags = e.tags.length > 0 ? ` tags="${e.tags.join(",")}"` : "";
+				const tagList = Array.isArray(e.tags) ? e.tags : [];
+				const tags = tagList.length > 0 ? ` tags="${tagList.join(",")}"` : "";
 				return `<doc path="knowledge/${e.path}" priority="${e.priority}"${tags} />`;
 			})
 			.join("\n");

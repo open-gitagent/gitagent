@@ -374,11 +374,13 @@ export function wrapToolWithOtel<T extends AgentTool<any>>(tool: T): T {
 	const original = (tool as any).execute;
 	if (typeof original !== "function") return tool;
 
-	const wrapped = async function (this: any, args: any, ...rest: any[]) {
+	// AgentTool.execute(toolCallId, args, signal, onUpdate) — the call id is
+	// the first argument.
+	const wrapped = async function (this: any, toolCallId: any, ...rest: any[]) {
 		const tracer = getTracer();
 		const startedAt = Date.now();
 		const callId =
-			(rest && rest[0] && (rest[0] as any).toolCallId) ||
+			(typeof toolCallId === "string" && toolCallId) ||
 			`call_${Math.random().toString(36).slice(2, 10)}`;
 
 		return await tracer.startActiveSpan(
@@ -392,7 +394,7 @@ export function wrapToolWithOtel<T extends AgentTool<any>>(tool: T): T {
 			},
 			async (span) => {
 				try {
-					const result = await original.apply(this, [args, ...rest]);
+					const result = await original.apply(this, [toolCallId, ...rest]);
 					try {
 						span.setAttribute("tool.status", "ok");
 						span.setStatus({ code: SpanStatusCode.OK });

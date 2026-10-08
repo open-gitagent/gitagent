@@ -118,6 +118,17 @@ pub fn load_agent(dir: &Path) -> Result<LoadedAgent> {
     })
 }
 
+/// Whether `name` is safe to use as a single path component (skill / sub-agent
+/// / dependency names): `[A-Za-z0-9._-]`, not `.`/`..`, not starting with `-`.
+pub fn is_safe_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name != "."
+        && name != ".."
+        && !name.starts_with('-')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
 /// Whether an `extends`/`source` value is a git URL (vs. a local path).
 fn is_git_url(s: &str) -> bool {
     s.starts_with("http://")
@@ -179,6 +190,10 @@ fn resolve_parent_dir(dir: &Path, extends: &str) -> Option<PathBuf> {
 fn resolve_dependencies(dir: &Path, deps: &[crate::sdk::manifest::Dependency]) {
     for dep in deps {
         if !is_git_url(&dep.source) {
+            continue;
+        }
+        if !is_safe_name(&dep.name) {
+            eprintln!("warning: skipping dependency with unsafe name {:?}", dep.name);
             continue;
         }
         let dest = dir.join(".gitagent").join("deps").join(&dep.name);
@@ -332,4 +347,19 @@ fn load_examples(dir: &Path) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_safe_name;
+
+    #[test]
+    fn safe_names() {
+        for ok in ["web-search", "a.b_c", "v2"] {
+            assert!(is_safe_name(ok), "{ok}");
+        }
+        for bad in ["", ".", "..", "../x", "a/b", "a\\b", "-x", "/abs", "a b", "x\0"] {
+            assert!(!is_safe_name(bad), "{bad:?}");
+        }
+    }
 }

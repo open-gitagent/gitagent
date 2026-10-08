@@ -206,7 +206,13 @@ async fn run_one(
     // beforeToolCall: gates may rewrite args or block the call outright.
     let mut args = args;
     for g in gates {
-        match g.check(name, &args).await {
+        // A gate (e.g. a script hook) must not outlive an abort; dropping its
+        // future kills any process it started.
+        let decision = tokio::select! {
+            _ = cancel.cancelled() => return ("(aborted)".to_string(), true, false),
+            d = g.check(name, &args) => d,
+        };
+        match decision {
             GateDecision::Allow => {}
             GateDecision::Modify(v) => args = v,
             GateDecision::Deny(msg) => return (format!("Blocked: {msg}"), true, false),

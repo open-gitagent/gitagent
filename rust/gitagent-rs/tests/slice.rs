@@ -370,6 +370,7 @@ fn repo_mode_clones_branches_and_pushes() {
         token: String::new(),
         dir: clone.clone(),
         session: None,
+        trust_repo: false,
     })
     .unwrap();
 
@@ -1098,4 +1099,181 @@ fn learning_tools_track_and_reinforce() {
     let r = block_on(sl.execute("5", json!({"action": "reinforce", "name": "grep", "delta": 0.3}), &cancel)).unwrap();
     assert!(r.content.contains("0.80"), "reinforced confidence: {}", r.content);
     fs::remove_dir_all(&dir).ok();
+}
+
+fn git_identity_env() {
+    for (k, v) in [
+        ("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"),
+        ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t"),
+    ] {
+        std::env::set_var(k, v);
+    }
+}
+
+/// A bare remote with one commit; returns its file:// URL.
+fn seed_remote(base: &Path, files: &[(&str, &str)]) -> String {
+    let remote = base.join("remote.git");
+    let seed = base.join("seed");
+    run_git(&["-c", "init.defaultBranch=main", "init", "--bare", remote.to_str().unwrap()], base);
+    fs::create_dir_all(&seed).unwrap();
+    run_git(&["-c", "init.defaultBranch=main", "init"], &seed);
+    fs::write(seed.join("README.md"), "hi").unwrap();
+    for (p, c) in files {
+        fs::write(seed.join(p), c).unwrap();
+    }
+    run_git(&["add", "-A"], &seed);
+    run_git(&["commit", "-m", "init"], &seed);
+    let url = format!("file://{}", remote.display());
+    run_git(&["remote", "add", "origin", &url], &seed);
+    run_git(&["push", "origin", "main"], &seed);
+    url
+}
+
+#[test]
+fn repo_mode_refuses_a_dir_inside_another_repo() {
+    git_identity_env();
+    let base = tmp_dir("repo-nonroot");
+    let url = seed_remote(&base, &[]);
+    // An enclosing repo with a plain (non-repo) subdirectory as the target.
+    let outer = base.join("outer");
+    fs::create_dir_all(outer.join("sub")).unwrap();
+    run_git(&["-c", "init.defaultBranch=main", "init"], &outer);
+    run_git(&["remote", "add", "origin", "https://example.invalid/keep.git"], &outer);
+    fs::write(outer.join("sub").join("file.txt"), "x").unwrap();
+
+    let res = init_local_session(RepoOptions {
+        url,
+        token: "tok".into(),
+        dir: outer.join("sub"),
+        session: None,
+        trust_repo: false,
+    });
+    assert!(res.is_err(), "must refuse to reuse a non-root directory");
+    assert_eq!(run_git(&["remote", "get-url", "origin"], &outer), "https://example.invalid/keep.git");
+    fs::remove_dir_all(&base).ok();
+}
+
+#[test]
+fn repo_mode_runs_repo_mcp_only_when_trusted() {
+    git_identity_env();
+    for trusted in [false, true] {
+        let base = tmp_dir(if trusted { "repo-trust" } else { "repo-untrust" });
+        let marker = base.join("marker");
+        let mcp = format!("servers:\n  - name: m\n    command: \"touch {}; exit 1\"\n", marker.display());
+        let url = seed_remote(&base, &[("mcp.yaml", &mcp), ("agent.yaml", "name: a\nmodel:\n  preferred: \"openai:m\"\n")]);
+        let s = open_session(
+            base.join("clone"),
+            None,
+            Some(RepoOptions { url, token: String::new(), dir: base.join("clone"), session: None, trust_repo: trusted }),
+            None,
+        );
+        assert!(s.is_ok());
+        drop(s);
+        assert_eq!(marker.exists(), trusted, "repo mcp.yaml ran = {trusted}");
+        fs::remove_dir_all(&base).ok();
+    }
+}
+
+#[test]
+fn run_agent_inherits_parent_gates() {
+    std::env::set_var("OPENAI_API_KEY", "test");
+    // Sub-agent: tries to write a file, then stops.
+    let write = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"w1\",\"function\":{\"name\":\"write\",\"arguments\":\"{\\\"path\\\":\\\"pwned.txt\\\",\\\"content\\\":\\\"x\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n";
+    let stop = "data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: [DONE]\n\n";
+    let delegate = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"run_agent\",\"arguments\":\"{\\\"agent\\\":\\\"a\\\",\\\"prompt\\\":\\\"go\\\"}\"}}]}}]}\n\ndata: [DONE]\n\n";
+    let found_write = |dir: &Path| {
+        fn walk(p: &Path) -> bool {
+            fs::read_dir(p).map(|rd| rd.flatten().any(|e| {
+                let q = e.path();
+                q.file_name().map(|n| n == "pwned.txt").unwrap_or(false) || (q.is_dir() && walk(&q))
+            })).unwrap_or(false)
+        }
+        walk(&dir.join(".gitagent"))
+    };
+    // (parent permissions yaml, permission mode, sub-agent write expected)
+    let cases = [
+        ("", None, true),
+        ("permissions:\n  deny: [\"write\"]\n", None, false),
+        ("", Some("plan".to_string()), false),
+    ];
+    for (perms, mode, expect_write) in cases {
+        let (base_s, sub_calls) = spawn_mock_llm(move |i| (200, if i == 0 { write.to_string() } else { stop.to_string() }));
+        let (base_p, _) = spawn_mock_llm(move |i| (200, if i == 0 { delegate.to_string() } else { stop.to_string() }));
+        let dir = tmp_dir("subgate");
+        fs::create_dir_all(dir.join("agents/a")).unwrap();
+        fs::write(dir.join("agents/a/agent.yaml"), format!("name: a\nmodel:\n  preferred: \"openai:m@{base_s}\"\n")).unwrap();
+        fs::write(dir.join("agent.yaml"), format!("name: parent\nmodel:\n  preferred: \"openai:m\"\n{perms}")).unwrap();
+        drain_query(QueryOptions {
+            dir: dir.clone(),
+            model: Some(format!("openai:m@{base_p}")),
+            prompt: "delegate".into(),
+            repo: None,
+            permission_mode: mode.clone(),
+        });
+        assert_eq!(found_write(&dir), expect_write, "perms={perms:?} mode={mode:?}");
+        if mode.as_deref() == Some("plan") {
+            assert_eq!(sub_calls.load(Ordering::SeqCst), 0, "run_agent is mutating → blocked in plan mode");
+        }
+        fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_timeout_kills_the_whole_process_group() {
+    use ira::pi::tool::AgentTool;
+    let dir = tmp_dir("cligroup");
+    let cli = ira::sdk::tools::Cli { cwd: dir.clone(), sandbox: None };
+    let cancel = CancellationToken::new();
+    let _ = block_on(async {
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            cli.execute("1", json!({"command": "sleep 300 & echo $! > pid; wait"}), &cancel),
+        )
+        .await
+    });
+    std::thread::sleep(Duration::from_millis(200));
+    let pid = fs::read_to_string(dir.join("pid")).unwrap();
+    let alive = Command::new("kill").args(["-0", pid.trim()]).status().unwrap().success();
+    assert!(!alive, "background child must be killed with the group");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn concurrent_prompt_is_rejected_and_turns_cancel_independently() {
+    use ira::pi::agent::Agent;
+    use ira::pi::event::AgentEvent;
+    let (base, _) = spawn_mock_llm(|_| {
+        std::thread::sleep(Duration::from_millis(400));
+        (200, "data: {\"choices\":[{\"delta\":{\"content\":\"one\"}}]}\n\ndata: [DONE]\n\n".to_string())
+    });
+    block_on(async move {
+        let agent = Agent::new("sys".into(), Vec::new(), &format!("openai:m@{base}"));
+        let (mut first, first_cancel) = agent.prompt_with_cancel("a".into());
+        let mut second = agent.prompt("b".into());
+        let mut busy_err = None;
+        while let Some(ev) = second.next().await {
+            if let AgentEvent::MessageEnd(m) = ev {
+                busy_err = m.error_message;
+            }
+        }
+        assert!(busy_err.unwrap_or_default().contains("busy"));
+        let mut text = String::new();
+        while let Some(ev) = first.next().await {
+            if let AgentEvent::MessageDelta { text: t, .. } = ev {
+                text.push_str(&t);
+            }
+        }
+        assert_eq!(text, "one");
+        // The finished turn's token no longer reaches the next turn.
+        let (mut third, _) = agent.prompt_with_cancel("c".into());
+        first_cancel.cancel();
+        let mut got = String::new();
+        while let Some(ev) = third.next().await {
+            if let AgentEvent::MessageDelta { text: t, .. } = ev {
+                got.push_str(&t);
+            }
+        }
+        assert_eq!(got, "one");
+    });
 }

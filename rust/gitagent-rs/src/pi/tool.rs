@@ -23,5 +23,11 @@ pub trait AgentTool: Send + Sync {
     fn execution_mode(&self) -> ExecutionMode {
         ExecutionMode::Parallel
     }
+    /// Whether the tool changes state (blocked in `plan` mode unless allowed).
+    /// Defaults to "runs sequentially"; tools that run in parallel but can
+    /// still mutate (e.g. delegation) override this.
+    fn is_mutating(&self) -> bool {
+        self.execution_mode() == ExecutionMode::Sequential
+    }
     async fn execute(&self, id: &str, args: Value, cancel: &CancellationToken) -> anyhow::Result<ToolResult>;
 }

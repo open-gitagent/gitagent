@@ -1,5 +1,5 @@
 import { Type } from "@sinclair/typebox";
-import { homedir } from "os";
+import { posix } from "path";
 
 // ── Constants ───────────────────────────────────────────────────────────
 
@@ -94,16 +94,34 @@ export function paginateLines(
 	}
 
 	const maxLines = limit ?? MAX_LINES;
-	const endLine = Math.min(startLine + maxLines, totalLines);
-	let selected = allLines.slice(startLine, endLine).join("\n");
+	const lastLine = Math.min(startLine + maxLines, totalLines);
 
-	let truncatedByBytes = false;
-	if (Buffer.byteLength(selected, "utf-8") > MAX_BYTES) {
-		selected = selected.slice(0, MAX_BYTES);
-		truncatedByBytes = true;
+	// Take whole lines until the UTF-8 byte budget is spent, so the reported
+	// range and the next offset match exactly what was shown.
+	let bytes = 0;
+	let endLine = startLine;
+	for (let i = startLine; i < lastLine; i++) {
+		const lineBytes = Buffer.byteLength(allLines[i], "utf-8") + (i > startLine ? 1 : 0);
+		if (bytes + lineBytes > MAX_BYTES) break;
+		bytes += lineBytes;
+		endLine = i + 1;
 	}
 
-	const hasMore = endLine < totalLines || truncatedByBytes;
+	let selected: string;
+	if (endLine === startLine) {
+		// A single line larger than the budget: show its head, cut on a
+		// character boundary, and move on to the next line.
+		const buf = Buffer.from(allLines[startLine], "utf-8");
+		let cut = MAX_BYTES;
+		while (cut > 0 && (buf[cut] & 0xc0) === 0x80) cut--; // don't split a multi-byte char
+		const head = buf.subarray(0, cut).toString("utf-8");
+		selected = `${head}\n[line ${startLine + 1} truncated: longer than ${MAX_BYTES} bytes]`;
+		endLine = startLine + 1;
+	} else {
+		selected = allLines.slice(startLine, endLine).join("\n");
+	}
+
+	const hasMore = endLine < totalLines;
 
 	return {
 		text: selected,
@@ -113,10 +131,14 @@ export function paginateLines(
 	};
 }
 
-/** Resolve a path relative to a sandbox repo root. */
-export function resolveSandboxPath(path: string, repoRoot: string): string {
+/**
+ * Resolve a path relative to a sandbox repo root. `~` refers to the sandbox
+ * user's home (the repo root's parent, e.g. /home/user), never the host's.
+ */
+export function resolveSandboxPath(path: string, repoRoot: string, sandboxHome?: string): string {
 	if (path.startsWith("~/") || path === "~") {
-		path = homedir() + path.slice(1);
+		const home = sandboxHome ?? posix.dirname(repoRoot.replace(/\/+$/, ""));
+		path = home + path.slice(1);
 	}
 	if (path.startsWith("/")) return path;
 	return repoRoot.endsWith("/") ? repoRoot + path : repoRoot + "/" + path;

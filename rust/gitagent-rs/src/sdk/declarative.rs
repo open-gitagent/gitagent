@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
+use crate::sdk::proc::{new_group, GroupGuard};
 
 #[derive(Deserialize)]
 struct DeclSpec {
@@ -83,25 +84,36 @@ impl AgentTool for DeclarativeTool {
         self.mode
     }
     async fn execute(&self, _id: &str, args: Value, cancel: &CancellationToken) -> anyhow::Result<ToolResult> {
-        let payload = args.to_string();
-        let mut child = Command::new("sh")
-            .arg("-c")
+        let payload = args.to_string().into_bytes();
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
             .arg(&self.run)
             .current_dir(&self.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()?;
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(payload.as_bytes()).await;
-        }
-        let fut = child.wait_with_output();
+            .kill_on_drop(true);
+        // Own process group so abort/timeout kills the script's children too.
+        new_group(&mut cmd);
+        let mut child = cmd.spawn()?;
+        let mut guard = GroupGuard::new(child.id());
+        // Write stdin while draining output — a big payload can't deadlock.
+        let stdin = child.stdin.take();
+        let write = async move {
+            if let Some(mut stdin) = stdin {
+                let _ = stdin.write_all(&payload).await;
+            }
+        };
+        let fut = async {
+            let (_, out) = tokio::join!(write, child.wait_with_output());
+            out
+        };
         tokio::pin!(fut);
         let out = tokio::select! {
             _ = cancel.cancelled() => return Ok(ToolResult::text("(aborted)")),
             r = &mut fut => r?,
         };
+        guard.disarm();
         let mut s = String::from_utf8_lossy(&out.stdout).into_owned();
         if !out.status.success() {
             s.push_str(&String::from_utf8_lossy(&out.stderr));

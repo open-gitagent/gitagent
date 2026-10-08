@@ -8,6 +8,11 @@
 use std::io::Read;
 use std::path::Path;
 
+/// Caps on decompressed data, so a small "zip bomb" document can't exhaust
+/// memory: per archive entry / PDF stream, and in total per document.
+const MAX_ENTRY_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
+
 pub const DOC_EXTS: &[&str] = &["docx", "xlsx", "pptx", "pdf", "doc", "rtf", "odt"];
 
 pub fn is_document(path: &Path) -> bool {
@@ -56,10 +61,15 @@ fn zip_names(bytes: &[u8], prefix: &str) -> Vec<String> {
 fn zip_xml_text(bytes: &[u8], entries: &[&str]) -> Option<String> {
     let mut ar = zip_archive(bytes)?;
     let mut out = String::new();
+    let mut total = 0usize;
     for name in entries {
-        let Ok(mut f) = ar.by_name(name) else { continue };
+        let Ok(f) = ar.by_name(name) else { continue };
         let mut xml = String::new();
-        if f.read_to_string(&mut xml).is_ok() {
+        if f.take(MAX_ENTRY_BYTES).read_to_string(&mut xml).is_ok() {
+            total += xml.len();
+            if total > MAX_TOTAL_BYTES {
+                break;
+            }
             out.push_str(&xml_to_text(&xml));
             out.push('\n');
         }
@@ -101,6 +111,7 @@ fn xml_to_text(xml: &str) -> String {
 fn pdf_text(bytes: &[u8]) -> Option<String> {
     let mut out = String::new();
     collect_pdf_ops(bytes, &mut out); // uncompressed content streams
+    let mut total = 0usize;
     let mut i = 0;
     while let Some(s) = find(bytes, b"stream", i) {
         let mut ds = s + 6;
@@ -112,7 +123,12 @@ fn pdf_text(bytes: &[u8]) -> Option<String> {
         }
         let Some(e) = find(bytes, b"endstream", ds) else { break };
         let mut inflated = Vec::new();
-        if flate2::read::ZlibDecoder::new(&bytes[ds..e]).read_to_end(&mut inflated).is_ok() {
+        let decoder = flate2::read::ZlibDecoder::new(&bytes[ds..e]);
+        if decoder.take(MAX_ENTRY_BYTES).read_to_end(&mut inflated).is_ok() {
+            total += inflated.len();
+            if total > MAX_TOTAL_BYTES {
+                break;
+            }
             collect_pdf_ops(&inflated, &mut out);
         }
         i = e + 9;
@@ -214,4 +230,26 @@ fn tidy(s: &str) -> String {
         out.push('\n');
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn pdf_stream_inflation_is_capped() {
+        // ~100 MiB of zeros compresses to ~100 KiB; inflation must stop at the cap.
+        let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
+        let chunk = vec![0u8; 1024 * 1024];
+        for _ in 0..100 {
+            enc.write_all(&chunk).unwrap();
+        }
+        let z = enc.finish().unwrap();
+        let mut pdf = b"%PDF-1.4\nstream\n".to_vec();
+        pdf.extend_from_slice(&z);
+        pdf.extend_from_slice(b"\nendstream\n");
+        // Returns (no text) without allocating the full 100 MiB.
+        assert!(pdf_text(&pdf).is_none());
+    }
 }

@@ -33,12 +33,138 @@ struct Cfg {
     permission_mode: Option<String>,
     /// The UI page with brand placeholders resolved (IRA_BRAND env, default "Ira Agentic").
     html: String,
+    /// Per-launch API token; required on every /api, /v1 and /raw request.
+    token: String,
+    /// The bound port (Host/Origin must name it).
+    port: u16,
+}
+
+/// A fresh random API token for this launch (`IRA_UI_TOKEN` pins one, e.g. for
+/// external apps calling /v1 across restarts; it must be at least 16 chars).
+fn launch_token() -> anyhow::Result<String> {
+    if let Ok(t) = std::env::var("IRA_UI_TOKEN") {
+        let t = t.trim().to_string();
+        if t.len() >= 16 && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Ok(t);
+        }
+        eprintln!("warning: ignoring IRA_UI_TOKEN (needs 16+ chars of [A-Za-z0-9_-])");
+    }
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).map_err(|e| anyhow::anyhow!("could not generate a UI token: {e}"))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Constant-time string equality (token comparison).
+fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Endpoints that change state and take a JSON body: POST + application/json.
+const POST_JSON_PATHS: &[&str] = &[
+    "/api/chat",
+    "/api/agents/create",
+    "/api/agents/update",
+    "/api/agents/delete",
+    "/api/studio/skills/install",
+    "/v1/chat/completions",
+];
+/// Endpoints that change state (or launch processes) without a JSON body: POST.
+const POST_PATHS: &[&str] = &[
+    "/api/file/save",
+    "/api/upload",
+    "/api/onboarding/done",
+    "/api/open",
+    "/api/openurl",
+    "/api/auth/browser",
+    "/api/ollama/pull",
+    "/api/ollama/pull/cancel",
+    "/api/ollama/delete",
+];
+
+/// Gate every request before routing. `headers` are (lower-cased name, value).
+/// - Host must be this server (127.0.0.1:<port> or localhost:<port>) — blocks
+///   DNS rebinding.
+/// - A present Origin must be this server — blocks cross-site requests.
+/// - Everything except the page itself and vendored assets needs the launch
+///   token (X-Ira-Token or `Authorization: Bearer`; `/raw` GETs may pass it as
+///   `?token=` because <img>/<iframe> can't set headers).
+/// - State-changing endpoints require POST (and JSON where they take a body).
+/// Returns (status, message) when the request must be rejected.
+fn authorize(
+    method: &str,
+    url: &str,
+    headers: &[(String, String)],
+    port: u16,
+    token: &str,
+) -> Result<(), (u16, &'static str)> {
+    let header = |name: &str| headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.trim());
+    let host_ok = header("host")
+        .map(|h| {
+            let h = h.to_ascii_lowercase();
+            h == format!("127.0.0.1:{port}") || h == format!("localhost:{port}")
+        })
+        .unwrap_or(false);
+    if !host_ok {
+        return Err((403, "forbidden host"));
+    }
+    if let Some(origin) = header("origin") {
+        let o = origin.to_ascii_lowercase();
+        if o != format!("http://127.0.0.1:{port}") && o != format!("http://localhost:{port}") {
+            return Err((403, "forbidden origin"));
+        }
+    }
+
+    let path = url.split('?').next().unwrap_or("");
+    let public = path == "/" || path == "/index.html" || VENDOR.iter().any(|(p, _, _)| path == *p);
+    if public {
+        return if method == "GET" || method == "HEAD" { Ok(()) } else { Err((405, "method not allowed")) };
+    }
+
+    let bearer = header("authorization").and_then(|v| {
+        let (scheme, rest) = v.split_once(' ')?;
+        scheme.eq_ignore_ascii_case("bearer").then(|| rest.trim())
+    });
+    let presented = header("x-ira-token").or(bearer).map(str::to_string).or_else(|| {
+        (path == "/raw" && method == "GET").then(|| query_param(url, "token")).flatten()
+    });
+    match presented {
+        Some(t) if ct_eq(&t, token) => {}
+        _ => return Err((401, "missing or invalid API token")),
+    }
+
+    let json_body = POST_JSON_PATHS.contains(&path) || (path == "/api/auth/handoff" && method == "POST");
+    if (json_body || POST_PATHS.contains(&path)) && method != "POST" {
+        return Err((405, "method not allowed"));
+    }
+    if json_body {
+        let ct = header("content-type").unwrap_or("").to_ascii_lowercase();
+        if !ct.starts_with("application/json") {
+            return Err((415, "expected application/json"));
+        }
+    }
+    Ok(())
+}
+
+/// A model string sent over the HTTP API may only override the endpoint with a
+/// loopback URL (local Ollama etc.); remote `@baseurl`s must be configured
+/// locally (agent.yaml / GITAGENT_MODEL_BASE_URL), never by a request.
+fn validate_model_override(model: &str) -> Result<(), String> {
+    let rest = model.split_once(':').map(|(_, r)| r).unwrap_or(model);
+    match rest.split_once('@') {
+        None => Ok(()),
+        Some((_, base)) if crate::pi::provider::is_loopback_base_url(base) => Ok(()),
+        Some(_) => Err("model endpoint overrides (@baseurl) must point at localhost".into()),
+    }
 }
 
 /// Resolve brand placeholders: `IRA_BRAND="Lyzr Edgespace"` → h1 "Lyzr",
 /// eyebrow "Edgespace", title "Lyzr Edgespace". The assistant's display name
 /// comes from the agent manifest's `name` field.
-fn branded_html(dir: &std::path::Path) -> String {
+fn branded_html(dir: &std::path::Path, token: &str) -> String {
     let brand = std::env::var("IRA_BRAND").unwrap_or_else(|_| "Ira Agentic".to_string());
     let (name, tag) = brand.split_once(' ').unwrap_or((brand.as_str(), ""));
     let agent = crate::sdk::loader::load_agent(dir)
@@ -54,6 +180,7 @@ fn branded_html(dir: &std::path::Path) -> String {
         .replace("__AGENT_JS__", &serde_json::Value::String(agent).to_string())
         .replace("__MS_KEY__", &ms_key)
         .replace("__MS_PLAN__", &ms_plan)
+        .replace("__IRA_TOKEN__", token)
 }
 
 /// Start the UI server and return its URL. The accept loop runs on a background
@@ -66,9 +193,6 @@ pub async fn start_server(
 ) -> anyhow::Result<String> {
     let handle = tokio::runtime::Handle::current();
     let sessions: Arc<Mutex<HashMap<String, Session>>> = Arc::new(Mutex::new(HashMap::new()));
-    let html = branded_html(&dir);
-    let cfg = Arc::new(Cfg { dir, model, permission_mode, html });
-
     // Take over the canonical port: a stale `ira` from a previous build serving
     // OLD code on 8787 is the #1 cause of "my fixes aren't there". Kill any ira
     // holding a port in our range, then bind.
@@ -79,9 +203,16 @@ pub async fn start_server(
             Server::http(&a).ok().map(|s| (s, a))
         })
         .ok_or_else(|| anyhow::anyhow!("could not bind a local port (8787-8796)"))?;
+    let port = server.server_addr().to_ip().map(|a| a.port()).unwrap_or(0);
+    let token = launch_token()?;
+    let html = branded_html(&dir, &token);
+    let cfg = Arc::new(Cfg { dir, model, permission_mode, html, token, port });
     let url = format!("http://{addr}");
     *server_base_cell().lock().unwrap_or_else(|e| e.into_inner()) = Some(url.clone());
     println!("Ira UI v{} → {url}", env!("CARGO_PKG_VERSION"));
+    if std::env::var("IRA_UI_PRINT_TOKEN").is_ok() {
+        println!("API token (for /v1 clients): {}", cfg.token);
+    }
     warm_model(&cfg); // preload local model weights so the first reply is fast
     if open {
         open_browser(&url);
@@ -122,6 +253,19 @@ fn handle_request(
     handle: tokio::runtime::Handle,
 ) {
     let url = request.url().to_string();
+
+    let headers: Vec<(String, String)> = request
+        .headers()
+        .iter()
+        .map(|h| (h.field.as_str().as_str().to_ascii_lowercase(), h.value.as_str().to_string()))
+        .collect();
+    if let Err((code, msg)) = authorize(request.method().as_str(), &url, &headers, cfg.port, &cfg.token) {
+        let hdr = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
+        let _ = request.respond(
+            Response::from_string(json!({ "error": msg }).to_string()).with_status_code(code).with_header(hdr),
+        );
+        return;
+    }
 
     if let Some((_, ct, bytes)) = VENDOR.iter().find(|(p, _, _)| url.starts_with(p)) {
         let ct_hdr = Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap();
@@ -184,7 +328,7 @@ fn handle_request(
     if url.starts_with("/raw?") {
         let rel = query_param(&url, "path").unwrap_or_default();
         let adir = resolve_agent(&cfg, &query_param(&url, "agent").unwrap_or_default());
-        match safe_join(&adir, &rel).and_then(|p| std::fs::read(&p).ok().map(|b| (p, b))) {
+        match safe_join(&adir, &rel).filter(|p| p.is_file()).and_then(|p| std::fs::read(&p).ok().map(|b| (p, b))) {
             Some((p, bytes)) => {
                 let ct = content_type_for(&p);
                 let hdr = Header::from_bytes(&b"Content-Type"[..], ct.as_bytes()).unwrap();
@@ -502,13 +646,21 @@ fn handle_request(
     }
 
     if url.starts_with("/api/chat") {
-        let (sid, msg, model_override) = parse_chat_query(&url);
+        let mut buf = Vec::new();
+        let _ = request.as_reader().take(10 * 1024 * 1024).read_to_end(&mut buf);
+        let (sid, msg, model_override, agent_sel) = parse_chat_body(&buf);
         if msg.is_empty() {
             let _ = request.respond(Response::from_string("missing msg").with_status_code(400));
             return;
         }
+        if let Some(m) = &model_override {
+            if let Err(e) = validate_model_override(m) {
+                let body = format!("data: {}\n\n", json!({"type":"error","message": e}));
+                let _ = request.respond(sse_response(mpsc_once(body)));
+                return;
+            }
+        }
         let model = model_override.clone().or_else(|| cfg.model.clone());
-        let agent_sel = query_param(&url, "agent").unwrap_or_default();
         let agent_dir = resolve_agent(&cfg, &agent_sel);
 
         // Get-or-create the session for this conversation, then start a turn.
@@ -741,6 +893,9 @@ fn create_agent(handle: &tokio::runtime::Handle, body: &[u8]) -> String {
             None => "ollama:gemma4:e2b-it-qat@http://localhost:11434/v1".to_string(),
         }
     } else {
+        if let Err(e) = validate_model_override(&model) {
+            return json!({ "error": e }).to_string();
+        }
         model
     };
     let soul = v.get("soul").and_then(|s| s.as_str()).unwrap_or("").trim().to_string();
@@ -753,10 +908,20 @@ fn create_agent(handle: &tokio::runtime::Handle, body: &[u8]) -> String {
     if std::fs::create_dir_all(&dir).is_err() {
         return json!({ "error": "could not create agent directory" }).to_string();
     }
-    let yaml = format!(
-        "spec_version: \"0.1.0\"\nname: {name}\ndescription: {description}\n\nmodel:\n  preferred: \"{model}\"\n  fallback: []\n  constraints:\n    max_tokens: 8192\n\ntools: [{}]\n\nruntime:\n  max_turns: 20\n",
-        tools.join(", ")
-    );
+    // Built as a YAML value (never string-templated) so user input can't
+    // inject keys.
+    let mut doc = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+    yaml_set(&mut doc, &["spec_version"], "0.1.0".into());
+    yaml_set(&mut doc, &["name"], name.clone().into());
+    yaml_set(&mut doc, &["description"], description.into());
+    yaml_set(&mut doc, &["model", "preferred"], model.into());
+    yaml_set(&mut doc, &["model", "fallback"], serde_yaml::Value::Sequence(Vec::new()));
+    yaml_set(&mut doc, &["model", "constraints", "max_tokens"], 8192u64.into());
+    yaml_set(&mut doc, &["tools"], yaml_strings(&tools));
+    yaml_set(&mut doc, &["runtime", "max_turns"], 20u64.into());
+    let Ok(yaml) = serde_yaml::to_string(&doc) else {
+        return json!({ "error": "could not serialize agent.yaml" }).to_string();
+    };
     if std::fs::write(dir.join("agent.yaml"), yaml).is_err() {
         return json!({ "error": "could not write agent.yaml" }).to_string();
     }
@@ -800,24 +965,41 @@ fn update_agent(cfg: &Arc<Cfg>, body: &[u8]) -> String {
     };
     let id = v.get("id").and_then(|s| s.as_str()).unwrap_or("");
     let dir = resolve_agent(cfg, id);
-    let Ok(l) = crate::sdk::loader::load_agent(&dir) else {
+    // The name is fixed (it's the API identifier) and is never edited here.
+    if crate::sdk::loader::load_agent(&dir).is_err() {
         return json!({ "error": "agent not found" }).to_string();
+    }
+    // Edit agent.yaml in place as a YAML value: only the fields the editor
+    // sends change; everything else (permissions, sandbox, hooks…) is kept.
+    let path = dir.join("agent.yaml");
+    let Some(mut doc) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_yaml::from_str::<serde_yaml::Value>(&raw).ok())
+        .filter(|d| d.is_mapping())
+    else {
+        return json!({ "error": "could not read agent.yaml" }).to_string();
     };
-    let m = l.manifest;
-    let name = m.name.clone(); // name is fixed (it's the API identifier)
-    let description = v.get("description").and_then(|s| s.as_str()).unwrap_or(&m.description).trim().to_string();
-    let model = v.get("model").and_then(|s| s.as_str()).unwrap_or(&m.model.preferred).trim().to_string();
-    let max_turns = v.get("max_turns").and_then(|n| n.as_u64()).unwrap_or(m.max_turns() as u64);
-    let tools: Vec<String> = v
-        .get("tools")
-        .and_then(|t| t.as_array())
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-        .unwrap_or_else(|| m.tools.clone().unwrap_or_default());
-    let yaml = format!(
-        "spec_version: \"0.1.0\"\nname: {name}\ndescription: {description}\n\nmodel:\n  preferred: \"{model}\"\n  fallback: []\n  constraints:\n    max_tokens: 8192\n\ntools: [{}]\n\nruntime:\n  max_turns: {max_turns}\n",
-        tools.join(", ")
-    );
-    if std::fs::write(dir.join("agent.yaml"), yaml).is_err() {
+    if let Some(d) = v.get("description").and_then(|s| s.as_str()) {
+        yaml_set(&mut doc, &["description"], d.trim().to_string().into());
+    }
+    if let Some(m) = v.get("model").and_then(|s| s.as_str()) {
+        let m = m.trim().to_string();
+        if let Err(e) = validate_model_override(&m) {
+            return json!({ "error": e }).to_string();
+        }
+        yaml_set(&mut doc, &["model", "preferred"], m.into());
+    }
+    if let Some(n) = v.get("max_turns").and_then(|n| n.as_u64()) {
+        yaml_set(&mut doc, &["runtime", "max_turns"], n.into());
+    }
+    if let Some(arr) = v.get("tools").and_then(|t| t.as_array()) {
+        let tools: Vec<String> = arr.iter().filter_map(|x| x.as_str().map(String::from)).collect();
+        yaml_set(&mut doc, &["tools"], yaml_strings(&tools));
+    }
+    let Ok(yaml) = serde_yaml::to_string(&doc) else {
+        return json!({ "error": "could not serialize agent.yaml" }).to_string();
+    };
+    if std::fs::write(&path, yaml).is_err() {
         return json!({ "error": "could not write agent.yaml" }).to_string();
     }
     if let Some(soul) = v.get("soul").and_then(|s| s.as_str()) {
@@ -828,6 +1010,34 @@ fn update_agent(cfg: &Arc<Cfg>, body: &[u8]) -> String {
         }
     }
     json!({ "ok": true }).to_string()
+}
+
+/// Set `path` (nested mapping keys) in a YAML document, creating intermediate
+/// mappings (and replacing non-mapping intermediates) as needed.
+fn yaml_set(doc: &mut serde_yaml::Value, path: &[&str], value: serde_yaml::Value) {
+    let Some((last, parents)) = path.split_last() else { return };
+    let mut cur = doc;
+    for key in parents {
+        if !cur.is_mapping() {
+            *cur = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+        }
+        let map = cur.as_mapping_mut().expect("mapping");
+        let k = serde_yaml::Value::String((*key).to_string());
+        if !map.get(&k).map(|v| v.is_mapping()).unwrap_or(false) {
+            map.insert(k.clone(), serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+        }
+        cur = map.get_mut(&k).expect("just inserted");
+    }
+    if !cur.is_mapping() {
+        *cur = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+    }
+    cur.as_mapping_mut()
+        .expect("mapping")
+        .insert(serde_yaml::Value::String((*last).to_string()), value);
+}
+
+fn yaml_strings(items: &[String]) -> serde_yaml::Value {
+    serde_yaml::Value::Sequence(items.iter().map(|t| serde_yaml::Value::String(t.clone())).collect())
 }
 
 /// Delete a created agent (never the launch agent; jailed to ~/.ira/agents).
@@ -1081,6 +1291,9 @@ fn install_studio_skill(cfg: &Arc<Cfg>, body: &[u8]) -> String {
         return json!({ "error": "only http(s) repositories are supported" }).to_string();
     }
     let subpath = v.get("external_repo_path").and_then(|s| s.as_str()).unwrap_or("").trim_matches('/');
+    if !is_plain_relative(subpath) {
+        return json!({ "error": "external_repo_path must be a relative path inside the repository" }).to_string();
+    }
     let adir = resolve_agent(cfg, agent);
     let slug = slugify(name);
     let dest = adir.join("skills").join(&slug);
@@ -1124,6 +1337,15 @@ fn install_studio_skill(cfg: &Arc<Cfg>, body: &[u8]) -> String {
         }
     }
 
+    // The chosen root must resolve (symlinks included) inside the clone.
+    let confined = match (src.canonicalize(), tmp.canonicalize()) {
+        (Ok(s), Ok(t)) => s.starts_with(&t),
+        _ => false,
+    };
+    if !confined {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return json!({ "error": "skill path resolves outside the repository" }).to_string();
+    }
     if let Err(e) = copy_dir(&src, &dest) {
         let _ = std::fs::remove_dir_all(&tmp);
         return json!({ "error": format!("copy failed: {e}") }).to_string();
@@ -1194,7 +1416,17 @@ fn installed_skills(adir: &std::path::Path) -> String {
     json!({ "skills": entries }).to_string()
 }
 
-/// Recursive copy (skips .git).
+/// A non-empty-or-empty relative path made only of normal components (no
+/// `..`, no root/prefix) — safe to join under a directory.
+fn is_plain_relative(p: &str) -> bool {
+    use std::path::Component;
+    let path = std::path::Path::new(p);
+    !path.is_absolute() && path.components().all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
+}
+
+/// Recursive copy (skips .git). Symlinks and special files are skipped, never
+/// followed — a cloned repo must not be able to pull in files from elsewhere
+/// on disk (or loop forever).
 fn copy_dir(src: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dest)?;
     for e in std::fs::read_dir(src)?.flatten() {
@@ -1204,9 +1436,10 @@ fn copy_dir(src: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()
         }
         let from = e.path();
         let to = dest.join(&name);
-        if from.is_dir() {
+        let ft = std::fs::symlink_metadata(&from)?.file_type();
+        if ft.is_dir() {
             copy_dir(&from, &to)?;
-        } else {
+        } else if ft.is_file() {
             std::fs::copy(&from, &to)?;
         }
     }
@@ -1613,6 +1846,10 @@ fn file_meta(root: &std::path::Path, rel: &str) -> String {
     if ext == "pdf" {
         return json!({ "kind": "pdf" }).to_string();
     }
+    // Too big to load into memory for the viewer → open externally.
+    if std::fs::metadata(&p).map(|m| m.len() > 32 * 1024 * 1024).unwrap_or(true) {
+        return json!({ "kind": "binary" }).to_string();
+    }
     // Documents: show extracted text in the viewer tab.
     if crate::sdk::extract::is_document(&p) {
         if let Ok(bytes) = std::fs::read(&p) {
@@ -1718,28 +1955,13 @@ fn short_model(spec: &str) -> String {
     s.split('@').next().unwrap_or(s).to_string()
 }
 
-/// Parse `?session=..&msg=..&model=..` (URL-decoded) from the chat request URL.
-fn parse_chat_query(url: &str) -> (String, String, Option<String>) {
-    let query = url.splitn(2, '?').nth(1).unwrap_or("");
-    let mut sid = "default".to_string();
-    let mut msg = String::new();
-    let mut model = None;
-    for pair in query.split('&') {
-        if let Some((k, v)) = pair.split_once('=') {
-            match k {
-                "session" => sid = url_decode(v),
-                "msg" => msg = url_decode(v),
-                "model" => {
-                    let m = url_decode(v);
-                    if !m.is_empty() {
-                        model = Some(m);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    (sid, msg, model)
+/// Parse the chat request body `{session, msg, model, agent}`.
+fn parse_chat_body(body: &[u8]) -> (String, String, Option<String>, String) {
+    let v: serde_json::Value = serde_json::from_slice(body).unwrap_or(serde_json::Value::Null);
+    let field = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let sid = Some(field("session")).filter(|s| !s.is_empty()).unwrap_or_else(|| "default".to_string());
+    let model = Some(field("model")).filter(|m| !m.is_empty());
+    (sid, field("msg"), model, field("agent"))
 }
 
 /// Minimal percent-decoding (also `+` → space).
@@ -1828,4 +2050,132 @@ fn open_browser(url: &str) {
         "xdg-open"
     };
     let _ = std::process::Command::new(cmd).arg(url).spawn();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TOK: &str = "0123456789abcdef0123456789abcdef";
+
+    fn hdrs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn authorize_checks_host_origin_token_and_method() {
+        let ok_host = ("host", "127.0.0.1:8787");
+        let tok = ("x-ira-token", TOK);
+        let json = ("content-type", "application/json");
+        // The page and vendored assets are public (but still Host-checked).
+        assert!(authorize("GET", "/", &hdrs(&[ok_host]), 8787, TOK).is_ok());
+        assert!(authorize("GET", "/vendor/cm.js", &hdrs(&[("host", "localhost:8787")]), 8787, TOK).is_ok());
+        assert_eq!(authorize("GET", "/", &hdrs(&[("host", "evil.example:8787")]), 8787, TOK).unwrap_err().0, 403);
+        assert_eq!(authorize("GET", "/", &hdrs(&[]), 8787, TOK).unwrap_err().0, 403);
+        assert_eq!(authorize("GET", "/", &hdrs(&[("host", "127.0.0.1:9999")]), 8787, TOK).unwrap_err().0, 403);
+        // API calls need the token.
+        assert_eq!(authorize("GET", "/api/agents", &hdrs(&[ok_host]), 8787, TOK).unwrap_err().0, 401);
+        assert_eq!(authorize("GET", "/api/agents", &hdrs(&[ok_host, ("x-ira-token", "nope")]), 8787, TOK).unwrap_err().0, 401);
+        assert!(authorize("GET", "/api/agents", &hdrs(&[ok_host, tok]), 8787, TOK).is_ok());
+        let bearer = format!("Bearer {TOK}");
+        assert!(authorize("POST", "/v1/chat/completions", &hdrs(&[ok_host, ("authorization", &bearer), json]), 8787, TOK).is_ok());
+        // Query-string token only for /raw GETs.
+        assert!(authorize("GET", &format!("/raw?path=a.png&token={TOK}"), &hdrs(&[ok_host]), 8787, TOK).is_ok());
+        assert_eq!(authorize("GET", &format!("/api/files?token={TOK}"), &hdrs(&[ok_host]), 8787, TOK).unwrap_err().0, 401);
+        // Foreign Origin is rejected even with the token.
+        assert_eq!(
+            authorize("GET", "/api/agents", &hdrs(&[ok_host, tok, ("origin", "https://evil.example")]), 8787, TOK).unwrap_err().0,
+            403
+        );
+        assert_eq!(authorize("GET", "/api/agents", &hdrs(&[ok_host, tok, ("origin", "null")]), 8787, TOK).unwrap_err().0, 403);
+        assert!(authorize("GET", "/api/agents", &hdrs(&[ok_host, tok, ("origin", "http://127.0.0.1:8787")]), 8787, TOK).is_ok());
+        // Chat is POST + JSON only.
+        assert_eq!(authorize("GET", "/api/chat?msg=hi", &hdrs(&[ok_host, tok]), 8787, TOK).unwrap_err().0, 405);
+        assert_eq!(authorize("POST", "/api/chat", &hdrs(&[ok_host, tok, ("content-type", "text/plain")]), 8787, TOK).unwrap_err().0, 415);
+        assert!(authorize("POST", "/api/chat", &hdrs(&[ok_host, tok, json]), 8787, TOK).is_ok());
+        // Process-launching / destructive endpoints are POST only.
+        assert_eq!(authorize("GET", "/api/ollama/delete?name=x", &hdrs(&[ok_host, tok]), 8787, TOK).unwrap_err().0, 405);
+        assert_eq!(authorize("GET", "/api/open?path=x", &hdrs(&[ok_host, tok]), 8787, TOK).unwrap_err().0, 405);
+        assert!(authorize("POST", "/api/ollama/pull?name=x", &hdrs(&[ok_host, tok]), 8787, TOK).is_ok());
+        // Polling endpoints stay GET.
+        assert!(authorize("GET", "/api/ollama/pulls", &hdrs(&[ok_host, tok]), 8787, TOK).is_ok());
+        assert!(authorize("GET", "/api/auth/handoff", &hdrs(&[ok_host, tok]), 8787, TOK).is_ok());
+        assert_eq!(authorize("POST", "/api/auth/handoff", &hdrs(&[ok_host, tok]), 8787, TOK).unwrap_err().0, 415);
+    }
+
+    #[test]
+    fn launch_tokens_are_random_hex() {
+        std::env::remove_var("IRA_UI_TOKEN");
+        let (a, b) = (launch_token().unwrap(), launch_token().unwrap());
+        assert_eq!(a.len(), 64);
+        assert_ne!(a, b);
+        assert!(ct_eq(&a, &a.clone()) && !ct_eq(&a, &b) && !ct_eq(&a, "short"));
+    }
+
+    #[test]
+    fn model_overrides_from_requests_must_be_local() {
+        assert!(validate_model_override("openai:gpt-4o").is_ok());
+        assert!(validate_model_override("ollama:gemma3:4b@http://localhost:11434/v1").is_ok());
+        assert!(validate_model_override("openai:gpt-4o@https://evil.example/v1").is_err());
+        assert!(validate_model_override("ollama:x@http://localhost.evil.example/v1").is_err());
+    }
+
+    #[test]
+    fn chat_body_parses() {
+        let (sid, msg, model, agent) = parse_chat_body(br#"{"session":"s1","msg":"hi","model":"","agent":"a"}"#);
+        assert_eq!((sid.as_str(), msg.as_str(), model, agent.as_str()), ("s1", "hi", None, "a"));
+        let (sid, msg, _, _) = parse_chat_body(b"not json");
+        assert_eq!((sid.as_str(), msg.as_str()), ("default", ""));
+    }
+
+    #[test]
+    fn skill_subpaths_must_stay_relative() {
+        assert!(is_plain_relative(""));
+        assert!(is_plain_relative("skills/foo"));
+        assert!(!is_plain_relative("../x"));
+        assert!(!is_plain_relative("skills/../../x"));
+        assert!(!is_plain_relative("/etc"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn copy_dir_skips_symlinks() {
+        let base = std::env::temp_dir().join(format!("ira-copydir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (src, dest, outside) = (base.join("src"), base.join("dest"), base.join("outside"));
+        std::fs::create_dir_all(src.join("sub")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret"), "s").unwrap();
+        std::fs::write(src.join("SKILL.md"), "ok").unwrap();
+        std::fs::write(src.join("sub").join("a.txt"), "a").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret"), src.join("linked.md")).unwrap();
+        std::os::unix::fs::symlink(&outside, src.join("linkdir")).unwrap();
+        std::os::unix::fs::symlink(&src, src.join("sub").join("loop")).unwrap();
+        copy_dir(&src, &dest).unwrap();
+        assert!(dest.join("SKILL.md").is_file());
+        assert!(dest.join("sub").join("a.txt").is_file());
+        assert!(std::fs::symlink_metadata(dest.join("linked.md")).is_err());
+        assert!(std::fs::symlink_metadata(dest.join("linkdir")).is_err());
+        assert!(std::fs::symlink_metadata(dest.join("sub").join("loop")).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn yaml_set_edits_fields_and_keeps_the_rest() {
+        let raw = "name: a\ndescription: old\nmodel:\n  preferred: x\n  fallback: [y]\npermissions:\n  deny: [\"cli(rm)\"]\nsandbox:\n  wrapper: [w]\n";
+        let mut doc: serde_yaml::Value = serde_yaml::from_str(raw).unwrap();
+        yaml_set(&mut doc, &["description"], "new\ninjected: true".into());
+        yaml_set(&mut doc, &["model", "preferred"], "z".into());
+        yaml_set(&mut doc, &["runtime", "max_turns"], 7u64.into());
+        let out = serde_yaml::to_string(&doc).unwrap();
+        let back: crate::sdk::manifest::AgentManifest = serde_yaml::from_str(&out).unwrap();
+        assert_eq!(back.description, "new\ninjected: true");
+        assert_eq!(back.model.preferred, "z");
+        assert_eq!(back.model.fallback, vec!["y".to_string()]);
+        assert_eq!(back.max_turns(), 7);
+        assert_eq!(back.permissions.unwrap().deny, vec!["cli(rm)".to_string()]);
+        assert_eq!(back.sandbox.unwrap().wrapper, vec!["w".to_string()]);
+        let top: serde_yaml::Value = serde_yaml::from_str(&out).unwrap();
+        assert!(top.get("injected").is_none());
+    }
 }

@@ -13,6 +13,7 @@ pub mod manifest;
 pub mod mcp;
 pub mod pdf;
 pub mod permissions;
+pub(crate) mod proc;
 pub mod query;
 pub mod session;
 pub mod telemetry;

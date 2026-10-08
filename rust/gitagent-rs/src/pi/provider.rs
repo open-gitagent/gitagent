@@ -75,6 +75,14 @@ pub fn model_cost_per_mtok(model_id: &str) -> (f64, f64) {
     }
 }
 
+/// Pop one complete `\n`-terminated line off the front of a byte buffer and
+/// decode it. Returns None (leaving the bytes buffered) until a newline arrives.
+fn take_line(buf: &mut Vec<u8>) -> Option<String> {
+    let nl = buf.iter().position(|&b| b == b'\n')?;
+    let line: Vec<u8> = buf.drain(..=nl).collect();
+    Some(String::from_utf8_lossy(&line).into_owned())
+}
+
 pub fn resolve_model(spec: &str) -> ModelSpec {
     // "provider:model[@baseurl]" — the provider prefix selects a default endpoint.
     let (provider, rest) = spec.split_once(':').unwrap_or(("openai", spec));
@@ -88,13 +96,67 @@ pub fn resolve_model(spec: &str) -> ModelSpec {
         "anthropic" => "https://api.anthropic.com/v1",
         _ => "https://api.openai.com/v1",
     };
+    let env_base = std::env::var("GITAGENT_MODEL_BASE_URL").ok().filter(|s| !s.trim().is_empty());
     let base_url = base_from_at
-        .or_else(|| std::env::var("GITAGENT_MODEL_BASE_URL").ok())
+        .or_else(|| env_base.clone())
         .unwrap_or_else(|| default_base.to_string());
-    let api_key = std::env::var("OPENAI_API_KEY")
-        .or_else(|_| std::env::var("ANTHROPIC_API_KEY"))
-        .unwrap_or_default();
+    let api_key = provider_api_key(provider, &base_url, env_base.as_deref());
     ModelSpec { model_id, base_url, api_key }
+}
+
+/// The env var holding a provider's key and the official API host that key
+/// belongs to. `None` = the provider takes no key (local Ollama).
+fn provider_key_source(provider: &str) -> Option<(&'static str, &'static str)> {
+    match provider {
+        "ollama" => None,
+        "anthropic" => Some(("ANTHROPIC_API_KEY", "api.anthropic.com")),
+        // Everything else speaks the OpenAI wire format against api.openai.com.
+        _ => Some(("OPENAI_API_KEY", "api.openai.com")),
+    }
+}
+
+/// Whether a provider's key may be sent to `base_url`: only to the provider's
+/// official HTTPS host, or to the endpoint the user configured explicitly via
+/// `GITAGENT_MODEL_BASE_URL`. A `@baseurl` in a model string never receives a
+/// key on its own — model strings can come from untrusted agent repos.
+pub fn key_allowed_for(provider: &str, base_url: &str, user_base: Option<&str>) -> bool {
+    let Some((_, official_host)) = provider_key_source(provider) else {
+        return false;
+    };
+    if let Some(ub) = user_base {
+        if ub.trim_end_matches('/') == base_url.trim_end_matches('/') {
+            return true;
+        }
+    }
+    match reqwest::Url::parse(base_url) {
+        Ok(u) => u.scheme() == "https" && u.host_str() == Some(official_host),
+        Err(_) => false,
+    }
+}
+
+/// One key per provider (no cross-provider fallback), attached only when
+/// [`key_allowed_for`] approves the destination.
+fn provider_api_key(provider: &str, base_url: &str, user_base: Option<&str>) -> String {
+    let Some((var, _)) = provider_key_source(provider) else {
+        return String::new();
+    };
+    if !key_allowed_for(provider, base_url, user_base) {
+        return String::new();
+    }
+    std::env::var(var).unwrap_or_default()
+}
+
+/// Whether a `@baseurl` points at this machine (loopback). Model strings that
+/// arrive over the local HTTP API may only override the endpoint with these.
+pub fn is_loopback_base_url(base_url: &str) -> bool {
+    let Ok(u) = reqwest::Url::parse(base_url) else { return false };
+    if !matches!(u.scheme(), "http" | "https") || !u.username().is_empty() || u.password().is_some() {
+        return false;
+    }
+    let Some(host) = u.host_str() else { return false };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || host.parse::<std::net::IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false)
 }
 
 #[derive(Serialize)]
@@ -289,7 +351,11 @@ async fn stream_inner(
     }
 
     let url = format!("{}/chat/completions", spec.base_url.trim_end_matches('/'));
-    let resp = client.post(&url).bearer_auth(&spec.api_key).json(&body).send().await?;
+    let mut req = client.post(&url);
+    if !spec.api_key.is_empty() {
+        req = req.bearer_auth(&spec.api_key);
+    }
+    let resp = req.json(&body).send().await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
@@ -297,7 +363,9 @@ async fn stream_inner(
     }
 
     let mut stream = resp.bytes_stream();
-    let mut buf = String::new();
+    // Raw bytes: a multi-byte UTF-8 char may be split across chunks, so only
+    // complete lines are decoded.
+    let mut buf: Vec<u8> = Vec::new();
     let mut text = String::new();
     let mut thinking = String::new();
     let mut acc: Vec<(String, String, String)> = Vec::new(); // (id, name, args)
@@ -318,10 +386,9 @@ async fn stream_inner(
                 None => break,
             }
         };
-        buf.push_str(&String::from_utf8_lossy(&chunk));
+        buf.extend_from_slice(&chunk);
 
-        while let Some(nl) = buf.find('\n') {
-            let line: String = buf.drain(..=nl).collect();
+        while let Some(line) = take_line(&mut buf) {
             let line = line.trim();
             let Some(data) = line.strip_prefix("data:") else { continue };
             let data = data.trim();
@@ -588,4 +655,74 @@ fn extract_text_tool_call(text: &str) -> Option<(String, Value)> {
         other => other,
     };
     Some((name, args))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn take_line_keeps_split_multibyte_chars_intact() {
+        let line = "data: {\"c\":\"héllo — 世界\"}\n".as_bytes();
+        // Split inside the 3-byte '世' and inside the 2-byte 'é'.
+        let cut = line.iter().position(|&b| b == 0xE4).unwrap() + 1;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&line[..8]);
+        assert!(take_line(&mut buf).is_none());
+        buf.extend_from_slice(&line[8..cut]);
+        assert!(take_line(&mut buf).is_none());
+        buf.extend_from_slice(&line[cut..]);
+        let got = take_line(&mut buf).unwrap();
+        assert_eq!(got, "data: {\"c\":\"héllo — 世界\"}\n");
+        assert!(!got.contains('\u{FFFD}'));
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn keys_only_go_to_the_official_host_or_user_base() {
+        assert!(key_allowed_for("openai", "https://api.openai.com/v1", None));
+        assert!(key_allowed_for("anthropic", "https://api.anthropic.com/v1", None));
+        assert!(!key_allowed_for("openai", "https://api.anthropic.com/v1", None));
+        assert!(!key_allowed_for("openai", "https://evil.example/v1", None));
+        assert!(!key_allowed_for("openai", "http://api.openai.com/v1", None));
+        assert!(!key_allowed_for("openai", "https://api.openai.com.evil.example/v1", None));
+        assert!(!key_allowed_for("openai", "https://evil.example/v1?x=api.openai.com", None));
+        assert!(!key_allowed_for("ollama", "http://localhost:11434/v1", None));
+        // An endpoint the user configured explicitly is trusted.
+        assert!(key_allowed_for("openai", "https://gw.corp/v1/", Some("https://gw.corp/v1")));
+        assert!(!key_allowed_for("openai", "https://other.corp/v1", Some("https://gw.corp/v1")));
+    }
+
+    #[test]
+    fn resolve_model_uses_one_key_per_provider() {
+        std::env::remove_var("GITAGENT_MODEL_BASE_URL");
+        std::env::remove_var("OPENAI_API_KEY");
+        std::env::set_var("ANTHROPIC_API_KEY", "ak");
+        // No cross-provider fallback.
+        assert_eq!(resolve_model("openai:gpt-4o").api_key, "");
+        assert_eq!(resolve_model("anthropic:claude-x").api_key, "ak");
+        std::env::set_var("OPENAI_API_KEY", "ok");
+        assert_eq!(resolve_model("openai:gpt-4o").api_key, "ok");
+        // A @baseurl override never receives the key.
+        assert_eq!(resolve_model("openai:gpt-4o@https://evil.example/v1").api_key, "");
+        assert_eq!(resolve_model("ollama:gemma3:4b").api_key, "");
+        // The user-configured endpoint does.
+        std::env::set_var("GITAGENT_MODEL_BASE_URL", "https://gw.corp/v1");
+        let s = resolve_model("openai:gpt-4o");
+        assert_eq!((s.base_url.as_str(), s.api_key.as_str()), ("https://gw.corp/v1", "ok"));
+        std::env::remove_var("GITAGENT_MODEL_BASE_URL");
+        std::env::remove_var("OPENAI_API_KEY");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+    }
+
+    #[test]
+    fn loopback_base_urls() {
+        assert!(is_loopback_base_url("http://localhost:11434/v1"));
+        assert!(is_loopback_base_url("http://127.0.0.1:8080/v1"));
+        assert!(is_loopback_base_url("http://[::1]:8080/v1"));
+        assert!(!is_loopback_base_url("https://evil.example/v1"));
+        assert!(!is_loopback_base_url("http://localhost.evil.example/v1"));
+        assert!(!is_loopback_base_url("http://user@evil.example/v1"));
+        assert!(!is_loopback_base_url("file:///etc/passwd"));
+    }
 }

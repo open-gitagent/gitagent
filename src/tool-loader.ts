@@ -116,11 +116,17 @@ function createDeclarativeTool(
 					stderr += data.toString("utf-8");
 				});
 
+				// A script that exits before reading stdin makes this pipe emit
+				// EPIPE; without a listener that crashes the process. The close/error
+				// handlers decide the outcome.
+				child.stdin.on("error", () => {});
 				// Send args as JSON on stdin
 				child.stdin.write(JSON.stringify(args));
 				child.stdin.end();
 
+				let timedOut = false;
 				const timeout = setTimeout(() => {
+					timedOut = true;
 					child.kill("SIGTERM");
 					reject(new Error(`Tool "${def.name}" timed out after 120s`));
 				}, 120_000);
@@ -134,7 +140,7 @@ function createDeclarativeTool(
 					reject(new Error(`Tool "${def.name}" failed to start: ${err.message}`));
 				});
 
-				child.on("close", (code) => {
+				child.on("close", (code, killSignal) => {
 					clearTimeout(timeout);
 					if (signal) signal.removeEventListener("abort", onAbort);
 
@@ -142,8 +148,14 @@ function createDeclarativeTool(
 						reject(new Error("Operation aborted"));
 						return;
 					}
+					if (timedOut) return; // already rejected
 
-					if (code !== 0 && code !== null) {
+					if (code === null) {
+						reject(new Error(`Tool "${def.name}" was killed by signal ${killSignal ?? "unknown"}: ${stderr.trim()}`));
+						return;
+					}
+
+					if (code !== 0) {
 						reject(new Error(`Tool "${def.name}" exited with code ${code}: ${stderr.trim()}`));
 						return;
 					}

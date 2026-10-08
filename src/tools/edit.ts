@@ -89,7 +89,8 @@ export function createEditTool(cwd: string): AgentTool<typeof editSchema> {
 				if (replace_all) {
 					updated = original.split(old_string).join(new_string);
 				} else {
-					updated = original.replace(old_string, new_string);
+					// Function replacer: new_string is inserted literally (no `$&`/`$$` expansion)
+					updated = original.replace(old_string, () => new_string);
 				}
 			}
 

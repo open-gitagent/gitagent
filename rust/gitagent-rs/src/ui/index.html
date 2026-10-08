@@ -8,6 +8,26 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Inter:wght@400;450;500;600&display=swap" rel="stylesheet">
+<script>
+// Per-launch API token (injected by the server). Every same-origin request
+// carries it; the local server rejects /api, /v1 and /raw calls without it.
+const IRA_TOKEN = "__IRA_TOKEN__";
+(()=>{
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init)=>{
+    const u = typeof input==='string' ? input : (input && input.url) || '';
+    let same = false;
+    try{ same = new URL(u, location.href).origin === location.origin; }catch(_){}
+    if(same){
+      init = Object.assign({}, init);
+      const h = new Headers(init.headers || (typeof input!=='string' && input.headers) || {});
+      h.set('X-Ira-Token', IRA_TOKEN);
+      init.headers = h;
+    }
+    return nativeFetch(input, init);
+  };
+})();
+</script>
 <link rel="stylesheet" href="/vendor/cm.css">
 <script src="/vendor/cm.js"></script>
 <script src="/vendor/mode-yaml.js"></script>
@@ -858,9 +878,8 @@ function send(){
   const kick = ()=>{ if(!raf) raf=requestAnimationFrame(tick); };
 
   const mdl = localStorage.getItem('ira_model') || '';
-  const url = `/api/chat?session=${encodeURIComponent(state.current)}&msg=${encodeURIComponent(sendText)}` + agentQ()
-    + (mdl ? `&model=${encodeURIComponent(mdl)}` : '');
-  es = new EventSource(url);
+  es = postEventStream('/api/chat', { session: state.current, msg: sendText,
+    agent: currentAgent || '', model: mdl });
   es.onmessage = (ev)=>{
     let d; try{ d = JSON.parse(ev.data); }catch(_){ return; }
     if(d.type==='delta'){ clearStatus(); asst.text += d.text; kick(); }
@@ -875,6 +894,31 @@ function send(){
     else if(d.type==='done'){ doneFlag=true; kick(); }
   };
   es.onerror = ()=>{ doneFlag=true; kick(); };
+}
+// SSE over a POST (EventSource can only GET). Same surface as EventSource:
+// onmessage({data}), onerror(), close().
+function postEventStream(url, payload){
+  const ctl = new AbortController();
+  const src = { onmessage:null, onerror:null, close(){ ctl.abort(); } };
+  fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload), signal: ctl.signal })
+    .then(async r=>{
+      if(!r.ok || !r.body) throw new Error('HTTP '+r.status);
+      const rd = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
+      for(;;){
+        const { done, value } = await rd.read();
+        if(done) break;
+        buf += dec.decode(value, { stream:true });
+        let i;
+        while((i = buf.indexOf('\n\n')) >= 0){
+          const chunk = buf.slice(0, i); buf = buf.slice(i+2);
+          const data = chunk.split('\n').filter(l=>l.startsWith('data:')).map(l=>l.slice(5).replace(/^ /,'')).join('\n');
+          if(data && src.onmessage) src.onmessage({ data });
+        }
+      }
+      if(src.onerror) src.onerror();
+    })
+    .catch(()=>{ if(!ctl.signal.aborted && src.onerror) src.onerror(); });
+  return src;
 }
 function finishStream(){ if(es){ es.close(); es=null; } streaming=false; $('#send').disabled=false; save(); renderSidebar(); }
 
@@ -1036,7 +1080,7 @@ async function engineCard(){
     return '<div class="wcard"><div class="wi"><div class="wn">Could not set up the local AI engine</div>'
       +'<div class="wd" style="color:#a33">'+esc(st.error||'unknown error')+'</div></div>'
       +'<button class="mbtn engRetry" style="padding:8px 14px;font-size:.8rem;flex:0 0 auto">Retry</button>'
-      +'<button class="mbtn" style="padding:8px 14px;font-size:.8rem;flex:0 0 auto;background:transparent;color:var(--brand);border:1px solid var(--border-strong)" onclick="fetch(&quot;/api/openurl?u=https%3A%2F%2Follama.com%2Fdownload&quot;)">Install manually</button></div>';
+      +'<button class="mbtn" style="padding:8px 14px;font-size:.8rem;flex:0 0 auto;background:transparent;color:var(--brand);border:1px solid var(--border-strong)" onclick="fetch(&quot;/api/openurl?u=https%3A%2F%2Follama.com%2Fdownload&quot;,{method:&quot;POST&quot;})">Install manually</button></div>';
   }
   let line = 'Preparing…';
   let pct = 0;
@@ -1094,7 +1138,7 @@ async function openFile(path, name){
   if(existing){ activateTab(existing.id); return; }
   try{
     const meta = await (await fetch('/api/file?path='+encodeURIComponent(path)+agentQ())).json();
-    if(meta.kind==='binary' || meta.kind==='missing'){ fetch('/api/open?path='+encodeURIComponent(path)+agentQ()); return; }
+    if(meta.kind==='binary' || meta.kind==='missing'){ fetch('/api/open?path='+encodeURIComponent(path)+agentQ(), {method:'POST'}); return; }
     const tab = { id:'f'+Date.now().toString(36), path, name, kind:meta.kind, content:meta.content||'', ext:meta.ext||'', rendered:(meta.ext==='md') };
     fileTabs.push(tab); renderTabs(); activateTab(tab.id);
   }catch(_){}
@@ -1131,10 +1175,10 @@ function closeTab(id){
 }
 function renderFileView(t){
   const v=$('#fileView');
-  const raw='/raw?path='+encodeURIComponent(t.path)+agentQ();
+  const raw='/raw?path='+encodeURIComponent(t.path)+agentQ()+'&token='+encodeURIComponent(IRA_TOKEN);
   const head='<div class="fmeta"><span>'+esc(t.path)+'</span>'
     + (t.kind==='text' && t.ext==='md' ? '<button class="mode" onclick="mdToggle(\''+t.id+'\')">'+(t.rendered?'raw':'rendered')+'</button>' : '')
-    + (t.kind==='pdf' ? '<button class="mode" onclick="fetch(\'/api/open?path='+encodeURIComponent(t.path)+'\')">open externally</button>' : '')
+    + (t.kind==='pdf' ? '<button class="mode" onclick="fetch(\'/api/open?path='+encodeURIComponent(t.path)+agentQ()+'\',{method:\'POST\'})">open externally</button>' : '')
     + '</div>';
   if(t.kind==='image'){
     v.innerHTML=head+'<img src="'+raw+'" alt="'+esc(t.name)+'">';
@@ -1288,7 +1332,7 @@ async function renderStudio(){
     for(const a of (d.agents||[])){
       const card=document.createElement('div'); card.className='acard';
       const payload = '{\n    "model": "'+a.name+'",\n    "messages": [{"role": "user", "content": "Hello"}]\n  }';
-      const curl = "curl "+location.origin+"/v1/chat/completions \\\n  -H 'Content-Type: application/json' \\\n  -d '"+payload+"'";
+      const curl = "curl "+location.origin+"/v1/chat/completions \\\n  -H 'Authorization: Bearer "+IRA_TOKEN+"' \\\n  -H 'Content-Type: application/json' \\\n  -d '"+payload+"'";
       // syntax-tinted display copy (plain text goes to the clipboard)
       const curlHtml = esc(curl)
         .replace(/^curl/, '<span class="hl">curl</span>')
@@ -1544,7 +1588,7 @@ async function refreshModelsPanel(){
         if(!del.classList.contains('confirm')){ del.classList.add('confirm'); del.textContent='delete?';
           setTimeout(()=>{ del.classList.remove('confirm'); del.innerHTML=icon('trash',14); }, 2600); return; }
         del.disabled=true; del.textContent='…';
-        await fetch('/api/ollama/delete?name='+encodeURIComponent(m.model));
+        await fetch('/api/ollama/delete?name='+encodeURIComponent(m.model), {method:'POST'});
         refreshModelsPanel(); loadModels();
       };
       list.appendChild(row);
@@ -1567,7 +1611,7 @@ async function refreshModelsPanel(){
         row.querySelector('.insb').onclick=async (ev)=>{
           const b=ev.currentTarget; b.disabled=true; b.textContent='Starting…';
           recentPulls.push(r.tag);
-          await fetch('/api/ollama/pull?name='+encodeURIComponent(r.tag));
+          await fetch('/api/ollama/pull?name='+encodeURIComponent(r.tag), {method:'POST'});
           pollPulls(); setTimeout(refreshModelsPanel, 600);
         };
         list.appendChild(row);
@@ -1579,7 +1623,7 @@ async function refreshModelsPanel(){
 async function startPull(){
   const inp=$('#pullName'); const name=inp.value.trim(); if(!name) return;
   inp.value=''; recentPulls.push(name);
-  await fetch('/api/ollama/pull?name='+encodeURIComponent(name));
+  await fetch('/api/ollama/pull?name='+encodeURIComponent(name), {method:'POST'});
   pollPulls();
 }
 async function pollPulls(){
@@ -1598,8 +1642,8 @@ async function pollPulls(){
           +'<div style="display:flex;gap:8px;margin-top:7px">'
           +(old?'<button class="mbtn upol" style="padding:6px 12px;font-size:.75rem">Update Ollama</button>':'')
           +'<button class="mbtn rtry" style="padding:6px 12px;font-size:.75rem;background:transparent;color:var(--brand);border:1px solid var(--border-strong)">Retry</button></div>';
-        const u=el.querySelector('.upol'); if(u) u.onclick=()=>fetch('/api/openurl?u=https%3A%2F%2Follama.com%2Fdownload');
-        el.querySelector('.rtry').onclick=async ()=>{ await fetch('/api/ollama/pull?name='+encodeURIComponent(p.name)); pollPulls(); };
+        const u=el.querySelector('.upol'); if(u) u.onclick=()=>fetch('/api/openurl?u=https%3A%2F%2Follama.com%2Fdownload', {method:'POST'});
+        el.querySelector('.rtry').onclick=async ()=>{ await fetch('/api/ollama/pull?name='+encodeURIComponent(p.name), {method:'POST'}); pollPulls(); };
       } else {
         const d = pullDetail(p);
         el.innerHTML='<div class="pname"><span>'+esc(p.name)+'</span><span>'+esc(d.text)+'</span></div>'
@@ -1608,7 +1652,7 @@ async function pollPulls(){
           +'<button class="mbtn pstp" style="padding:4px 11px;font-size:.72rem;flex:0 0 auto;background:transparent;color:var(--muted);border:1px solid var(--border-strong)">Stop</button></div>';
         el.querySelector('.pstp').onclick=async (ev)=>{
           ev.currentTarget.disabled=true; ev.currentTarget.textContent='Stopping…';
-          await fetch('/api/ollama/pull/cancel?name='+encodeURIComponent(p.name));
+          await fetch('/api/ollama/pull/cancel?name='+encodeURIComponent(p.name), {method:'POST'});
           setTimeout(()=>{ pollPulls(); refreshModelsPanel(); }, 700);
         };
       }
@@ -1679,7 +1723,7 @@ async function wizModelsRender(){
         +(old?'Your Ollama is too old for this model — update it, then retry.':esc(pull.error.slice(0,90)))+'</div></div>'
         +(old?'<button class="mbtn wupd" style="padding:8px 14px;font-size:.8rem;flex:0 0 auto">Update Ollama</button>':'')
         +'<button class="mbtn wrty" style="padding:8px 14px;font-size:.8rem;flex:0 0 auto;background:transparent;color:var(--brand);border:1px solid var(--border-strong)">Retry</button>';
-      const u=card.querySelector('.wupd'); if(u) u.onclick=()=>fetch('/api/openurl?u=https%3A%2F%2Follama.com%2Fdownload');
+      const u=card.querySelector('.wupd'); if(u) u.onclick=()=>fetch('/api/openurl?u=https%3A%2F%2Follama.com%2Fdownload', {method:'POST'});
       card.querySelector('.wrty').onclick=()=>wizPull(r.tag);
     } else if(pull){
       const d = pullDetail(pull);
@@ -1688,7 +1732,7 @@ async function wizModelsRender(){
         +'<button class="mbtn wstp" style="padding:6px 12px;font-size:.75rem;flex:0 0 auto;background:transparent;color:var(--muted);border:1px solid var(--border-strong)">Stop</button>';
       card.querySelector('.wstp').onclick=async (ev)=>{
         ev.currentTarget.disabled=true; ev.currentTarget.textContent='…';
-        await fetch('/api/ollama/pull/cancel?name='+encodeURIComponent(r.tag));
+        await fetch('/api/ollama/pull/cancel?name='+encodeURIComponent(r.tag), {method:'POST'});
         setTimeout(wizModelsRender, 700);
       };
     } else if(inst){
@@ -1701,7 +1745,7 @@ async function wizModelsRender(){
   }
   $('#wizNext1').textContent = have.size ? 'Continue' : 'Continue anyway';
 }
-async function wizPull(tag){ recentPulls.push(tag); await fetch('/api/ollama/pull?name='+encodeURIComponent(tag)); wizModelsRender(); }
+async function wizPull(tag){ recentPulls.push(tag); await fetch('/api/ollama/pull?name='+encodeURIComponent(tag), {method:'POST'}); wizModelsRender(); }
 async function wizPick(){
   try{
     const d=await (await fetch('/api/pickfolder')).json();
@@ -1873,7 +1917,7 @@ document.getElementById('msGoogle').onclick = async ()=>{
     // webviews) — run the OAuth in the system browser and wait for the token.
     fail('');
     document.getElementById('msSub').textContent = 'Continuing in your browser… finish Google sign-in there.';
-    await fetch('/api/auth/browser');
+    await fetch('/api/auth/browser', {method:'POST'});
     const poll = setInterval(async ()=>{
       try{
         const d = await (await fetch('/api/auth/handoff')).json();

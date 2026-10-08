@@ -26,7 +26,8 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, any>; 
 	if (!match) {
 		return { frontmatter: {}, body: content };
 	}
-	const frontmatter = yaml.load(match[1]) as Record<string, any>;
+	const parsed = yaml.load(match[1]);
+	const frontmatter = parsed && typeof parsed === "object" ? (parsed as Record<string, any>) : {};
 	return { frontmatter, body: match[2] };
 }
 
@@ -65,7 +66,13 @@ export async function discoverSkills(agentDir: string): Promise<SkillMetadata[]>
 			continue; // no SKILL.md, skip
 		}
 
-		const { frontmatter } = parseFrontmatter(content);
+		let frontmatter: Record<string, any>;
+		try {
+			({ frontmatter } = parseFrontmatter(content));
+		} catch (err: any) {
+			console.warn(`Skipping skill "${entry.name}": invalid frontmatter: ${err.message}`);
+			continue;
+		}
 		const name = frontmatter.name as string | undefined;
 		const description = frontmatter.description as string | undefined;
 
