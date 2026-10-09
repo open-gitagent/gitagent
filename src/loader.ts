@@ -34,8 +34,8 @@ export interface AgentManifest {
 	tags?: string[];
 	metadata?: Record<string, string | number | boolean>;
 	model: {
-		preferred: string;
-		fallback: string[];
+		preferred?: string;
+		fallback?: string[];
 		constraints?: {
 			temperature?: number;
 			max_tokens?: number;
@@ -47,7 +47,7 @@ export interface AgentManifest {
 	tools: string[];
 	skills?: string[];
 	runtime: {
-		max_turns: number;
+		max_turns?: number;
 		timeout?: number;
 	};
 	extends?: string;
@@ -268,6 +268,10 @@ export async function loadAgent(
 		manifest = resolved.manifest;
 		parentRules = resolved.parentRules;
 	}
+
+	// runtime and model are optional in the spec; default them so consumers can read sub-fields safely
+	manifest.runtime ??= {};
+	manifest.model ??= {};
 
 	// Resolve dependencies (Phase 2.5)
 	await resolveDependencies(manifest, agentDir, gitagentDir);

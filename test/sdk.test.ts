@@ -271,3 +271,36 @@ describe("query()", () => {
 		assert.ok(collected.length > 0);
 	});
 });
+
+// ── Optional manifest sections ─────────────────────────────────────────
+
+describe("agent.yaml without runtime/model blocks", () => {
+	const makeAgent = async () => {
+		const { mkdtemp, writeFile } = await import("node:fs/promises");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const dir = await mkdtemp(join(tmpdir(), "gitagent-minimal-"));
+		await writeFile(join(dir, "agent.yaml"), "spec_version: \"0.1.0\"\nname: minimal\nversion: 0.1.0\ndescription: no runtime block\n");
+		return dir;
+	};
+
+	it("loadAgent() succeeds and defaults runtime to {}", async () => {
+		const loaded = await loadAgent(await makeAgent(), "openai:test-model@http://127.0.0.1:1");
+		assert.deepEqual(loaded.manifest.runtime, {});
+	});
+
+	it("query() does not crash reading runtime.timeout", async () => {
+		const messages: any[] = [];
+		// Unreachable local endpoint: the run fails fast at the model call, never at setup.
+		for await (const msg of query({
+			prompt: "hello",
+			dir: await makeAgent(),
+			model: "openai:test-model@http://127.0.0.1:1",
+			maxTurns: 1,
+		})) {
+			messages.push(msg);
+		}
+		const crash = messages.find((m) => JSON.stringify(m).includes("reading 'timeout'"));
+		assert.equal(crash, undefined, `unexpected crash: ${JSON.stringify(crash)}`);
+	});
+});
