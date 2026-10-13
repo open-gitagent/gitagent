@@ -34,7 +34,13 @@ export async function discoverSubAgents(agentDir: string): Promise<SubAgentMetad
 	for (const entry of entries) {
 		const entryPath = join(agentsDir, entry.name);
 
-		if (entry.isDirectory()) {
+		// A dependency mounted under agents/ is a symlink to its clone.
+		let isDirectory = entry.isDirectory();
+		if (entry.isSymbolicLink()) {
+			isDirectory = await stat(entryPath).then((s) => s.isDirectory(), () => false);
+		}
+
+		if (isDirectory) {
 			// Directory form: agents/<name>/agent.yaml
 			const agentYamlPath = join(entryPath, "agent.yaml");
 			try {

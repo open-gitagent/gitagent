@@ -1,5 +1,6 @@
-import { readFile, mkdir, writeFile } from "fs/promises";
-import { join } from "path";
+import { readFile, mkdir, writeFile, lstat, realpath, symlink } from "fs/promises";
+import { existsSync } from "fs";
+import { join, resolve, relative, dirname, isAbsolute, sep } from "path";
 import { randomUUID } from "crypto";
 import { execFileSync } from "child_process";
 import { getModel } from "@mariozechner/pi-ai";
@@ -241,7 +242,44 @@ async function resolveDependencies(
 		const depDir = join(depsDir, dep.name);
 		// Clone failure is non-fatal; skip this dependency.
 		cloneGitRepo(dep.source, depDir, { cwd: agentDir, branch: dep.version });
+		if (dep.mount) await mountDependency(agentDir, depDir, dep.mount, dep.name);
 	}
+}
+
+/**
+ * Link a cloned dependency into the agent directory at its `mount` path
+ * (e.g. `agents/fact-checker`, `tools`) so the normal discovery of
+ * sub-agents, tools and skills picks it up. The path comes from an untrusted
+ * agent.yaml, so it must stay inside the agent directory, and an existing
+ * file or directory there is never replaced.
+ */
+async function mountDependency(agentDir: string, depDir: string, mount: string, name: string): Promise<void> {
+	if (!existsSync(depDir)) return; // clone failed; nothing to mount
+
+	const target = resolve(agentDir, mount);
+	const rel = relative(resolve(agentDir), target);
+	if (!rel || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+		console.warn(`Dependency "${name}": mount "${mount}" is outside the agent directory; not mounted`);
+		return;
+	}
+
+	let existing;
+	try {
+		existing = await lstat(target);
+	} catch {
+		existing = null;
+	}
+	if (existing) {
+		const alreadyMounted =
+			existing.isSymbolicLink() && (await realpath(target).catch(() => "")) === (await realpath(depDir));
+		if (!alreadyMounted) {
+			console.warn(`Dependency "${name}": mount "${mount}" already exists; not mounted`);
+		}
+		return;
+	}
+
+	await mkdir(dirname(target), { recursive: true });
+	await symlink(relative(dirname(target), depDir), target, process.platform === "win32" ? "junction" : "dir");
 }
 
 export async function loadAgent(
