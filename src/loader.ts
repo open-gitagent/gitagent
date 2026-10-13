@@ -5,7 +5,7 @@ import { execFileSync } from "child_process";
 import { getModel } from "@mariozechner/pi-ai";
 import type { Model } from "@mariozechner/pi-ai";
 import yaml from "js-yaml";
-import { discoverSkills, formatSkillsForPrompt } from "./skills.js";
+import { discoverAgentSkills, formatSkillsForPrompt } from "./skills.js";
 import type { SkillMetadata } from "./skills.js";
 import { loadKnowledge, formatKnowledgeForPrompt } from "./knowledge.js";
 import type { LoadedKnowledge } from "./knowledge.js";
@@ -141,6 +141,8 @@ export interface LoadedAgent {
 	envConfig: EnvConfig;
 	sessionId: string;
 	agentDir: string;
+	/** Local clone of the `extends` parent, when one was resolved. */
+	parentDir?: string;
 	gitagentDir: string;
 	complianceWarnings: ComplianceWarning[];
 	plugins: LoadedPlugin[];
@@ -186,7 +188,7 @@ async function resolveInheritance(
 	manifest: AgentManifest,
 	agentDir: string,
 	gitagentDir: string,
-): Promise<{ manifest: AgentManifest; parentRules: string }> {
+): Promise<{ manifest: AgentManifest; parentRules: string; parentDir?: string }> {
 	if (!manifest.extends) {
 		return { manifest, parentRules: "" };
 	}
@@ -224,7 +226,7 @@ async function resolveInheritance(
 	// Load parent RULES.md for appending (union)
 	const parentRules = await readFileOr(join(parentDir, "RULES.md"), "");
 
-	return { manifest: merged, parentRules };
+	return { manifest: merged, parentRules, parentDir };
 }
 
 async function resolveDependencies(
@@ -263,10 +265,12 @@ export async function loadAgent(
 
 	// Resolve inheritance (Phase 2.4)
 	let parentRules = "";
+	let parentDir: string | undefined;
 	if (manifest.extends) {
 		const resolved = await resolveInheritance(manifest, agentDir, gitagentDir);
 		manifest = resolved.manifest;
 		parentRules = resolved.parentRules;
+		parentDir = resolved.parentDir;
 	}
 
 	// Resolve dependencies (Phase 2.5)
@@ -304,8 +308,8 @@ export async function loadAgent(
 	const knowledgeBlock = formatKnowledgeForPrompt(knowledge);
 	if (knowledgeBlock) parts.push(knowledgeBlock);
 
-	// Discover skills (filtered by manifest.skills if set)
-	let skills = await discoverSkills(agentDir);
+	// Discover skills, the extends parent's included (filtered by manifest.skills if set)
+	let skills = await discoverAgentSkills(agentDir, parentDir);
 	if (manifest.skills && manifest.skills.length > 0) {
 		const allowed = new Set(manifest.skills);
 		skills = skills.filter((s) => allowed.has(s.name));
@@ -455,6 +459,7 @@ Do NOT track trivial single-command tasks (e.g. "what time is it"). But DO check
 		envConfig,
 		sessionId,
 		agentDir,
+		parentDir,
 		gitagentDir,
 		complianceWarnings,
 		plugins,

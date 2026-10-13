@@ -10,7 +10,7 @@ import type { SandboxContext, SandboxConfig } from "./sandbox.js";
 import { expandSkillCommand, refreshSkills } from "./skills.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
 import type { HooksConfig } from "./hooks.js";
-import { loadDeclarativeTools } from "./tool-loader.js";
+import { loadAgentDeclarativeTools } from "./tool-loader.js";
 import { setupMcp } from "./mcp/manager.js";
 import { toAgentTool } from "./tool-utils.js";
 import { AuditLogger, isAuditEnabled } from "./audit.js";
@@ -545,8 +545,8 @@ async function main(): Promise<void> {
 		pluginMemoryLayers: pluginMemoryLayers.length > 0 ? pluginMemoryLayers : undefined,
 	});
 
-	// Load declarative tools from tools/*.yaml (Phase 2.2)
-	const declarativeTools = await loadDeclarativeTools(agentDir);
+	// Load declarative tools from tools/*.yaml, plus the extends parent's (Phase 2.2)
+	const declarativeTools = await loadAgentDeclarativeTools(agentDir, loaded.parentDir);
 	tools = [...tools, ...declarativeTools];
 
 	// Plugin tools (declarative + programmatic) — check for collisions with existing tools
@@ -728,7 +728,7 @@ async function main(): Promise<void> {
 
 			if (trimmed === "/skills") {
 				// Refresh skills to pick up any newly learned ones
-				const currentSkills = await refreshSkills(dir);
+				const currentSkills = await refreshSkills(dir, loaded.parentDir);
 				if (currentSkills.length === 0) {
 					console.log(dim("No skills installed."));
 				} else {
@@ -761,7 +761,7 @@ async function main(): Promise<void> {
 			}
 
 			if (trimmed === "/learned") {
-				const currentSkills = await refreshSkills(dir);
+				const currentSkills = await refreshSkills(dir, loaded.parentDir);
 				const learned = currentSkills.filter((s) => s.confidence !== undefined);
 				if (learned.length === 0) {
 					console.log(dim("No learned skills yet."));

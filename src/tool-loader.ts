@@ -81,10 +81,11 @@ export function buildTypeboxSchema(schema: Record<string, any>, opts: Record<str
 
 function createDeclarativeTool(
 	def: ToolDefinition,
-	agentDir: string,
+	toolsRoot: string,
+	cwd: string,
 ): AgentTool<any> {
 	const schema = buildTypeboxSchema(def.input_schema);
-	const scriptPath = join(agentDir, "tools", def.implementation.script);
+	const scriptPath = join(toolsRoot, "tools", def.implementation.script);
 	const runtime = def.implementation.runtime || "sh";
 
 	return {
@@ -101,7 +102,7 @@ function createDeclarativeTool(
 
 			return new Promise((resolve, reject) => {
 				const child = spawn(runtime, [scriptPath], {
-					cwd: agentDir,
+					cwd,
 					stdio: ["pipe", "pipe", "pipe"],
 					env: { ...process.env },
 				});
@@ -190,8 +191,16 @@ function createDeclarativeTool(
 	};
 }
 
-export async function loadDeclarativeTools(agentDir: string): Promise<AgentTool<any>[]> {
+/**
+ * Load `tools/*.yaml` from `agentDir`. Scripts resolve from `agentDir/tools`
+ * and run in `opts.cwd`, which defaults to `agentDir`.
+ */
+export async function loadDeclarativeTools(
+	agentDir: string,
+	opts: { cwd?: string } = {},
+): Promise<AgentTool<any>[]> {
 	const toolsDir = join(agentDir, "tools");
+	const cwd = opts.cwd ?? agentDir;
 
 	try {
 		const s = await stat(toolsDir);
@@ -210,7 +219,7 @@ export async function loadDeclarativeTools(agentDir: string): Promise<AgentTool<
 			const raw = await readFile(join(toolsDir, entry), "utf-8");
 			const def = yaml.load(raw) as ToolDefinition;
 			if (def?.name && def?.description && def?.input_schema && def?.implementation?.script) {
-				tools.push(createDeclarativeTool(def, agentDir));
+				tools.push(createDeclarativeTool(def, agentDir, cwd));
 			}
 		} catch {
 			// Skip invalid tool definitions
@@ -218,4 +227,24 @@ export async function loadDeclarativeTools(agentDir: string): Promise<AgentTool<
 	}
 
 	return tools;
+}
+
+/**
+ * Load the agent's declarative tools plus, when it `extends` a parent, the
+ * parent's. The child's tool wins on a name collision. Inherited scripts
+ * resolve from the parent's clone but run in the child's directory, since
+ * they act for the child.
+ */
+export async function loadAgentDeclarativeTools(
+	agentDir: string,
+	parentDir?: string,
+): Promise<AgentTool<any>[]> {
+	const own = await loadDeclarativeTools(agentDir);
+	if (!parentDir) return own;
+
+	const ownNames = new Set(own.map((t) => t.name));
+	const inherited = (await loadDeclarativeTools(parentDir, { cwd: agentDir }))
+		.filter((t) => !ownNames.has(t.name));
+
+	return [...own, ...inherited];
 }

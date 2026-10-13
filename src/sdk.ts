@@ -7,7 +7,7 @@ import { createBuiltinTools } from "./tools/index.js";
 import { createSandboxContext } from "./sandbox.js";
 import type { SandboxContext } from "./sandbox.js";
 import { loadHooksConfig, runHooks, wrapToolWithHooks } from "./hooks.js";
-import { loadDeclarativeTools } from "./tool-loader.js";
+import { loadAgentDeclarativeTools } from "./tool-loader.js";
 import { toAgentTool } from "./tool-utils.js";
 import { setupMcp } from "./mcp/manager.js";
 import type { McpSetupResult } from "./mcp/types.js";
@@ -194,8 +194,8 @@ export function query(options: QueryOptions): Query {
 			});
 		}
 
-		// Declarative tools from tools/*.yaml
-		const declarativeTools = await loadDeclarativeTools(loaded.agentDir);
+		// Declarative tools from tools/*.yaml, plus the extends parent's
+		const declarativeTools = await loadAgentDeclarativeTools(loaded.agentDir, loaded.parentDir);
 		tools = [...tools, ...declarativeTools];
 
 		// Plugin tools (declarative + programmatic) — check for collisions with existing tools

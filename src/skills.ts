@@ -1,5 +1,5 @@
 import { readFile, readdir, stat } from "fs/promises";
-import { join } from "path";
+import { join, relative, sep } from "path";
 import yaml from "js-yaml";
 
 export interface SkillMetadata {
@@ -7,6 +7,8 @@ export interface SkillMetadata {
 	description: string;
 	directory: string;
 	filePath: string;
+	/** Path to read this skill from, relative to the agent dir (set for inherited skills). */
+	location?: string;
 	confidence?: number;
 	usage_count?: number;
 	success_count?: number;
@@ -103,6 +105,22 @@ export async function discoverSkills(agentDir: string): Promise<SkillMetadata[]>
 	return skills.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Discover the agent's skills plus, when it `extends` a parent, the parent's.
+ * The union keeps the child's skill on a name collision.
+ */
+export async function discoverAgentSkills(agentDir: string, parentDir?: string): Promise<SkillMetadata[]> {
+	const own = await discoverSkills(agentDir);
+	if (!parentDir) return own;
+
+	const ownNames = new Set(own.map((s) => s.name));
+	const inherited = (await discoverSkills(parentDir))
+		.filter((s) => !ownNames.has(s.name))
+		.map((s) => ({ ...s, location: relative(agentDir, s.filePath).split(sep).join("/") }));
+
+	return [...own, ...inherited].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function loadSkill(meta: SkillMetadata): Promise<ParsedSkill> {
 	const content = await readFile(meta.filePath, "utf-8");
 	const { body } = parseFrontmatter(content);
@@ -121,7 +139,7 @@ export function formatSkillsForPrompt(skills: SkillMetadata[]): string {
 	const skillEntries = skills
 		.map((s) => {
 			let entry = `<skill>\n<name>${s.name}</name>\n<description>${s.description}</description>`;
-			entry += `\n<location>skills/${s.name}/SKILL.md</location>`;
+			entry += `\n<location>${s.location ?? `skills/${s.name}/SKILL.md`}</location>`;
 			if (s.confidence !== undefined) {
 				entry += `\n<confidence>${s.confidence}</confidence>`;
 			}
@@ -160,8 +178,8 @@ To load a skill's full instructions: read \`skills/<name>/SKILL.md\`
 Scripts within a skill are relative to the skill's directory: \`skills/<name>/scripts/\``;
 }
 
-export async function refreshSkills(agentDir: string): Promise<SkillMetadata[]> {
-	return discoverSkills(agentDir);
+export async function refreshSkills(agentDir: string, parentDir?: string): Promise<SkillMetadata[]> {
+	return discoverAgentSkills(agentDir, parentDir);
 }
 
 export async function expandSkillCommand(
