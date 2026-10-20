@@ -1,0 +1,467 @@
+mod learn_cmd;
+mod otel;
+mod repl;
+mod repo_mode;
+mod sandbox_exec;
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+use std::time::Duration;
+
+use anyhow::{bail, Context, Result};
+use clap::{Parser, ValueEnum};
+use gitagent_core::{Finished, Outcome, RunOptions};
+use gitagent_loader::{AgentSpec, LoadOptions};
+use gitagent_provider::Provider;
+use gitagent_record::Events;
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "gitagent",
+    version,
+    about = "A terminal agent whose behavior lives in version-controlled files.",
+    after_help = "Without -p or --instruction-file, gitagent starts an interactive session in --dir.\n\
+                  `gitagent learn --help` describes learning lessons from finished trials."
+)]
+pub(crate) struct Cli {
+    /// Benchmark mode: built-in config only, no git commits, no memory.
+    #[arg(long)]
+    bench: bool,
+
+    /// Read the task from this file.
+    #[arg(long, conflicts_with = "prompt")]
+    instruction_file: Option<PathBuf>,
+
+    /// The task, given inline.
+    #[arg(short = 'p', long)]
+    prompt: Option<String>,
+
+    /// Model as provider:model (overrides gitagent.yaml).
+    #[arg(long)]
+    model: Option<String>,
+
+    /// Profile: auto, a built-in name, or a path to a profile YAML file.
+    #[arg(long)]
+    profile: Option<String>,
+
+    /// Path to gitagent.yaml; its prompts/ and profiles/ override the built-ins.
+    #[arg(long)]
+    config: Option<PathBuf>,
+
+    /// Directory the agent works in (default: current directory).
+    #[arg(long)]
+    dir: Option<PathBuf>,
+
+    /// Where the trajectory, counters and logs are written.
+    #[arg(long, default_value = "/tmp/gitagent")]
+    out_dir: PathBuf,
+
+    /// Wall-clock budget for the run in seconds (default: timeout_s from the config).
+    #[arg(long)]
+    timeout_s: Option<u64>,
+
+    /// Session id recorded in the trajectory.
+    #[arg(long)]
+    session_id: Option<String>,
+
+    /// Write events to stdout, one JSON object per line.
+    #[arg(long, value_enum)]
+    events: Option<EventFormat>,
+
+    /// `text` prints the agent's summary; `stream-json` prints the SDK's
+    /// messages (system, assistant, user, result), one per line.
+    #[arg(long, value_enum, default_value = "text")]
+    output_format: OutputFormat,
+
+    /// Stop after this many model calls.
+    #[arg(long)]
+    max_turns: Option<u32>,
+
+    /// Offer only these tools, comma-separated (`.claude/` or gitagent names).
+    #[arg(long, value_delimiter = ',')]
+    allowed_tools: Vec<String>,
+
+    /// Never offer these tools, comma-separated (`.claude/` or gitagent names).
+    #[arg(long, value_delimiter = ',')]
+    disallowed_tools: Vec<String>,
+
+    /// Text added after the system prompt.
+    #[arg(long)]
+    append_system_prompt: Option<String>,
+
+    /// Clone this repository, work on a new branch and commit the result.
+    #[arg(long)]
+    repo: Option<String>,
+
+    /// Branch to start from in repo mode (default: the remote's default branch).
+    #[arg(long, requires = "repo")]
+    base: Option<String>,
+
+    /// Work on this branch in repo mode; an existing remote branch is resumed.
+    #[arg(long, requires = "repo")]
+    branch: Option<String>,
+
+    /// Push the working branch after committing (never forced).
+    #[arg(long, requires = "repo")]
+    push: bool,
+
+    /// After the run, keep the shells open (and anything still running in
+    /// them) until they exit, instead of stopping them. For harnesses that
+    /// check the environment after the agent ends; they can wait for the
+    /// `done` file in the output directory.
+    #[arg(long)]
+    linger: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum EventFormat {
+    Jsonl,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum OutputFormat {
+    Text,
+    StreamJson,
+}
+
+/// What every mode needs: the loaded configuration and a provider.
+pub(crate) struct Setup {
+    pub spec: AgentSpec,
+    pub provider: Box<dyn Provider>,
+    pub work_dir: PathBuf,
+    pub timeout: Duration,
+    pub events: Events,
+    /// Directories the sandboxed shell may write to; `None` when the
+    /// sandbox is off.
+    pub sandbox: Option<Vec<PathBuf>>,
+}
+
+fn main() -> ExitCode {
+    // The sandbox launcher runs before anything else and replaces itself
+    // with the shell.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if args.get(1).and_then(|a| a.to_str()) == Some("__sandbox") {
+        return sandbox_exec::run(&args[2..]);
+    }
+    let learn = args.get(1).and_then(|a| a.to_str()) == Some("learn");
+    match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) if learn => rt.block_on(learn_cmd::run(&args[2..])),
+        Ok(rt) => rt.block_on(async_main()),
+        Err(e) => usage_error(e.into()),
+    }
+}
+
+async fn async_main() -> ExitCode {
+    let cli = Cli::parse();
+    let task = match task_from(&cli) {
+        Ok(t) => t,
+        Err(e) => return usage_error(e),
+    };
+    if cli.repo.is_some() && cli.bench {
+        return usage_error(anyhow::anyhow!("--repo cannot be used with --bench"));
+    }
+    match task {
+        Some(instruction) if cli.repo.is_some() => {
+            let url = cli.repo.clone().unwrap_or_default();
+            repo_mode::run(cli, url, instruction).await
+        }
+        None if cli.repo.is_some() => usage_error(anyhow::anyhow!(
+            "--repo needs a task: give -p/--prompt or --instruction-file"
+        )),
+        Some(instruction) => single(cli, instruction).await,
+        None if cli.bench => usage_error(anyhow::anyhow!(
+            "--bench needs a task: give --instruction-file or -p/--prompt"
+        )),
+        None => match setup(&cli) {
+            Ok(s) => match repl::run(s, &cli.out_dir).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => usage_error(e),
+            },
+            Err(e) => usage_error(e),
+        },
+    }
+}
+
+pub(crate) fn usage_error(e: anyhow::Error) -> ExitCode {
+    eprintln!("gitagent: {e:#}");
+    ExitCode::from(2)
+}
+
+fn task_from(cli: &Cli) -> Result<Option<String>> {
+    let task = match (&cli.instruction_file, &cli.prompt) {
+        (Some(path), None) => Some(
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?,
+        ),
+        (None, Some(p)) => Some(p.clone()),
+        _ => None,
+    };
+    if task.as_deref().is_some_and(|t| t.trim().is_empty()) {
+        bail!("the task is empty");
+    }
+    Ok(task)
+}
+
+pub(crate) fn setup(cli: &Cli) -> Result<Setup> {
+    let work_dir = match &cli.dir {
+        Some(d) => d.clone(),
+        None => std::env::current_dir().context("reading the current directory")?,
+    };
+    // Benchmark runs use only the built-in files and explicit flags, so the
+    // task's directory or the machine's home cannot change the agent.
+    let (project_dir, home_dir) = if cli.bench {
+        (None, None)
+    } else {
+        (
+            Some(work_dir.clone()),
+            std::env::var_os("HOME").map(PathBuf::from),
+        )
+    };
+    let spec = gitagent_loader::load(&LoadOptions {
+        config_path: cli.config.clone(),
+        model: cli.model.clone(),
+        profile: cli.profile.clone(),
+        project_dir,
+        home_dir,
+    })?;
+    if !matches!(spec.config.learning.as_str(), "off" | "online") {
+        bail!(
+            "learning must be off or online, got {:?}",
+            spec.config.learning
+        );
+    }
+    let mut spec = spec;
+    if let Some(n) = cli.max_turns {
+        spec.config.max_turns = n;
+    }
+    if let Some(extra) = &cli.append_system_prompt {
+        spec.system_prompt.push('\n');
+        spec.system_prompt.push_str(extra.trim_end());
+        spec.system_prompt.push('\n');
+    }
+    let provider = make_provider(&spec)?;
+    let timeout = Duration::from_secs(cli.timeout_s.unwrap_or(spec.config.timeout_s));
+    let events = match cli.events {
+        Some(EventFormat::Jsonl) => Events::stdout(),
+        None => Events::disabled(),
+    };
+    let sandbox = sandbox_dirs(&spec.config.sandbox, cli.bench, &work_dir, &cli.out_dir)?;
+    eprintln!(
+        "gitagent {}: model {} · config {} · profile {} · {}{} · sandbox {}",
+        env!("CARGO_PKG_VERSION"),
+        spec.model,
+        spec.config_source,
+        spec.profile_source,
+        work_dir.display(),
+        if cli.bench { " · bench" } else { "" },
+        if sandbox.is_some() { "on" } else { "off" }
+    );
+    Ok(Setup {
+        spec,
+        provider,
+        work_dir,
+        timeout,
+        events,
+        sandbox,
+    })
+}
+
+/// One task (`-p`, `--instruction-file`, and `--bench`).
+async fn single(cli: Cli, instruction: String) -> ExitCode {
+    let out_dir = cli.out_dir.clone();
+    let result = async {
+        let s = setup(&cli)?;
+        let stream_json = cli.output_format == OutputFormat::StreamJson;
+        let session_id = cli
+            .session_id
+            .clone()
+            .unwrap_or_else(|| format!("gitagent-{}", std::process::id()));
+        let tool_allowlist = (!cli.allowed_tools.is_empty())
+            .then(|| gitagent_loader::sdk::normalize_tool_list(&cli.allowed_tools));
+        let tool_denylist = gitagent_loader::sdk::normalize_tool_list(&cli.disallowed_tools);
+        // Stream output: gitagent's events are converted as they happen.
+        let converter = stream_json.then(|| {
+            std::sync::Arc::new(std::sync::Mutex::new(gitagent_sdk::Converter::new(
+                &session_id,
+                &s.spec.model.to_string(),
+                u64::from(s.spec.profile.context_window),
+                None,
+            )))
+        });
+        let events = match &converter {
+            Some(c) => {
+                let init = c.lock().unwrap().init(
+                    &s.work_dir,
+                    &tool_names(&s.spec, tool_allowlist.as_deref(), &tool_denylist),
+                    &s.spec
+                        .agents
+                        .iter()
+                        .map(|a| a.name.clone())
+                        .collect::<Vec<_>>(),
+                    &s.spec
+                        .skills
+                        .iter()
+                        .map(|k| k.name.clone())
+                        .collect::<Vec<_>>(),
+                );
+                println!("{}", serde_json::to_string(&init)?);
+                let c = c.clone();
+                Events::to_callback(move |event| {
+                    for m in c.lock().unwrap().feed(&event) {
+                        if let Ok(line) = serde_json::to_string(&m) {
+                            println!("{line}");
+                        }
+                    }
+                })
+            }
+            None => s.events.clone(),
+        };
+        let finished = gitagent_core::run(
+            &s.spec,
+            s.provider.as_ref(),
+            RunOptions {
+                instruction,
+                work_dir: s.work_dir.clone(),
+                out_dir: out_dir.clone(),
+                timeout: Some(s.timeout),
+                session_id: Some(session_id),
+                events,
+                resume: None,
+                sandbox: s.sandbox.clone(),
+                tool_allowlist,
+                tool_denylist,
+                hook_callbacks: None,
+            },
+        )
+        .await?;
+        report(&finished, !s.events.enabled() && !stream_json);
+        if !cli.bench {
+            export_telemetry(&finished, &s.spec).await;
+        }
+        learn_cmd::after_run(&s, &finished.report, &s.work_dir, cli.bench).await;
+        anyhow::Ok(finished)
+    }
+    .await;
+
+    let (code, finished) = match result {
+        // Running out of turns or time is a normal end of a run; only a
+        // provider failure gets its own exit code so harnesses can tell it apart.
+        Ok(f) => (
+            if matches!(f.report.outcome, Outcome::ProviderFailed(_)) {
+                3
+            } else {
+                0
+            },
+            Some(f),
+        ),
+        Err(e) => {
+            eprintln!("gitagent: {e:#}");
+            (2, None)
+        }
+    };
+    // Written last, after the trajectory and counters: a harness waiting for
+    // this file can read everything else.
+    if let Err(e) = std::fs::create_dir_all(&out_dir)
+        .and_then(|_| std::fs::write(out_dir.join("done"), format!("{code}\n")))
+    {
+        eprintln!("gitagent: writing {}: {e}", out_dir.join("done").display());
+    }
+    if let Some(mut f) = finished.filter(|_| cli.linger) {
+        eprintln!("gitagent: done; keeping the shells open until they exit");
+        f.terminal.linger().await;
+    }
+    ExitCode::from(code)
+}
+
+/// The tools a run offers after the allow and deny lists.
+fn tool_names(spec: &AgentSpec, allow: Option<&[String]>, deny: &[String]) -> Vec<String> {
+    let mut tools: Vec<String> = gitagent_tools::specs(&spec.profile.tools, spec.profile.edit_tool)
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    if !spec.skills.is_empty() {
+        tools.push(gitagent_tools::SKILL.into());
+    }
+    if !spec.agents.is_empty() {
+        tools.push(gitagent_tools::SUBAGENT.into());
+    }
+    if let Some(allow) = allow {
+        tools.retain(|t| allow.contains(t) || t == gitagent_tools::TASK_COMPLETE);
+    }
+    tools.retain(|t| !deny.contains(t) || t == gitagent_tools::TASK_COMPLETE);
+    tools
+}
+
+/// Sends traces and metrics when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. A
+/// failure is reported but does not change the run's result.
+pub(crate) async fn export_telemetry(f: &Finished, spec: &AgentSpec) {
+    if let Some(exporter) = otel::Exporter::from_env() {
+        if let Err(e) = exporter.export(&f.report, &spec.model.to_string()).await {
+            eprintln!("gitagent: telemetry export failed: {e:#}");
+        }
+    }
+}
+
+/// Prints the outcome: a status line on stderr and, unless events go to
+/// stdout, the agent's summary on stdout.
+pub(crate) fn report(f: &Finished, summary_to_stdout: bool) {
+    let r = &f.report;
+    eprintln!(
+        "gitagent: {} after {} turns · tokens in {} (cached {}) out {} · {}",
+        r.outcome,
+        r.turns,
+        r.usage.input_tokens,
+        r.usage.cache_read_tokens,
+        r.usage.output_tokens,
+        r.trajectory_path.display()
+    );
+    if summary_to_stdout {
+        match &r.summary {
+            Some(s) => println!("{s}"),
+            None => println!("(no summary: the run ended with {})", r.outcome),
+        }
+    }
+}
+
+/// `sandbox: auto` means on outside `--bench` (the benchmark container is the
+/// isolation there) wherever the sandbox is available; `on` and `off` force it.
+fn sandbox_dirs(
+    setting: &str,
+    bench: bool,
+    work_dir: &std::path::Path,
+    out_dir: &std::path::Path,
+) -> Result<Option<Vec<PathBuf>>> {
+    let on = match setting {
+        "auto" => !bench && gitagent_sandbox::available(),
+        "on" => {
+            if !gitagent_sandbox::available() {
+                bail!("sandbox: on needs Linux (Landlock and seccomp)");
+            }
+            true
+        }
+        "off" => false,
+        other => bail!("sandbox must be auto, on or off, got {other:?}"),
+    };
+    if !on {
+        return Ok(None);
+    }
+    let mut dirs = vec![
+        work_dir.to_path_buf(),
+        out_dir.to_path_buf(),
+        std::env::temp_dir(),
+        PathBuf::from("/tmp"),
+        PathBuf::from("/var/tmp"),
+        PathBuf::from("/dev"),
+    ];
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(PathBuf::from(home).join(".cache"));
+    }
+    std::fs::create_dir_all(out_dir)?;
+    Ok(Some(dirs))
+}
+
+pub(crate) fn make_provider(spec: &AgentSpec) -> Result<Box<dyn Provider>> {
+    gitagent_provider::for_spec(spec)
+}

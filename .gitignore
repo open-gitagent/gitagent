@@ -1,0 +1,9 @@
+/target/
+bench/jobs/
+.env
+*.env
+.DS_Store
+.env.*
+__pycache__/
+*.pyc
+dist/

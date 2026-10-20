@@ -1,0 +1,47 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[workspace.dependencies]
+gitagent-cli = { path = "crates/cli" }
+gitagent-context = { path = "crates/context" }
+gitagent-core = { path = "crates/core" }
+gitagent-guards = { path = "crates/guards" }
+gitagent-hooks = { path = "crates/hooks" }
+gitagent-learn = { path = "crates/learn" }
+gitagent-loader = { path = "crates/loader" }
+gitagent-provider = { path = "crates/provider" }
+gitagent-record = { path = "crates/record" }
+gitagent-repo = { path = "crates/repo" }
+gitagent-sandbox = { path = "crates/sandbox" }
+gitagent-sdk = { path = "crates/sdk" }
+gitagent-shaper = { path = "crates/shaper" }
+gitagent-terminal = { path = "crates/terminal" }
+gitagent-tools = { path = "crates/tools" }
+
+anyhow = "1.0.104"
+async-trait = "0.1.92"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.21"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "fs", "io-util", "io-std", "signal"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

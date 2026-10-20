@@ -1,0 +1,15 @@
+name: gitagent
+# model: anthropic:<model-id>      # provider:model; --model overrides
+fallback_models: []
+max_turns: 200
+timeout_s: 1800                    # in --bench, --timeout-s from the Harbor shim wins
+profile: auto                      # auto = pick by model family, or a profile name/path
+sandbox: auto                      # auto | on | off; auto = on outside --bench on Linux
+skills: true
+hooks: true
+learning: off                      # off | online: learn lessons into .gitagent/ after each finished task (never in --bench)
+repo:
+  branch_prefix: gitagent/
+  commit_every_turns: 0
+  author: "gitagent <gitagent@localhost>"
+  push: false

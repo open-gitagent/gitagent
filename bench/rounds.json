@@ -1,0 +1,219 @@
+{
+  "_note": "Groups jobs in bench/jobs into rounds so the dashboard can show the current round's numbers next to earlier ones. A job belongs to the first round whose glob matches its name. Rounds with \"counts\": false are plumbing checks and stay out of every accuracy figure. \"skip\" lists dev tasks the round left out on purpose; they are not reported as pending. gitagent's current round is the last listed round that has gitagent runs. \"changes\" and \"reasoning\" describe what a round did and why it scored as it did; \"lessons_commit\" is the commit whose prompts/lessons.md the round's binary carried (the dashboard reads it with git show). \"split\": \"heldout\" marks a round on the held-out tasks; it is scored on those tasks and never becomes gitagent's current dev round.",
+  "rounds": [
+    {
+      "name": "checks",
+      "label": "Plumbing checks (scripted model, single-task smoke runs)",
+      "host": "macOS and optimus",
+      "jobs": [
+        "dry-*",
+        "m?-fix-git",
+        "optimus-gitagent-smoke",
+        "task1-*",
+        "smoke3-*",
+        "debug-*",
+        "smoke-gpt6*",
+        "smoke-nolessons*",
+        "smoke4-*",
+        "tb4-*"
+      ],
+      "counts": false,
+      "model": null
+    },
+    {
+      "name": "mac-oracle",
+      "label": "Oracle on the Mac (amd64 emulated under QEMU, then Rosetta)",
+      "host": "macOS + Colima",
+      "jobs": [
+        "smoke-oracle*",
+        "oracle-*"
+      ],
+      "model": null
+    },
+    {
+      "name": "r0",
+      "label": "Passes 1-4 on the Mac (amd64 emulated; prompt, shim and lessons changed between passes)",
+      "host": "macOS + Colima",
+      "commit": "a91af9d..f4a0a30",
+      "jobs": [
+        "pass*"
+      ],
+      "lessons_commit": null,
+      "changes": [
+        "First attempts at all 45 dev tasks, in four passes of 10-14 tasks",
+        "Ran on the owner's Mac: amd64 emulated under QEMU, then under Rosetta from pass 3",
+        "Fixed between passes: the shim's relaunch when gitagent dies early, and a check that refuses a stale binary",
+        "Lessons learned after each pass: 0 in the prompt at the start, 9 by the end"
+      ],
+      "reasoning": "76.7% mean per task, but not comparable with later rounds. Part of the failures were the machine's: under emulation the reference solutions themselves failed on several tasks (no AVX, compiler crashes, no nested VM). Two more were harness bugs fixed during the round (a relaunch bug and a stale binary). The code and lessons changed between passes, so the round mixes several versions of gitagent.",
+      "model": "claude-opus-5-5"
+    },
+    {
+      "name": "optimus-oracle",
+      "label": "Oracle on optimus, all 89 tasks, plus reruns of its failures",
+      "host": "optimus",
+      "jobs": [
+        "optimus-oracle-*"
+      ],
+      "model": null
+    },
+    {
+      "name": "terminus-baseline",
+      "label": "Terminus 2 baseline, 1 run per task (stopped by the owner with 41 of 44 scored)",
+      "host": "optimus",
+      "jobs": [
+        "baseline-terminus2-*"
+      ],
+      "skip": [
+        "qemu-alpine-ssh"
+      ],
+      "changes": [
+        "Harbor's reference agent Terminus 2, same model (Opus 5.5) and machine, 1 run per task",
+        "Stopped by the owner after 41 of 44 tasks were scored"
+      ],
+      "reasoning": "87.8% on the 41 tasks it scored, which matches the public Vals.ai figure for Opus 5.5 with Terminus 2 (87.64% on all 89 tasks), so this machine reproduces leaderboard conditions. Its failures included two runaway loops: on password-recovery and crack-7z-hash the model returned empty replies (most likely refusals) and Terminus resent the whole conversation hundreds of times, about $350 between them.",
+      "model": "claude-opus-5-5"
+    },
+    {
+      "name": "r1",
+      "label": "Round 1 on optimus: gitagent at 480265d, M4 profile, 9 lessons, no changes (45 dev tasks x 3 runs)",
+      "host": "optimus",
+      "commit": "480265d",
+      "jobs": [
+        "r1-*"
+      ],
+      "lessons_commit": "480265d",
+      "changes": [
+        "Moved to optimus: native x86_64, 32 cores, Docker",
+        "Same code as the end of r0 (480265d), M4 profile, 9 lessons in the prompt",
+        "All 45 dev tasks, 3 runs each (135 trials), so single lucky or unlucky runs average out"
+      ],
+      "reasoning": "94.1% mean per task (96.2% without qemu-alpine-ssh), +8.9 points over Terminus 2 on the tasks both ran. Every task r0 failed for machine or early-bug reasons now passes, so most of the jump from r0 is the real hardware, not new skill. Remaining failures: qemu-alpine-ssh 0/3 (this machine cannot run it); filter-js-from-html 0/3 (every run kept clean files byte-identical, while the instruction allows the parser's normalised output, which the r0 pass produced); protein-assembly and make-doom-for-mips 2/3 (run-to-run variation).",
+      "model": "claude-opus-5-5"
+    },
+    {
+      "name": "r2",
+      "label": "Round 2 on optimus: r1 plus the /tests guard fix and lessons relearned from r1's 135 trials (45 dev tasks x 1 run)",
+      "host": "optimus",
+      "commit": "97fc537",
+      "jobs": [
+        "r2-*"
+      ],
+      "lessons_commit": "98b89c4",
+      "changes": [
+        "/tests guard fix: a redirect such as 2>/dev/null no longer counts as a write to /tests (13 false refusals over r0 and r1, each costing a turn)",
+        "Lessons relearned from r1's 135 trials: 54 added, 255 upvoted, 26 edited; 107 stored, 10 in the prompt (7 new or reworded, 6 dropped or reworded)",
+        "1 run per task; compared task by task with r1"
+      ],
+      "reasoning": "93.3% (42/45), the same as r1's 94.1% within run-to-run noise: only two tasks differ, and both already varied in r1 (make-doom-for-mips 2/3 in r1, passed here; protein-assembly 2/3 in r1, failed here). The guard fix works: 0 false /tests refusals, against 20 in r1's 135 trials. The relearned lessons made runs slightly longer (14.8 turns against 13.0, $0.266 against $0.247 per trial) but faster in wall time (median 74 s against 82 s), with no measurable change in accuracy. filter-js-from-html still fails (0/4 on optimus): the new lessons did not change how it reads the formatting requirement. One run per task cannot separate a change of a point or two from noise.",
+      "model": "claude-opus-5-5"
+    },
+    {
+      "name": "final-heldout",
+      "split": "heldout",
+      "label": "Held-out run: r2's code frozen (97fc537), Claude Opus 5.5, the 44 held-out tasks x 3 runs. First and only use of the held-out split for this code.",
+      "host": "optimus",
+      "commit": "97fc537",
+      "lessons_commit": "98b89c4",
+      "jobs": [
+        "heldout-opus55-*"
+      ],
+      "changes": [
+        "Code frozen at r2 (97fc537): M4 profile, effort high, the /tests guard fix, 10 lessons",
+        "The 44 held-out tasks, never run, read or learned from before",
+        "3 runs per task; reported as single-run and 3-run accuracy",
+        "Learning is off: the learner refuses held-out tasks and no lessons change"
+      ],
+      "reasoning": "95.5% mean per task over 3 runs (126/132 trials; 97.7% without qemu-startup, which this machine cannot run). Single runs: 95.5%, 93.2% and 97.7%. 40 of 44 tasks passed every run and 43 at least once; no timeouts. The held-out score is not lower than the dev rounds (r1 94.1%, r2 93.3%), so the lessons and tuning on dev did not overfit. Not always passed: qemu-startup 0/3 (machine: no nested VM), modernize-scientific-stack, video-processing and extract-moves-from-video 2/3 each. Above every published Terminal-Bench 2.1 result (top: 91.4%, and 87.6% for Opus 5.5 with Terminus 2), with the caveat that those cover all 89 tasks and this covers the 44 held-out ones. Run note: 15 trials first failed to start because Docker ran out of network address pools with 32 trials at once; Harbor's job resume re-ran them, the first time without the API key (resume does not reload --env-file) and then with it. Only the final, complete runs are counted.",
+      "model": "claude-opus-5-5",
+      "final": true
+    },
+    {
+      "name": "r3",
+      "label": "Round 3 on optimus: r2's harness with the rewritten system prompt and apply_patch tool, same lessons (45 dev tasks x 3 runs)",
+      "host": "optimus",
+      "commit": "57f0dc2",
+      "jobs": [
+        "r3-*"
+      ],
+      "lessons_commit": "98b89c4",
+      "changes": [
+        "System prompt written anew: the same rules and finishing conditions as before in new wording, no header comment",
+        "apply_patch tool reimplemented; it is only offered by the OpenAI profile, so these runs do not exercise it",
+        "Lessons, profile (M4), model and effort unchanged from r2",
+        "3 runs per task; compared task by task with r1 (3 runs) and r2 (1 run)"
+      ],
+      "reasoning": "91.9% (124/135 trials; 93.9% without qemu-alpine-ssh), against r1's 94.1% over the same 135-trial design and r2's 93.3% over one run each. No task flipped: the two tasks that fail every run are unchanged (qemu-alpine-ssh is the machine, filter-js-from-html is 0/10 since r0), make-doom-for-mips went from 2/3 to 3/3, and the three trials that separate r3 from r1 are single lost runs on three tasks that were 3/3 before (dna-assembly, polyglot-c-py, raman-fitting), plus protein-assembly at 1/3 after 2/3 and 0/1. Those failed trials ended normally: 11 to 23 turns, no timeouts or loops, two of them after the stop check had rejected an early task_complete. That is the known pattern of ambiguous specs read differently from the checker, not a new failure mode. Cost and shape are the same as r1: $0.243 per trial against $0.247, 13.2 turns against 13.0, median 82 s in both, 92.9% of input tokens from the cache against 91.8%; stop rejections 75 against 59; 0 false /tests refusals as in r2. Reading: the rewritten prompt performs the same as the old one within run-to-run noise; a difference of a point or two either way cannot be excluded with 135 trials.",
+      "model": "claude-opus-5-5"
+    },
+    {
+      "name": "heldout-r3",
+      "split": "heldout",
+      "label": "Held-out check of r3's code (57f0dc2): the rewritten prompt, Claude Opus 5.5, the 44 held-out tasks x 1 run",
+      "host": "optimus",
+      "commit": "57f0dc2",
+      "lessons_commit": "98b89c4",
+      "jobs": [
+        "heldout2-opus55-*"
+      ],
+      "changes": [
+        "Same model, profile, effort and lessons as the first held-out run; only the system prompt and apply_patch differ",
+        "One run per task: a sanity check against the first held-out run's single runs (95.5%, 93.2%, 97.7%), not a new final score",
+        "Learning is off: the learner refuses held-out tasks; the result is not used to change code"
+      ],
+      "reasoning": "40/44 (90.9%; 93.0% without qemu-startup, which this machine cannot run; est. cost $14.08). The first held-out run on the old prompt gave 93.2%, 95.5% and 97.7% in its three single runs, so this run sits one trial below that band: qemu-startup 0/1 (0/3 before), extract-moves-from-video and video-processing 0/1 (both 2/3 before), and dna-insert 0/1 (3/3 before), the only task that was solid before and failed here. On its own this is noise (Fisher p = 0.22 against the 126/132 record). Taken together with dev round r3 (124/135 against r1's 127/135), both measurements of the rewritten prompt point the same way: pooled 164/179 (91.6%) against 253/267 (94.8%) for the old prompt, p = 0.13. Not proof of a regression, but enough to measure further before quoting a held-out number for this prompt. Nothing from this run is used to change the prompt; any prompt work happens on the dev split.",
+      "model": "claude-opus-5-5"
+    },
+    {
+      "name": "g1",
+      "model": "gpt-6-astra",
+      "label": "Round g1 on optimus: GPT-6 Astra, OpenAI M4 profile (apply_patch), same lessons as r3 (45 dev tasks x 1 run)",
+      "host": "optimus",
+      "commit": "57f0dc2",
+      "jobs": [
+        "g1-*"
+      ],
+      "lessons_commit": "98b89c4",
+      "changes": [
+        "First round on a second model family: openai/gpt-6-astra through the Responses API adapter",
+        "Profile bench/profiles/openai-m4.yaml: the OpenAI profile with snapshot, stop check, time budget, loop detector and client-side masking on, apply_patch as the edit tool, effort high",
+        "Same harness build (57f0dc2) and lessons as r3; 1 run per task, the same design as Claude's r2"
+      ],
+      "reasoning": "88.9% (40/45; 90.9% without qemu-alpine-ssh, which this machine cannot run), against Claude Opus 5.5 at 93.3% (r2, the same 1-run design) and 91.9% (r3, 3 runs) on the same tasks, harness build and lessons. GPT-6 Astra failed the two tasks every run fails (qemu-alpine-ssh, filter-js-from-html) and three that Opus passes every time (mailman, make-doom-for-mips, mteb-retrieve); it passed protein-assembly, which Opus is flaky on. All 45 trials ended normally: no timeouts, no loops, 33 stop-check rejections (it tried to finish early in about a third of the tasks). It works differently: 22.6 turns per trial against Opus's 13-15, median 141 s against 74-82 s, and $1.30 per trial (median $0.66; a few long tasks cost $3-7 each) against $0.24-0.27 (est. $58.60 for the round, including the re-run of pytorch-model-cli, whose checker timed out the first time and which then passed). apply_patch, used for the first time by a real model: 34 calls, 0 failures. This is a first round with a profile carried over from the Claude one and never tuned for GPT-6, and one run per task cannot separate a point or two from noise."
+    },
+    {
+      "name": "g2",
+      "model": "gpt-6-astra",
+      "label": "Round g2 on optimus: g1 plus lessons relearned from r3 and g1 (45 dev tasks x 1 run)",
+      "host": "optimus",
+      "commit": "9775813",
+      "jobs": [
+        "g2-*"
+      ],
+      "lessons_commit": "9775813",
+      "changes": [
+        "Lessons relearned from r3's 135 and g1's 45 trials: 44 added, 24 edited, 396 upvoted; 151 stored, 10 in the prompt (4 new or reworded, 2 dropped from the top 10)",
+        "Same profile (bench/profiles/openai-m4.yaml), model and harness code as g1; 1 run per task, compared task by task with g1"
+      ],
+      "reasoning": "88.9% (40/45; 90.9% without qemu-alpine-ssh), the same as g1. Only two tasks changed, in opposite directions: make-doom-for-mips passed (failed in g1), dna-assembly failed (passed in g1, flaky for Opus too). The relearned lessons did not change accuracy but made GPT-6 finish more cleanly: stop-check rejections fell from 31 to 18 (-42%), turns per trial from 22.5 to 21.4, median time from 141 s to 126 s, and cost from $58.60 to $54.12 ($1.20 per trial). apply_patch: 30 calls, 1 failure. Still failing: qemu-alpine-ssh (machine), filter-js-from-html (every model), mailman and mteb-retrieve (pass for Opus every time)."
+    },
+    {
+      "name": "heldout-g2",
+      "split": "heldout",
+      "model": "gpt-6-astra",
+      "label": "Held-out run of g2's code (9775813): GPT-6 Astra, the 44 held-out tasks x 1 run",
+      "host": "optimus",
+      "commit": "9775813",
+      "lessons_commit": "9775813",
+      "jobs": [
+        "heldout-gpt6-*"
+      ],
+      "changes": [
+        "Code, lessons and profile (bench/profiles/openai-m4.yaml) frozen at g2",
+        "One run per task; more runs can be added later as further jobs",
+        "Learning is off: the learner refuses held-out tasks; the result is not used to change code"
+      ],
+      "reasoning": "37/44 (84.1%; 86.0% without qemu-startup, which this machine cannot run; est. cost $51.72). Two of the seven failures were not attempts: on break-filter-js-from-html and vulnerable-secret, OpenAI's API stopped the run with a cyber_policy refusal (content flagged for possible cybersecurity risk; OpenAI offers a separate access programme for authorised security work). Without those two the model solved 37 of 42 (88.1%); without them and qemu-startup, 37 of 41 (90.2%). The other failures: qemu-startup (machine; 0/3 for Opus too), video-processing (2/3 for Opus), and three that Opus solved in all three of its held-out runs: extract-elf, sanitize-git-repo, torch-pipeline-parallelism. One run per task, so about +/-3 points of noise; lower than GPT-6's dev rounds (88.9%), with the refusals accounting for most of the gap. Not comparable to the official leaderboard (89 tasks x 5 runs), and not used to change code."
+    }
+  ]
+}
