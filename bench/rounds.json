@@ -214,6 +214,24 @@
         "Learning is off: the learner refuses held-out tasks; the result is not used to change code"
       ],
       "reasoning": "37/44 (84.1%; 86.0% without qemu-startup, which this machine cannot run; est. cost $51.72). Two of the seven failures were not attempts: on break-filter-js-from-html and vulnerable-secret, OpenAI's API stopped the run with a cyber_policy refusal (content flagged for possible cybersecurity risk; OpenAI offers a separate access programme for authorised security work). Without those two the model solved 37 of 42 (88.1%); without them and qemu-startup, 37 of 41 (90.2%). The other failures: qemu-startup (machine; 0/3 for Opus too), video-processing (2/3 for Opus), and three that Opus solved in all three of its held-out runs: extract-elf, sanitize-git-repo, torch-pipeline-parallelism. One run per task, so about +/-3 points of noise; lower than GPT-6's dev rounds (88.9%), with the refusals accounting for most of the gap. Not comparable to the official leaderboard (89 tasks x 5 runs), and not used to change code."
+    },
+    {
+      "name": "tb21-final",
+      "split": "all",
+      "model": "claude-opus-5-5",
+      "label": "Terminal-Bench 2.1 full run for publication: all 89 tasks x 5 runs, Claude Opus 5.5, effort high, no lessons",
+      "host": "optimus",
+      "commit": "79e4d28",
+      "lessons_commit": null,
+      "jobs": [
+        "tb21-final-opus55-*"
+      ],
+      "changes": [
+        "Leaderboard format: every task, 5 trials each, the tasks' own time limits and resources",
+        "Profile bench/profiles/anthropic-m4-nolessons.yaml: the M4 profile with learned lessons switched off, so the agent sees only the system prompt",
+        "Code frozen at the published commit 79e4d28; results uploaded to Harbor Hub"
+      ],
+      "reasoning": ""
     }
   ]
 }
