@@ -10,6 +10,7 @@ pub mod manifest;
 mod profile;
 pub mod sdk;
 mod skills;
+pub mod v1;
 
 pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
 pub use config::{Config, RepoConfig};

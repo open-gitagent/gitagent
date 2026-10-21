@@ -49,9 +49,9 @@ pub fn model_alias(name: &str) -> &str {
     }
 }
 
-/// A tool list from a `.claude/` agent file, as gitagent tool names:
-/// `.claude/` names are expanded, gitagent names pass through, names with no
-/// equivalent are dropped.
+/// A tool list as gitagent tool names: `.claude/` and 1.x names
+/// (`cli`, `read`, `edit`, …) are expanded, gitagent names pass through,
+/// names with no equivalent are dropped.
 pub fn normalize_tool_list(names: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for name in names {
@@ -59,7 +59,10 @@ pub fn normalize_tool_list(names: &[String]) -> Vec<String> {
         if name.is_empty() {
             continue;
         }
-        let mapped = gitagent_tools_for(name);
+        let mut mapped = gitagent_tools_for(name);
+        if mapped.is_empty() && crate::v1::is_v1_tool(name) {
+            mapped = crate::v1::gitagent_tools_for(name);
+        }
         let expanded: Vec<String> = if mapped.is_empty() {
             if is_gitagent_tool(name) {
                 vec![name.to_string()]
@@ -92,6 +95,7 @@ fn is_gitagent_tool(name: &str) -> bool {
             | "task_complete"
             | "skill"
             | "subagent"
+            | "memory"
     )
 }
 
@@ -190,6 +194,19 @@ mod tests {
         assert_eq!(
             normalize_tool_list(&list("Edit")),
             vec!["str_replace", "apply_patch"]
+        );
+        // 1.x names, mixed with the others; duplicates collapse.
+        assert_eq!(
+            normalize_tool_list(&list("cli, read, edit, capture_photo, memory, Bash")),
+            vec![
+                "exec",
+                "write_stdin",
+                "read_file",
+                "image_read",
+                "str_replace",
+                "apply_patch",
+                "memory"
+            ]
         );
         assert_eq!(sdk_name("exec"), "Bash");
         assert_eq!(sdk_name("task_complete"), "task_complete");

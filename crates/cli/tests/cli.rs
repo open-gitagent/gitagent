@@ -772,3 +772,41 @@ fn bench_prompt_and_tools_match_the_published_run() {
         "the benchmark tool definitions changed"
     );
 }
+
+/// Tool lists accept the 1.x names (`cli`, `read`, …) as well as gitagent's.
+#[test]
+fn allowed_tools_accept_v1_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(
+        &script,
+        "- tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+    )
+    .unwrap();
+    let out = dir.path().join("out");
+    let status = gitagent()
+        .args(["-p", "x", "--model"])
+        .arg(format!("scripted:{}", script.display()))
+        .arg("--dir")
+        .arg(dir.path())
+        .arg("--out-dir")
+        .arg(&out)
+        .args([
+            "--allowed-tools",
+            "cli,read",
+            "--disallowed-tools",
+            "write_stdin",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let t: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(out.join("trajectory.json")).unwrap()).unwrap();
+    let names: Vec<&str> = t["agent"]["tool_definitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["exec", "read_file", "task_complete"]);
+}
