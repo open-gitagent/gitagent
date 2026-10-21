@@ -1,0 +1,19 @@
+Removing trial directory with RuntimeError: modernize-scientific-stack__y24aiQF
+Removing trial directory with RuntimeError: modernize-scientific-stack__xzpaZ6H
+Removing trial directory with RuntimeError: modernize-scientific-stack__eChPrMU
+Removing trial directory with RuntimeError: modernize-scientific-stack__EF8y4Rr
+Removing trial directory with RuntimeError: modernize-scientific-stack__mvovoL9
+  5/5 Mean: 1.000 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 0:01:26 0:00:00
+terminal-bench/terminal-bench-2-1 • gitagent • claude-opus-5-5
+┏━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━━┓
+┃ Trials ┃ Exceptions ┃  Mean ┃ Pass@2 ┃ Pass@4 ┃ Pass@5 ┃
+┡━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━━┩
+│      5 │          0 │ 1.000 │  1.000 │  1.000 │  1.000 │
+└────────┴────────────┴───────┴────────┴────────┴────────┘
+
+┏━━━━━━━━┳━━━━━━━┓
+┃ Reward ┃ Count ┃
+┡━━━━━━━━╇━━━━━━━┩
+│ 1.0    │     5 │
+└────────┴───────┘
+
