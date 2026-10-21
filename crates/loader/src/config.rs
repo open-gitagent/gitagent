@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::Deserialize;
 
 /// `gitagent.yaml` (BLUEPRINT §6).
@@ -21,6 +23,9 @@ pub struct Config {
     pub memory: bool,
     /// Commit each memory save to git.
     pub memory_commit: bool,
+    /// MCP servers to connect (see `mcp.rs`); these replace servers of the
+    /// same name in `agent.yaml` and `.mcp.json`.
+    pub mcp_servers: BTreeMap<String, serde_json::Value>,
     pub repo: RepoConfig,
 }
 
@@ -39,6 +44,7 @@ impl Default for Config {
             learning: "off".into(),
             memory: false,
             memory_commit: true,
+            mcp_servers: BTreeMap::new(),
             repo: RepoConfig::default(),
         }
     }

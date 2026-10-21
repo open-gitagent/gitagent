@@ -745,6 +745,11 @@ fn bench_prompt_and_tools_match_the_published_run() {
         "name: leak\ndescription: Should never be offered.\nimplementation: {script: leak.sh}\n",
     )
     .unwrap();
+    std::fs::write(
+        work.join(".mcp.json"),
+        r#"{"mcpServers": {"leak": {"command": "/nonexistent/should-never-start"}}}"#,
+    )
+    .unwrap();
     std::fs::create_dir_all(work.join("hooks")).unwrap();
     std::fs::write(
         work.join("hooks/stop.sh"),
@@ -1037,4 +1042,72 @@ fn agent_hooks_follow_the_session() {
         "{stderr}"
     );
     assert!(stderr.contains("hook_blocked: closed today"), "{stderr}");
+}
+
+/// MCP servers from `agent.yaml` are connected for the session and their
+/// tools are offered as `<server>__<tool>`; one that cannot start is left
+/// out with a warning.
+#[test]
+fn mcp_server_tools_are_offered_and_called() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    std::fs::write(
+        dir.path().join("server.sh"),
+        r#"while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"t"}}}\n' "$id" ;;
+    *'"method":"tools/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"shout","description":"Shouts.","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}}}]}}\n' "$id" ;;
+    *'"method":"tools/call"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"HELLO FROM %s"}]}}\n' "$id" "$GREETING_SOURCE" ;;
+  esac
+done
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        format!(
+            "spec_version: \"0.1.0\"\nname: lyra\nversion: 1.0.0\ndescription: A test agent.\nmcp_servers:\n  loud:\n    command: sh\n    args: [\"{}\"]\n    env: {{GREETING_SOURCE: mcp}}\n  broken:\n    command: /nonexistent/server\n",
+            dir.path().join("server.sh").display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(
+        &script,
+        "- tool_calls: [{name: loud__shout, arguments: {text: hello}}]\n\
+         - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+    )
+    .unwrap();
+    let out_dir = dir.path().join("out");
+    let out = gitagent()
+        .args(["-p", "x", "--model"])
+        .arg(format!("scripted:{}", script.display()))
+        .arg("--dir")
+        .arg(&agent)
+        .arg("--out-dir")
+        .arg(&out_dir)
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("MCP server \"broken\" (stdio): cannot start /nonexistent/server"),
+        "{stderr}"
+    );
+    let t: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(out_dir.join("trajectory.json")).unwrap()).unwrap();
+    let names: Vec<&str> = t["agent"]["tool_definitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.last(), Some(&"loud__shout"));
+    let prompt = t["steps"][0]["message"].as_str().unwrap();
+    assert!(prompt.contains("# MCP servers\n"), "{prompt}");
+    assert!(t.to_string().contains("HELLO FROM mcp"));
 }

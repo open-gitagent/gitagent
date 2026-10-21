@@ -12,6 +12,7 @@ workspace = true
 anyhow.workspace = true
 gitagent-context.workspace = true
 gitagent-loader.workspace = true
+gitagent-mcp.workspace = true
 gitagent-provider.workspace = true
 gitagent-record.workspace = true
 gitagent-shaper.workspace = true

@@ -23,6 +23,7 @@ gitagent-guards = { path = "crates/guards" }
 gitagent-hooks = { path = "crates/hooks" }
 gitagent-learn = { path = "crates/learn" }
 gitagent-loader = { path = "crates/loader" }
+gitagent-mcp = { path = "crates/mcp" }
 gitagent-provider = { path = "crates/provider" }
 gitagent-record = { path = "crates/record" }
 gitagent-repo = { path = "crates/repo" }

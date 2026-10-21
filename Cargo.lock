@@ -432,6 +432,7 @@ dependencies = [
  "gitagent-core",
  "gitagent-learn",
  "gitagent-loader",
+ "gitagent-mcp",
  "gitagent-provider",
  "gitagent-record",
  "gitagent-repo",
@@ -461,6 +462,7 @@ dependencies = [
  "gitagent-guards",
  "gitagent-hooks",
  "gitagent-loader",
+ "gitagent-mcp",
  "gitagent-provider",
  "gitagent-record",
  "gitagent-shaper",
@@ -515,6 +517,18 @@ dependencies = [
  "serde-saphyr",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "gitagent-mcp"
+version = "0.1.0"
+dependencies = [
+ "gitagent-loader",
+ "gitagent-provider",
+ "reqwest",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -603,6 +617,7 @@ dependencies = [
  "anyhow",
  "gitagent-context",
  "gitagent-loader",
+ "gitagent-mcp",
  "gitagent-provider",
  "gitagent-record",
  "gitagent-shaper",

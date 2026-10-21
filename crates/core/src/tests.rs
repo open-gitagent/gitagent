@@ -54,6 +54,7 @@ async fn run_script_for(spec: &AgentSpec, instruction: &str, script: &str, secs:
             tool_allowlist: None,
             tool_denylist: Vec::new(),
             hook_callbacks: None,
+            mcp: None,
         },
     )
     .await
@@ -94,6 +95,7 @@ async fn a_tool_denylist_removes_tools_but_never_task_complete() {
             ]),
             tool_denylist: vec!["exec".into(), "task_complete".into()],
             hook_callbacks: None,
+            mcp: None,
         },
     )
     .await
@@ -975,6 +977,7 @@ async fn events_describe_the_run_as_json_lines() {
             tool_allowlist: None,
             tool_denylist: Vec::new(),
             hook_callbacks: None,
+            mcp: None,
         },
     )
     .await
@@ -1031,6 +1034,7 @@ async fn a_follow_up_task_continues_the_conversation_and_shell() {
         tool_allowlist: None,
         tool_denylist: Vec::new(),
         hook_callbacks: None,
+        mcp: None,
     };
     let first = run(&spec(), &provider, opts("First task.", "t1", None))
         .await

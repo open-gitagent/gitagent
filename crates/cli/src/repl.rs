@@ -19,6 +19,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
     let mut resume: Option<Resume> = None;
     let mut n = 0;
     let session_id = format!("gitagent-{}", std::process::id());
+    let mcp = crate::connect_mcp(&s.spec).await;
     loop {
         eprint!("> ");
         let _ = std::io::stderr().flush();
@@ -46,6 +47,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             tool_allowlist: None,
             tool_denylist: Vec::new(),
             hook_callbacks: None,
+            mcp: mcp.clone(),
         };
         tokio::select! {
             result = gitagent_core::run(&s.spec, s.provider.as_ref(), opts) => match result {

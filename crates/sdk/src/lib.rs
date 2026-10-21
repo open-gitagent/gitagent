@@ -110,6 +110,9 @@ pub struct AgentOptions {
     pub config_path: Option<PathBuf>,
     pub out_dir: Option<PathBuf>,
     pub prices: Option<Prices>,
+    /// MCP servers by name, with the settings of `mcp_servers` in
+    /// gitagent.yaml; they replace configured servers of the same name.
+    pub mcp_servers: BTreeMap<String, Value>,
 }
 
 // ---------------------------------------------------------------- hooks
@@ -854,6 +857,13 @@ pub fn prepare(options: &AgentOptions) -> Result<Prepared> {
     if let Some(n) = options.max_turns {
         spec.config.max_turns = n;
     }
+    for (name, v) in &options.mcp_servers {
+        let server = gitagent_loader::mcp::parse(name, v, &work_dir)
+            .map_err(|e| anyhow::anyhow!("MCP server {name:?}: {e}"))?;
+        spec.mcp_servers.retain(|s| s.name != *name);
+        spec.mcp_servers.push(server);
+    }
+    spec.mcp_servers.sort_by(|a, b| a.name.cmp(&b.name));
     if !options.agents.is_empty() {
         spec.profile.tools.subagents = true;
         for (name, def) in &options.agents {
@@ -918,11 +928,19 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
         u64::from(p.spec.profile.context_window),
         options.prices,
     )));
-    let tool_names: Vec<String> =
-        gitagent_core::offered_tools(&p.spec, p.tool_allowlist.as_deref(), &p.tool_denylist)
-            .into_iter()
-            .map(|t| t.name)
-            .collect();
+    let (mcp, warnings) = gitagent_core::connect_mcp(&p.spec).await;
+    for w in warnings {
+        eprintln!("gitagent: warning: {w}");
+    }
+    let tool_names: Vec<String> = gitagent_core::offered_tools(
+        &p.spec,
+        mcp.as_deref(),
+        p.tool_allowlist.as_deref(),
+        &p.tool_denylist,
+    )
+    .into_iter()
+    .map(|t| t.name)
+    .collect();
     let init = converter.lock().unwrap().init(
         &p.work_dir,
         &tool_names,
@@ -960,6 +978,7 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
         tool_allowlist: p.tool_allowlist.clone(),
         tool_denylist: p.tool_denylist.clone(),
         hook_callbacks: p.hook_callbacks.clone(),
+        mcp,
     };
     let spec = p.spec;
     let (work_dir, session_id) = (p.work_dir.clone(), p.session_id.clone());

@@ -288,6 +288,8 @@ pub struct ToolContext<'a> {
     pub memory: Option<&'a MemoryCfg>,
     /// Tools the agent declares in `tools/*.yaml`.
     pub declared: &'a [DeclaredTool],
+    /// Connected MCP servers.
+    pub mcp: Option<&'a gitagent_mcp::Servers>,
     pub default_yield_ms: u64,
     /// Time left in the run, used to cap waits.
     pub remaining: Option<Duration>,
@@ -296,6 +298,26 @@ pub struct ToolContext<'a> {
     /// The model sees `.claude/` tool names (`tool_naming: sdk`): error messages
     /// name tools and arguments the way the model knows them.
     pub sdk_names: bool,
+}
+
+/// Longest wait for an MCP tool call.
+const MCP_CALL_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// An MCP tool's result as a tool output.
+fn mcp_output(out: gitagent_mcp::CallOutput) -> ToolOutput {
+    let text = if out.text.is_empty() {
+        "(no output)".to_string()
+    } else {
+        declared::cap(&out.text)
+    };
+    ToolOutput {
+        images: out.images,
+        ..if out.is_error {
+            ToolOutput::error(text)
+        } else {
+            ToolOutput::ok(text)
+        }
+    }
 }
 
 /// Where tests are placed for grading; nothing may write there.
@@ -337,6 +359,17 @@ pub async fn dispatch(call: &ToolCall, ctx: &mut ToolContext<'_>) -> ToolOutput 
             let tool = ctx.declared.iter().find(|t| t.name == name);
             declared::run(call, tool.expect("checked above"), ctx.remaining).await
         }
+        name if ctx.mcp.is_some_and(|m| m.has(name)) => {
+            ctx.counters.inc_labelled("mcp_tool_calls", name);
+            let servers = ctx.mcp.expect("checked above");
+            let timeout = ctx
+                .remaining
+                .map_or(MCP_CALL_TIMEOUT, |r| r.min(MCP_CALL_TIMEOUT));
+            Ok(match servers.call(name, &call.arguments, timeout).await {
+                Ok(out) => mcp_output(out),
+                Err(why) => ToolOutput::error(format!("Error: {}", declared::cap(&why))),
+            })
+        }
         other => {
             ctx.counters.inc("malformed_calls");
             let mut offered = specs(ctx.tools, ctx.edit_tool);
@@ -345,6 +378,7 @@ pub async fn dispatch(call: &ToolCall, ctx: &mut ToolContext<'_>) -> ToolOutput 
             }
             let mut names: Vec<String> = offered.into_iter().map(|t| t.name).collect();
             names.extend(ctx.declared.iter().map(|t| t.name.clone()));
+            names.extend(ctx.mcp.into_iter().flat_map(|m| m.specs()).map(|t| t.name));
             Ok(ToolOutput::error(format!(
                 "Unknown tool `{other}`. Available tools: {}.",
                 names.join(", ")

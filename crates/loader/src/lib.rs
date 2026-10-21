@@ -9,6 +9,7 @@ mod agents;
 mod config;
 pub mod declared;
 pub mod manifest;
+pub mod mcp;
 pub mod memory;
 mod profile;
 pub mod sdk;
@@ -20,6 +21,7 @@ pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
 pub use config::{Config, RepoConfig};
 pub use declared::DeclaredTool;
 pub use manifest::AgentDir;
+pub use mcp::McpServerCfg;
 pub use memory::MemoryCfg;
 pub use profile::{
     AnthropicCfg, CacheCfg, ContextCfg, EditTool, Effort, GuardsCfg, Masking, OpenAiCfg, Profile,
@@ -173,6 +175,11 @@ pub struct AgentSpec {
     pub declared_tools: Vec<DeclaredTool>,
     /// The agent's `hooks/hooks.yaml`. Never set in benchmark runs.
     pub agent_hooks: Vec<HookEntry>,
+    /// MCP servers to connect. Never set in benchmark runs.
+    pub mcp_servers: Vec<McpServerCfg>,
+    /// Problems found while loading that did not stop it (besides the
+    /// agent directory's own, in `agent.warnings`).
+    pub warnings: Vec<String>,
 }
 
 impl AgentSpec {
@@ -352,6 +359,37 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         system_prompt.push('\n');
         system_prompt.push_str(&skills::index(&skills));
     }
+    // MCP servers: `.mcp.json`, then agent.yaml, then gitagent.yaml.
+    let mut warnings = Vec::new();
+    let mcp_servers = match &opts.project_dir {
+        Some(project) if outside_bench => {
+            let mcp_json = mcp::read_mcp_json(&project.join(".mcp.json")).unwrap_or_else(|e| {
+                warnings.push(format!(".mcp.json: {e}"));
+                Default::default()
+            });
+            let none = Default::default();
+            let from_agent = agent.as_ref().map_or(&none, |a| &a.manifest.mcp_servers);
+            let base = agent
+                .as_ref()
+                .map_or(project.as_path(), |a| a.root.as_path());
+            let (servers, problems) = mcp::servers(
+                &[
+                    (".mcp.json", &mcp_json),
+                    ("agent.yaml", from_agent),
+                    ("gitagent.yaml", &config.mcp_servers),
+                ],
+                base,
+            );
+            warnings.extend(problems);
+            servers
+        }
+        _ => Vec::new(),
+    };
+    let section = mcp::prompt_section(&mcp_servers);
+    if !section.is_empty() {
+        system_prompt.push('\n');
+        system_prompt.push_str(&section);
+    }
     let memory = match &opts.project_dir {
         Some(project) if agent.is_some() || config.memory => {
             Some(MemoryCfg::for_project(project, config.memory_commit)?)
@@ -386,6 +424,8 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         memory,
         declared_tools,
         agent_hooks,
+        mcp_servers,
+        warnings,
     })
 }
 

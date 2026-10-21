@@ -48,7 +48,16 @@ pub(crate) async fn run(
             method,
             headers,
         } => run_http(url, method, headers, &call.arguments, timeout).await,
-        Runner::Mcp { .. } => Err("its MCP server is not connected".to_string()),
+        Runner::Mcp { url } => {
+            return Ok(
+                match gitagent_mcp::call_once(url, &tool.name, &call.arguments, timeout).await {
+                    Ok(out) => crate::mcp_output(out),
+                    Err(why) => {
+                        ToolOutput::error(format!("Tool {} failed: {}", tool.name, cap(&why)))
+                    }
+                },
+            )
+        }
     };
     Ok(match out {
         Ok(text) => read_result(&text),
@@ -212,7 +221,7 @@ fn secs(d: Duration) -> String {
     }
 }
 
-fn cap(text: &str) -> String {
+pub(crate) fn cap(text: &str) -> String {
     let n = text.chars().count();
     if n <= MAX_CHARS {
         return text.to_string();

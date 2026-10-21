@@ -74,6 +74,7 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
         .session_id
         .clone()
         .unwrap_or_else(|| format!("gitagent-{}", std::process::id()));
+    let mcp = crate::connect_mcp(&s.spec).await;
     let finished = gitagent_core::run(
         &s.spec,
         s.provider.as_ref(),
@@ -89,6 +90,7 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
             tool_allowlist: None,
             tool_denylist: Vec::new(),
             hook_callbacks: None,
+            mcp,
         },
     )
     .await?;

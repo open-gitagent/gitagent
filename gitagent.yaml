@@ -8,6 +8,9 @@ sandbox: auto                      # auto | on | off; auto = on outside --bench 
 skills: true
 hooks: true
 learning: off                      # off | online: learn lessons into .gitagent/ after each finished task (never in --bench)
+memory: false                      # memory/ and the memory tool (always on with an agent.yaml; never in --bench)
+memory_commit: true                # commit each memory save to git
+mcp_servers: {}                    # name: {command, args, env} or {url, headers}; added to agent.yaml's and .mcp.json's
 repo:
   branch_prefix: gitagent/
   commit_every_turns: 0

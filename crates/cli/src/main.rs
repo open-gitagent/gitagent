@@ -233,10 +233,9 @@ pub(crate) fn setup(cli: &Cli) -> Result<Setup> {
         );
     }
     let mut spec = spec;
-    if let Some(agent) = &spec.agent {
-        for w in &agent.warnings {
-            eprintln!("gitagent: warning: {w}");
-        }
+    let agent_warnings = spec.agent.iter().flat_map(|a| a.warnings.iter());
+    for w in agent_warnings.chain(spec.warnings.iter()) {
+        eprintln!("gitagent: warning: {w}");
     }
     if let Some(n) = cli.max_turns {
         spec.config.max_turns = n;
@@ -286,6 +285,7 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
         let tool_allowlist = (!cli.allowed_tools.is_empty())
             .then(|| gitagent_loader::sdk::normalize_tool_list(&cli.allowed_tools));
         let tool_denylist = gitagent_loader::sdk::normalize_tool_list(&cli.disallowed_tools);
+        let mcp = connect_mcp(&s.spec).await;
         // Stream output: gitagent's events are converted as they happen.
         let converter = stream_json.then(|| {
             std::sync::Arc::new(std::sync::Mutex::new(gitagent_sdk::Converter::new(
@@ -301,6 +301,7 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
                     &s.work_dir,
                     &gitagent_core::offered_tools(
                         &s.spec,
+                        mcp.as_deref(),
                         tool_allowlist.as_deref(),
                         &tool_denylist,
                     )
@@ -345,6 +346,7 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
                 tool_allowlist,
                 tool_denylist,
                 hook_callbacks: None,
+                mcp: mcp.clone(),
             },
         )
         .await?;
@@ -388,6 +390,16 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
         f.terminal.linger().await;
     }
     ExitCode::from(code)
+}
+
+/// Connects the MCP servers for a session (none in benchmark runs, whose
+/// spec has none), printing what could not be connected.
+pub(crate) async fn connect_mcp(spec: &AgentSpec) -> Option<std::sync::Arc<gitagent_mcp::Servers>> {
+    let (servers, warnings) = gitagent_core::connect_mcp(spec).await;
+    for w in warnings {
+        eprintln!("gitagent: warning: {w}");
+    }
+    servers
 }
 
 /// Sends traces and metrics when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. A

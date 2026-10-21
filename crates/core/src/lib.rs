@@ -72,6 +72,9 @@ pub struct RunOptions {
     pub tool_denylist: Vec<String>,
     /// Hooks given in code, asked after the file hooks.
     pub hook_callbacks: Option<std::sync::Arc<dyn gitagent_hooks::ToolHooks>>,
+    /// Connected MCP servers, whose tools are offered after the others. The
+    /// caller connects them once for a whole session.
+    pub mcp: Option<std::sync::Arc<gitagent_mcp::Servers>>,
 }
 
 /// What a follow-up task continues from.
@@ -150,7 +153,12 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     let counters_path = opts.out_dir.join("counters.json");
     let mut counters = Counters::new();
 
-    let mut tools = offered_tools(spec, opts.tool_allowlist.as_deref(), &opts.tool_denylist);
+    let mut tools = offered_tools(
+        spec,
+        opts.mcp.as_deref(),
+        opts.tool_allowlist.as_deref(),
+        &opts.tool_denylist,
+    );
     let sdk_names = spec.profile.tool_naming == gitagent_loader::ToolNaming::Sdk;
     if sdk_names {
         tools = gitagent_tools::naming::sdk_specs(tools);
@@ -552,6 +560,7 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                             remaining: remaining(),
                             sandbox: opts.sandbox.clone(),
                             hooks: opts.hook_callbacks.clone(),
+                            mcp: opts.mcp.clone(),
                         },
                     ));
                 }
@@ -632,6 +641,7 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                                 skills: &spec.skills,
                                 memory: spec.memory.as_ref(),
                                 declared: &spec.declared_tools,
+                                mcp: opts.mcp.as_deref(),
                                 default_yield_ms: spec.profile.exec_default_yield_ms,
                                 remaining: remaining(),
                                 minutes_left: time_budget
@@ -939,11 +949,12 @@ fn first_user_message(instruction: &str, snapshot: Option<&str>) -> String {
 /// definition's tools and turn limit. Returns what the parent sees.
 #[allow(clippy::too_many_arguments)]
 /// The tools a run offers, in order, under gitagent's names: the profile's
-/// tools, then `skill`, `subagent`, `memory` and the agent's declared tools
-/// when there are any, after the allow and deny lists (`task_complete`
-/// always stays).
+/// tools, then `skill`, `subagent`, `memory`, the agent's declared tools and
+/// the MCP servers' tools when there are any, after the allow and deny lists
+/// (`task_complete` always stays).
 pub fn offered_tools(
     spec: &AgentSpec,
+    mcp: Option<&gitagent_mcp::Servers>,
     allow: Option<&[String]>,
     deny: &[String],
 ) -> Vec<gitagent_provider::ToolSpec> {
@@ -962,11 +973,28 @@ pub fn offered_tools(
             .iter()
             .map(gitagent_tools::declared_spec),
     );
+    tools.extend(mcp.into_iter().flat_map(|m| m.specs()));
     if let Some(allow) = allow {
         tools.retain(|t| allow.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
     }
     tools.retain(|t| !deny.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
     tools
+}
+
+/// Connects the spec's MCP servers for a session; `None` when it has none.
+/// Servers that cannot be used come back as warnings.
+pub async fn connect_mcp(
+    spec: &AgentSpec,
+) -> (Option<std::sync::Arc<gitagent_mcp::Servers>>, Vec<String>) {
+    if spec.mcp_servers.is_empty() {
+        return (None, Vec::new());
+    }
+    let taken: Vec<String> = offered_tools(spec, None, None, &[])
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    let (servers, warnings) = gitagent_mcp::Servers::connect(&spec.mcp_servers, &taken).await;
+    (Some(std::sync::Arc::new(servers)), warnings)
 }
 
 /// Runs the agent's `on_session_end` hooks. Call it once when a session
@@ -1138,6 +1166,7 @@ struct ChildRun {
     remaining: Option<Duration>,
     sandbox: Option<Vec<PathBuf>>,
     hooks: Option<std::sync::Arc<dyn gitagent_hooks::ToolHooks>>,
+    mcp: Option<std::sync::Arc<gitagent_mcp::Servers>>,
 }
 
 /// What one sub-agent run came to.
@@ -1177,6 +1206,7 @@ fn run_subagent<'a>(
             remaining,
             sandbox,
             hooks: opts_hooks,
+            mcp,
         } = child_run;
         let arg = |k: &str| call.arguments.get(k).and_then(Value::as_str);
         let name = arg("agent").unwrap_or(gitagent_loader::GENERAL_AGENT);
@@ -1279,6 +1309,7 @@ fn run_subagent<'a>(
             tool_allowlist: def.tools.clone(),
             tool_denylist: def.disallowed_tools.clone(),
             hook_callbacks: opts_hooks,
+            mcp,
         };
         let nested: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Finished>> + Send + '_>,
