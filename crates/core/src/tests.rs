@@ -55,6 +55,8 @@ async fn run_script_for(spec: &AgentSpec, instruction: &str, script: &str, secs:
             tool_denylist: Vec::new(),
             hook_callbacks: None,
             mcp: None,
+            approver: None,
+            kill: None,
         },
     )
     .await
@@ -96,6 +98,8 @@ async fn a_tool_denylist_removes_tools_but_never_task_complete() {
             tool_denylist: vec!["exec".into(), "task_complete".into()],
             hook_callbacks: None,
             mcp: None,
+            approver: None,
+            kill: None,
         },
     )
     .await
@@ -978,6 +982,8 @@ async fn events_describe_the_run_as_json_lines() {
             tool_denylist: Vec::new(),
             hook_callbacks: None,
             mcp: None,
+            approver: None,
+            kill: None,
         },
     )
     .await
@@ -1035,6 +1041,8 @@ async fn a_follow_up_task_continues_the_conversation_and_shell() {
         tool_denylist: Vec::new(),
         hook_callbacks: None,
         mcp: None,
+        approver: None,
+        kill: None,
     };
     let first = run(&spec(), &provider, opts("First task.", "t1", None))
         .await
@@ -1201,4 +1209,226 @@ async fn subagents_run_with_a_fresh_context_and_return_only_a_summary() {
     assert_eq!(c["subagent_turns"], 2);
     // The parent cannot start nested sub-agents through the child.
     assert!(reqs[0].tools.iter().any(|t| t.name == "subagent"));
+}
+
+/// Approves calls whose arguments mention "approved", records every
+/// request, and can trip a kill switch when asked.
+struct TestApprover {
+    seen: std::sync::Mutex<Vec<ApprovalRequest>>,
+    kill: Option<KillSwitch>,
+}
+
+#[async_trait::async_trait]
+impl Approver for TestApprover {
+    async fn approve(&self, request: &ApprovalRequest) -> Approval {
+        self.seen.lock().unwrap().push(request.clone());
+        if let Some(k) = &self.kill {
+            k.trip();
+            return Approval::denied("stopping");
+        }
+        if Value::Object(request.arguments.clone())
+            .to_string()
+            .contains("approved")
+        {
+            Approval {
+                approved: true,
+                reason: None,
+            }
+        } else {
+            Approval::denied("not this one")
+        }
+    }
+}
+
+async fn run_supervised(
+    spec: &AgentSpec,
+    script: &str,
+    approver: Option<std::sync::Arc<TestApprover>>,
+    kill: Option<KillSwitch>,
+) -> Run {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("work")).unwrap();
+    let provider = ScriptedProvider::from_yaml(script).unwrap();
+    let report = run(
+        spec,
+        &provider,
+        RunOptions {
+            instruction: "x".into(),
+            work_dir: dir.path().join("work"),
+            out_dir: dir.path().join("out"),
+            timeout: Some(Duration::from_secs(60)),
+            session_id: None,
+            events: gitagent_record::Events::disabled(),
+            resume: None,
+            sandbox: None,
+            tool_allowlist: None,
+            tool_denylist: Vec::new(),
+            hook_callbacks: None,
+            mcp: None,
+            approver: approver.map(|a| a as std::sync::Arc<dyn Approver>),
+            kill,
+        },
+    )
+    .await
+    .unwrap()
+    .report;
+    Run {
+        dir,
+        report,
+        provider,
+    }
+}
+
+fn test_approver(kill: Option<KillSwitch>) -> std::sync::Arc<TestApprover> {
+    std::sync::Arc::new(TestApprover {
+        seen: Default::default(),
+        kill,
+    })
+}
+
+#[tokio::test]
+async fn always_supervision_asks_before_calls_that_change_something() {
+    let mut spec = spec();
+    spec.supervision.hitl = gitagent_loader::compliance::Hitl::Always;
+    let script = "- tool_calls: [{name: exec, arguments: {cmd: \"echo approved > a.txt\"}}]\n\
+                  - tool_calls: [{name: exec, arguments: {cmd: \"rm -rf a.txt\"}}]\n\
+                  - tool_calls: [{name: read_file, arguments: {path: a.txt}}]\n\
+                  - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n";
+    let approver = test_approver(None);
+    let r = run_supervised(&spec, script, Some(approver.clone()), None).await;
+    assert_eq!(r.report.outcome, Outcome::Completed);
+    let seen = approver.seen.lock().unwrap().clone();
+    let asked: Vec<&str> = seen.iter().map(|q| q.tool_name.as_str()).collect();
+    assert_eq!(asked, vec!["exec", "exec"]);
+    assert!(seen[0].reason.contains("human_in_the_loop: always"));
+    assert!(r.dir.path().join("work/a.txt").exists());
+    let c = r.counters();
+    assert_eq!(
+        (
+            c["approvals_granted"].as_u64(),
+            c["approvals_denied"].as_u64()
+        ),
+        (Some(1), Some(1))
+    );
+    let t = r.trajectory().to_string();
+    assert!(t.contains("was denied: not this one"), "{t}");
+
+    // Nobody to ask: denied.
+    let r = run_supervised(&spec, script, None, None).await;
+    assert!(r
+        .trajectory()
+        .to_string()
+        .contains("denied: no one is available to approve it"));
+    assert!(!r.dir.path().join("work/a.txt").exists());
+}
+
+#[tokio::test]
+async fn conditional_supervision_asks_when_a_trigger_fires() {
+    use gitagent_loader::compliance::{Hitl, Trigger};
+    let mut spec = spec();
+    spec.supervision.hitl = Hitl::Conditional;
+    spec.supervision.triggers = vec![Trigger::ErrorDetected];
+    let script = "- tool_calls: [{name: write_file, arguments: {path: a.txt, content: x}}]\n\
+                  - tool_calls: [{name: read_file, arguments: {path: missing.txt}}]\n\
+                  - tool_calls: [{name: write_file, arguments: {path: b.txt, content: approved}}]\n\
+                  - tool_calls: [{name: write_file, arguments: {path: c.txt, content: x}}]\n\
+                  - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n";
+    let approver = test_approver(None);
+    let r = run_supervised(&spec, script, Some(approver.clone()), None).await;
+    assert_eq!(r.report.outcome, Outcome::Completed);
+    let seen = approver.seen.lock().unwrap().clone();
+    // Only the write right after the failed read; the approval clears it.
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].arguments["path"], "b.txt");
+    assert!(seen[0].reason.contains("error_detected"));
+    for f in ["a.txt", "b.txt", "c.txt"] {
+        assert!(r.dir.path().join("work").join(f).exists(), "{f}");
+    }
+
+    spec.supervision.triggers = vec![Trigger::ActionType(vec!["read_file".into()])];
+    let approver = test_approver(None);
+    run_supervised(&spec, script, Some(approver.clone()), None).await;
+    let seen = approver.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].tool_name, "read_file");
+}
+
+#[tokio::test]
+async fn the_kill_switch_stops_the_run_between_steps() {
+    let mut spec = spec();
+    spec.supervision.hitl = gitagent_loader::compliance::Hitl::Always;
+    // Tripped while the first of two calls waits for approval: the second
+    // is not run and no further model call is made.
+    let kill = KillSwitch::default();
+    let script = "- tool_calls: [{name: exec, arguments: {cmd: \"echo 1 > one\"}}, {name: exec, arguments: {cmd: \"echo 2 > two\"}}]\n\
+                  - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n";
+    let r = run_supervised(
+        &spec,
+        script,
+        Some(test_approver(Some(kill.clone()))),
+        Some(kill.clone()),
+    )
+    .await;
+    assert_eq!(
+        r.report.outcome,
+        Outcome::Killed("the kill switch was used".into())
+    );
+    assert_eq!(r.provider.requests().len(), 1);
+    assert!(!r.dir.path().join("work/two").exists());
+    assert!(r
+        .trajectory()
+        .to_string()
+        .contains("Not run: the agent was halted"));
+
+    // Already tripped: no model call at all.
+    let r = run_supervised(&spec, script, None, Some(kill)).await;
+    assert!(matches!(r.report.outcome, Outcome::Killed(_)));
+    assert!(r.provider.requests().is_empty());
+}
+
+#[tokio::test]
+async fn reviewed_responses_wait_for_approval() {
+    let mut spec = spec();
+    spec.supervision.review_responses = true;
+    let script = "- tool_calls: [{name: task_complete, arguments: {summary: first}}]\n\
+                  - tool_calls: [{name: task_complete, arguments: {summary: approved answer}}]\n";
+    let approver = test_approver(None);
+    let r = run_supervised(&spec, script, Some(approver.clone()), None).await;
+    assert_eq!(r.report.outcome, Outcome::Completed);
+    assert_eq!(r.report.summary.as_deref(), Some("approved answer"));
+    assert_eq!(approver.seen.lock().unwrap().len(), 2);
+    assert!(r
+        .trajectory()
+        .to_string()
+        .contains("Your final response was not approved: not this one"));
+}
+
+#[tokio::test]
+async fn declared_tools_marked_for_confirmation_always_ask() {
+    let tools_dir = tempfile::tempdir().unwrap();
+    let script_path = tools_dir.path().join("t.sh");
+    std::fs::write(&script_path, "cat >/dev/null; echo ran\n").unwrap();
+    let mut spec = spec();
+    spec.declared_tools.push(gitagent_loader::DeclaredTool {
+        name: "pay".into(),
+        description: "Pays.".into(),
+        input_schema: json!({"type": "object", "properties": {"note": {"type": "string"}}}),
+        runner: gitagent_loader::declared::Runner::Script {
+            command: vec!["sh".into(), script_path.display().to_string()],
+            dir: tools_dir.path().to_path_buf(),
+        },
+        timeout: Duration::from_secs(10),
+        requires_confirmation: true,
+        read_only: true,
+    });
+    let script = "- tool_calls: [{name: pay, arguments: {note: nope}}]\n\
+                  - tool_calls: [{name: pay, arguments: {note: approved}}]\n\
+                  - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n";
+    let approver = test_approver(None);
+    let r = run_supervised(&spec, script, Some(approver.clone()), None).await;
+    let seen = approver.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[0].reason, "pay asks for confirmation before each call");
+    let t = r.trajectory().to_string();
+    assert_eq!(t.matches("\"content\":\"ran\"").count(), 1, "{t}");
 }

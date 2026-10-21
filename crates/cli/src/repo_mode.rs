@@ -91,6 +91,8 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
             tool_denylist: Vec::new(),
             hook_callbacks: None,
             mcp,
+            approver: Some(crate::approver()),
+            kill: None,
         },
     )
     .await?;

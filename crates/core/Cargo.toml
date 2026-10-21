@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 gitagent-context.workspace = true
 gitagent-guards.workspace = true
 gitagent-hooks.workspace = true

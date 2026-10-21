@@ -428,6 +428,7 @@ name = "gitagent-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "clap",
  "gitagent-core",
  "gitagent-learn",
@@ -458,6 +459,7 @@ name = "gitagent-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "gitagent-context",
  "gitagent-guards",
  "gitagent-hooks",

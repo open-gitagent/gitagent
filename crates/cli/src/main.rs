@@ -1,3 +1,4 @@
+mod approval;
 mod learn_cmd;
 mod otel;
 mod repl;
@@ -347,6 +348,8 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
                 tool_denylist,
                 hook_callbacks: None,
                 mcp: mcp.clone(),
+                approver: (!cli.bench).then(approver),
+                kill: None,
             },
         )
         .await?;
@@ -366,10 +369,10 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
         // Running out of turns or time is a normal end of a run; only a
         // provider failure gets its own exit code so harnesses can tell it apart.
         Ok(f) => (
-            if matches!(f.report.outcome, Outcome::ProviderFailed(_)) {
-                3
-            } else {
-                0
+            match f.report.outcome {
+                Outcome::ProviderFailed(_) => 3,
+                Outcome::Killed(_) => 130,
+                _ => 0,
             },
             Some(f),
         ),
@@ -390,6 +393,11 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
         f.terminal.linger().await;
     }
     ExitCode::from(code)
+}
+
+/// Asks the person at the terminal when a call needs approval.
+pub(crate) fn approver() -> std::sync::Arc<dyn gitagent_core::Approver> {
+    std::sync::Arc::new(approval::TtyApprover)
 }
 
 /// Connects the MCP servers for a session (none in benchmark runs, whose

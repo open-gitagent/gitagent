@@ -1,8 +1,11 @@
 //! The controller loop: model call → tool dispatch → record, until the agent
 //! completes the task or a limit is hit.
 
+mod approval;
 mod fallback;
 mod snapshot;
+
+pub use approval::{Approval, ApprovalRequest, Approver, KillSwitch};
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -75,6 +78,12 @@ pub struct RunOptions {
     /// Connected MCP servers, whose tools are offered after the others. The
     /// caller connects them once for a whole session.
     pub mcp: Option<std::sync::Arc<gitagent_mcp::Servers>>,
+    /// Asked when a call or the final response needs a person's approval
+    /// (the agent's `compliance` section); without one such requests are
+    /// denied.
+    pub approver: Option<std::sync::Arc<dyn Approver>>,
+    /// Stops the run before its next step once tripped.
+    pub kill: Option<KillSwitch>,
 }
 
 /// What a follow-up task continues from.
@@ -95,6 +104,8 @@ pub enum Outcome {
     /// An agent hook (`on_session_start`, `pre_query`) stopped the run
     /// before its first turn.
     HookBlocked(String),
+    /// The kill switch stopped the run.
+    Killed(String),
 }
 
 impl fmt::Display for Outcome {
@@ -107,6 +118,7 @@ impl fmt::Display for Outcome {
             Outcome::Refused => f.write_str("refused"),
             Outcome::ProviderFailed(e) => write!(f, "provider_failed: {e}"),
             Outcome::HookBlocked(r) => write!(f, "hook_blocked: {r}"),
+            Outcome::Killed(r) => write!(f, "killed: {r}"),
         }
     }
 }
@@ -224,6 +236,12 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
             );
         }
     }
+    let mut gate = approval::Gate::new(
+        spec,
+        opts.approver.as_ref(),
+        opts.mcp.as_deref(),
+        opts.kill.as_ref(),
+    );
     let snapshot = if spec.profile.snapshot {
         let snap = snapshot::probe(&opts.work_dir, SECRET_ENV).await;
         counters.inc(if snap.is_some() {
@@ -339,6 +357,9 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     let outcome = loop {
         if let Some(reason) = blocked.take() {
             break Outcome::HookBlocked(reason);
+        }
+        if let Some(reason) = gate.halted() {
+            break Outcome::Killed(reason);
         }
         if turns >= spec.config.max_turns {
             break Outcome::MaxTurns;
@@ -561,6 +582,8 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                             sandbox: opts.sandbox.clone(),
                             hooks: opts.hook_callbacks.clone(),
                             mcp: opts.mcp.clone(),
+                            approver: opts.approver.clone(),
+                            kill: opts.kill.clone(),
                         },
                     ));
                 }
@@ -569,6 +592,9 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                 }
             }
         }
+        // Set when the kill switch is found tripped; the remaining calls are
+        // answered without running.
+        let mut halted: Option<String> = None;
         for call in &resp.tool_calls {
             // Under `.claude/` names the model called `Bash`; the loop runs `exec`.
             let mut run_call = call.clone();
@@ -587,7 +613,12 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                 json!({"turn": turns, "id": call.id, "name": call.name, "arguments": call.arguments}),
             );
             let mut subagent_ref: Option<String> = None;
-            let mut output = if completed {
+            if halted.is_none() {
+                halted = gate.halted();
+            }
+            let mut output = if let Some(r) = &halted {
+                error_output(format!("Not run: the agent was halted: {r}."))
+            } else if completed {
                 error_output("Not run: the task was already marked complete.".into())
             } else if let Some(r) = subagent_results.remove(&call.id) {
                 counters.inc("subagent_calls");
@@ -631,7 +662,38 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                             counters.inc("hook_modifies");
                         }
                         run_call.arguments = arguments;
-                        let mut out = {
+                        let mut denied = None;
+                        if let Some(reason) = gate.reason(&run_call, total.output_tokens) {
+                            let request = ApprovalRequest {
+                                tool_name: run_call.name.clone(),
+                                arguments: run_call.arguments.clone(),
+                                reason,
+                            };
+                            events.emit(
+                                "approval_request",
+                                json!({"turn": turns, "id": call.id, "name": run_call.name, "reason": request.reason}),
+                            );
+                            let answer = gate.ask(&request).await;
+                            events.emit(
+                                "approval",
+                                json!({"turn": turns, "id": call.id, "approved": answer.approved, "reason": answer.reason}),
+                            );
+                            if answer.approved {
+                                counters.inc("approvals_granted");
+                            } else {
+                                counters.inc("approvals_denied");
+                                denied = Some(approval::denial_message(&request, &answer));
+                            }
+                        } else if gate.advisory(&run_call) {
+                            counters.inc("advisory_notices");
+                            events.emit(
+                                "guard",
+                                json!({"turn": turns, "kind": "advisory", "name": run_call.name}),
+                            );
+                        }
+                        let mut out = if let Some(message) = denied {
+                            error_output(message)
+                        } else {
                             let mut ctx = ToolContext {
                                 terminal: &mut terminal,
                                 shaper: &mut shaper,
@@ -784,7 +846,33 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                         }
                     }
                 }
+                if output.complete && spec.supervision.review_responses {
+                    let request = ApprovalRequest {
+                        tool_name: gitagent_tools::TASK_COMPLETE.into(),
+                        arguments: object(json!({"summary": summary})),
+                        reason:
+                            "the final response needs review (communications.pre_review_required)"
+                                .into(),
+                    };
+                    let answer = gate.ask(&request).await;
+                    events.emit(
+                        "approval",
+                        json!({"turn": turns, "id": call.id, "approved": answer.approved, "reason": answer.reason}),
+                    );
+                    if answer.approved {
+                        counters.inc("approvals_granted");
+                    } else {
+                        counters.inc("approvals_denied");
+                        output.complete = false;
+                        output.content = format!(
+                            "Your final response was not approved: {}\nRevise it, then call task_complete again.",
+                            answer.reason.as_deref().unwrap_or("no reason given")
+                        );
+                        summary = None;
+                    }
+                }
             }
+            gate.observe(output.is_error);
             completed |= output.complete;
             events.emit(
                 "tool_result",
@@ -869,6 +957,9 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
             json!({"turn": turns, "usage": resp.usage, "prompt_tokens": prompt_tokens}),
         );
 
+        if let Some(reason) = halted {
+            break Outcome::Killed(reason);
+        }
         if completed {
             break Outcome::Completed;
         }
@@ -1167,6 +1258,8 @@ struct ChildRun {
     sandbox: Option<Vec<PathBuf>>,
     hooks: Option<std::sync::Arc<dyn gitagent_hooks::ToolHooks>>,
     mcp: Option<std::sync::Arc<gitagent_mcp::Servers>>,
+    approver: Option<std::sync::Arc<dyn Approver>>,
+    kill: Option<KillSwitch>,
 }
 
 /// What one sub-agent run came to.
@@ -1207,6 +1300,8 @@ fn run_subagent<'a>(
             sandbox,
             hooks: opts_hooks,
             mcp,
+            approver,
+            kill,
         } = child_run;
         let arg = |k: &str| call.arguments.get(k).and_then(Value::as_str);
         let name = arg("agent").unwrap_or(gitagent_loader::GENERAL_AGENT);
@@ -1310,6 +1405,8 @@ fn run_subagent<'a>(
             tool_denylist: def.disallowed_tools.clone(),
             hook_callbacks: opts_hooks,
             mcp,
+            approver,
+            kill,
         };
         let nested: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Finished>> + Send + '_>,

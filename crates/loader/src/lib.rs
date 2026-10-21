@@ -6,6 +6,7 @@
 
 pub mod agent_hooks;
 mod agents;
+pub mod compliance;
 mod config;
 pub mod declared;
 pub mod manifest;
@@ -18,6 +19,7 @@ pub mod v1;
 
 pub use agent_hooks::{HookEntry, HookEvent};
 pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
+pub use compliance::Supervision;
 pub use config::{Config, RepoConfig};
 pub use declared::DeclaredTool;
 pub use manifest::AgentDir;
@@ -177,6 +179,9 @@ pub struct AgentSpec {
     pub agent_hooks: Vec<HookEntry>,
     /// MCP servers to connect. Never set in benchmark runs.
     pub mcp_servers: Vec<McpServerCfg>,
+    /// Approvals and the kill switch, from the agent's `compliance`
+    /// section; nothing is gated without one.
+    pub supervision: Supervision,
     /// Problems found while loading that did not stop it (besides the
     /// agent directory's own, in `agent.warnings`).
     pub warnings: Vec<String>,
@@ -390,6 +395,14 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         system_prompt.push('\n');
         system_prompt.push_str(&section);
     }
+    let (supervision, section) = match agent.as_ref().and_then(|a| a.manifest.compliance.as_ref()) {
+        Some(c) => compliance::read(c),
+        None => (Supervision::default(), String::new()),
+    };
+    if !section.is_empty() {
+        system_prompt.push('\n');
+        system_prompt.push_str(&section);
+    }
     let memory = match &opts.project_dir {
         Some(project) if agent.is_some() || config.memory => {
             Some(MemoryCfg::for_project(project, config.memory_commit)?)
@@ -425,6 +438,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         declared_tools,
         agent_hooks,
         mcp_servers,
+        supervision,
         warnings,
     })
 }

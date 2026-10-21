@@ -1111,3 +1111,54 @@ done
     assert!(prompt.contains("# MCP servers\n"), "{prompt}");
     assert!(t.to_string().contains("HELLO FROM mcp"));
 }
+
+/// With `kill_switch: true`, a `.gitagent/KILL` file stops the agent before
+/// its first model call (exit 130); the compliance lines are in the prompt.
+#[test]
+fn the_kill_file_halts_a_supervised_agent() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join(".gitagent")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "spec_version: \"0.1.0\"\nname: lyra\nversion: 1.0.0\ndescription: A test agent.\ncompliance:\n  risk_tier: high\n  supervision: {human_in_the_loop: always, kill_switch: true}\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(
+        &script,
+        "- tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+    )
+    .unwrap();
+    let run = |name: &str| {
+        gitagent()
+            .args(["-p", "x", "--model"])
+            .arg(format!("scripted:{}", script.display()))
+            .arg("--dir")
+            .arg(&agent)
+            .arg("--out-dir")
+            .arg(dir.path().join(name))
+            .env("HOME", dir.path())
+            .output()
+            .unwrap()
+    };
+    let ok = run("before");
+    assert!(ok.status.success());
+    let t = std::fs::read_to_string(dir.path().join("before/trajectory.json")).unwrap();
+    assert!(
+        t.contains(
+            "# Compliance constraints\\n\\n- All decisions require human approval before execution"
+        ),
+        "{t}"
+    );
+
+    std::fs::write(agent.join(".gitagent/KILL"), "").unwrap();
+    let out = run("after");
+    assert_eq!(out.status.code(), Some(130));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("killed: ") && stderr.contains(".gitagent/KILL exists"),
+        "{stderr}"
+    );
+}

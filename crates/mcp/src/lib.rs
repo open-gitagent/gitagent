@@ -127,6 +127,8 @@ struct Tool {
     server: usize,
     /// The name the server knows it by.
     remote: String,
+    /// The server says the tool changes nothing (`readOnlyHint`).
+    read_only: bool,
 }
 
 /// The connected servers and their tools.
@@ -213,6 +215,7 @@ impl Servers {
                     },
                     server: index,
                     remote: remote.to_string(),
+                    read_only: t["annotations"]["readOnlyHint"] == Value::Bool(true),
                 });
             }
         }
@@ -226,6 +229,13 @@ impl Servers {
 
     pub fn has(&self, name: &str) -> bool {
         self.tools.iter().any(|t| t.spec.name == name)
+    }
+
+    /// Whether the server marks the tool as changing nothing.
+    pub fn read_only(&self, name: &str) -> bool {
+        self.tools
+            .iter()
+            .any(|t| t.spec.name == name && t.read_only)
     }
 
     pub async fn call(

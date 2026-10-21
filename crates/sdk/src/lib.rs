@@ -113,6 +113,9 @@ pub struct AgentOptions {
     /// MCP servers by name, with the settings of `mcp_servers` in
     /// gitagent.yaml; they replace configured servers of the same name.
     pub mcp_servers: BTreeMap<String, Value>,
+    /// Asked when a call or the final response needs a person's approval
+    /// (the agent's `compliance` section); without one those are denied.
+    pub approver: Option<Arc<dyn gitagent_core::Approver>>,
 }
 
 // ---------------------------------------------------------------- hooks
@@ -786,6 +789,7 @@ fn cost_of(prices: Option<Prices>, u: &Usage) -> f64 {
 pub struct Query {
     rx: mpsc::UnboundedReceiver<Message>,
     handle: tokio::task::JoinHandle<Result<RunReport>>,
+    kill: gitagent_core::KillSwitch,
 }
 
 impl Query {
@@ -801,6 +805,12 @@ impl Query {
             out.push(m);
         }
         out
+    }
+
+    /// Stops the agent before its next model call or tool call (the kill
+    /// switch); the run ends with the outcome `killed`.
+    pub fn kill(&self) {
+        self.kill.trip();
     }
 
     /// Waits for the run to end.
@@ -928,6 +938,7 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
         u64::from(p.spec.profile.context_window),
         options.prices,
     )));
+    let kill = gitagent_core::KillSwitch::default();
     let (mcp, warnings) = gitagent_core::connect_mcp(&p.spec).await;
     for w in warnings {
         eprintln!("gitagent: warning: {w}");
@@ -979,6 +990,8 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
         tool_denylist: p.tool_denylist.clone(),
         hook_callbacks: p.hook_callbacks.clone(),
         mcp,
+        approver: options.approver.clone(),
+        kill: Some(kill.clone()),
     };
     let spec = p.spec;
     let (work_dir, session_id) = (p.work_dir.clone(), p.session_id.clone());
@@ -988,7 +1001,7 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
         drop(tx);
         Ok(finished.report)
     });
-    Ok(Query { rx, handle })
+    Ok(Query { rx, handle, kill })
 }
 
 /// The outcome a result message reports, for callers that want gitagent's enum.
