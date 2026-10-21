@@ -1092,6 +1092,9 @@ def harness_progress(jobs, tasks, models):
             "terminus": progress_of("terminus", mine, meta, term_round.get("skip", ())),
             "terminus_round": term_round.get("name"),
             "heldout": dict(held[-1], label=round_label(held[-1]["round"])) if held else None,
+            # The latest run over all tasks (the leaderboard format), if any.
+            "full": next((dict(h, label=round_label(h["round"])) for h in reversed(history)
+                          if h["kind"] == "gitagent" and h["model"] == m and h["split"] == "all"), None),
         }
 
     out = {
@@ -2034,6 +2037,12 @@ function renderInner(d) {
   const heldTiles = models.filter(m => bm(m.id).heldout).map(m => { const h = bm(m.id).heldout;
     return kpi(`${(100 * h.accuracy).toFixed(1)}%`, `Final, held-out ${mchip(m.id)}`, `gitagent · ${esc(m.label)} on ${h.done} unseen tasks, ${h.runs / Math.max(h.done, 1)} runs each · single runs ${h.per_run.map(x => (100 * x.accuracy).toFixed(1) + "%").join(" / ")} · open round ${esc(h.round)}`, "final click", `data-round="${esc(h.round)}" title="Open the held-out round"`); });
   if (!heldTiles.length) heldTiles.push(kpi("—", "Final, held-out", `Not measured yet: the ${d.accuracy.heldout_total} held-out tasks stay unseen until the final scoring run.`, "final"));
+  // One tile per model that has a run over all tasks (the leaderboard format).
+  const fullTiles = models.filter(m => bm(m.id).full).map(m => { const f = bm(m.id).full;
+    const live = (f.running || []).length, open = (f.pending || []).length;
+    return kpi(f.accuracy == null ? "—" : `${(100 * f.accuracy).toFixed(1)}%`, `Full run, all ${f.scope} tasks ${mchip(m.id)}`,
+      `gitagent · ${esc(m.label)} · ${f.done}/${f.scope} tasks scored${f.runnable_accuracy != null ? ` · ${(100 * f.runnable_accuracy).toFixed(1)}% on tasks this machine can run` : ""}${live ? ` · ${live} running` : ""}${open ? ` · ${open} pending` : ""} · open round ${esc(f.round)}`,
+      "final click", `data-round="${esc(f.round)}" title="Open the full run"`); });
   const curTiles = models.map(m => { const g = bm(m.id).gitagent || {}, r = g.round, b = bm(m.id);
     if (!r) return kpi("—", `Current round ${mchip(m.id)}`, `${esc(m.label)}: no rounds yet${b.unrounded_trials ? ` · ${b.unrounded_trials} trial(s) in jobs no round in bench/rounds.json lists yet (${(b.unrounded_jobs || []).map(esc).join(", ")})` : ""}`);
     return kpi(g.accuracy == null ? "—" : Math.round(100 * g.accuracy) + "%", `Current round ${mchip(m.id)} · ${esc(r.name)}`,
@@ -2045,7 +2054,7 @@ function renderInner(d) {
   const spendBy = perModel(m => costCell(tm(m.id).cost_usd, tm(m.id).unpriced_runs));
   const unpriced = t.unpriced_models || [];
   $("#kpis").innerHTML = [
-    ...heldTiles, ...curTiles,
+    ...fullTiles, ...heldTiles, ...curTiles,
     kpi(`${t.running} ${sm("running")}`, "Live trials", t.running ? `${usd(t.live_cost_usd)} spent so far in running trials${models.length > 1 ? ` · ${liveBy}` : ""}${t.runaway.length ? ` · ${t.runaway.length} over the ${usd(t.runaway_usd)} runaway limit` : ""}` : "Nothing running right now.", t.runaway.length ? "alarm" : ""),
     kpi(usd(t.cost_usd), "Estimated spend", `${models.length ? spendBy + " · " : ""}${t.jobs} jobs · ${t.trials} trials${unpriced.length ? ` · <span class="bad">no price for ${unpriced.map(esc).join(", ")} in bench/pricing.json: that spend shows as n/a and is not in the total</span>` : ""}`, unpriced.length ? "alarm" : ""),
   ].join("");

@@ -229,9 +229,11 @@
       "changes": [
         "Leaderboard format: every task, 5 trials each, the tasks' own time limits and resources",
         "Profile bench/profiles/anthropic-m4-nolessons.yaml: the M4 profile with learned lessons switched off, so the agent sees only the system prompt",
-        "Code frozen at the published commit 79e4d28; results uploaded to Harbor Hub"
+        "Code frozen at the published commit 79e4d28; results uploaded to Harbor Hub",
+        "Run on 2026-10-21: 445 trials in 9 Harbor jobs (one per task time limit), up to 30 at once",
+        "39 trials errored for reasons outside the agent: 33 when the Anthropic API key was revoked mid-run (HTTP 401), 5 that never started (Docker ran out of network address pools), 1 checker timeout. All 39, whatever their reward, are relaunched with Harbor's job resume and a new key; Harbor records them as retries"
       ],
-      "reasoning": ""
+      "reasoning": "PROVISIONAL, re-run of the 39 errored trials in progress. On the 406 clean trials: 377 passed (92.9%); mean pass rate per task 93.3% over 88 tasks, 95.4% without the two VM tasks this machine cannot run (the benchmark's reference solution fails them here too). Projected after the re-run: about 93.1% over all 89 tasks (range 84.7% if all 39 stayed errored to 93.5% if all passed). Against the earlier lessons-on rounds, the losses are judgement calls the lessons used to steer: query-optimize 2/5 (7/7 before; the failing runs returned correct output fast but not by filtering early), mteb-retrieve 4/5 (7/7; one run left out the model's retrieval instruction), gpt2-codegolf 4/5 (ran out of time), plus single runs on model-extraction-relu-logits and largest-eigenval. filter-js-from-html passed once (0/7 before). Est. cost of the first pass $98.67; median agent time 69 s."
     }
   ]
 }
