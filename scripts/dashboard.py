@@ -959,11 +959,17 @@ def comparison(jobs, task_meta, model=None):
     }
 
 
+def round_split(r):
+    """A round's task set: "dev", "held-out", or "all" (every task, the leaderboard format)."""
+    return {"heldout": "held-out", "all": "all"}.get(r.get("split"), "dev")
+
+
 def progress_of(kind, trials, meta, skip=(), split="dev"):
     """One harness over a set of trials: the split's tasks done, passed, running
     and still to run, and accuracy. The oracle is counted over every task, since
     it does not learn from them."""
-    scope = sorted(n for n, t in meta.items() if (kind == "oracle" or t["split"] == split) and n not in skip)
+    in_split = lambda t: t["split"] in ("dev", "held-out") if split == "all" else t["split"] == split  # noqa: E731
+    scope = sorted(n for n, t in meta.items() if (kind == "oracle" or in_split(t)) and n not in skip)
     mine = [t for t in trials if t["kind"] == kind and t["task"] in scope]
     scored, live = {}, set()
     for t in mine:
@@ -987,7 +993,7 @@ def progress_of(kind, trials, meta, skip=(), split="dev"):
     starts = sorted(t["started"] for t in mine if t["started"])
     return {
         "scope": len(scope),
-        "scope_label": "all tasks" if kind == "oracle" else f"{split} tasks",
+        "scope_label": "all tasks" if kind == "oracle" or split == "all" else f"{split} tasks",
         "per_run": per_run,
         "done": len(scored),
         "passed": sum(1 for r in rates.values() if r >= 1.0),
@@ -1039,7 +1045,7 @@ def harness_progress(jobs, tasks, models):
         if not r.get("counts", True):
             continue
         in_round = [t for t in counted if t.get("round") == r["name"]]
-        split = "held-out" if r.get("split") == "heldout" else "dev"
+        split = round_split(r)
         for kind in ("gitagent", "terminus", "oracle"):
             of_kind = [t for t in in_round if t["kind"] == kind]
             # One row per model that actually ran (the oracle calls no model).
@@ -1138,7 +1144,7 @@ def rounds_page(progress, jobs=()):
         if lessons is not None and prev is not None:
             diff = {"added": [l for l in lessons if l not in prev], "dropped": [l for l in prev if l not in lessons]}
         out.append({k: r.get(k) for k in ("name", "label", "host", "commit", "changes", "reasoning", "lessons_commit", "model")}
-                   | {"split": "held-out" if r.get("split") == "heldout" else "dev",
+                   | {"split": round_split(r),
                       "results": rows, "lessons": lessons, "lessons_diff": diff,
                       "compliance": round_compliance([j for j in jobs if j["round"] == r["name"]])})
         if lessons is not None:
@@ -2408,7 +2414,7 @@ function renderRounds(d) {
   const groups = [...models.map(m => ({ id: m.id, title: m.full, rounds: d.rounds_page.filter(r => r.model === m.id) })),
     { id: null, title: "Machine checks (oracle, no model)", rounds: d.rounds_page.filter(r => !r.model) }].filter(g => g.rounds.length);
   const roundCard = r => `<div class="panel">
-      <div class="titlerow">${roundTitle(r.name, r.commit, r.host, r.model)}${r.split === "held-out" ? '<span class="badge">held-out</span>' : ""}<span class="spacer"></span><button class="btn" data-round="${esc(r.name)}">Open round</button></div>
+      <div class="titlerow">${roundTitle(r.name, r.commit, r.host, r.model)}${r.split === "held-out" ? '<span class="badge">held-out</span>' : r.split === "all" ? '<span class="badge">all 89 tasks</span>' : ""}<span class="spacer"></span><button class="btn" data-round="${esc(r.name)}">Open round</button></div>
       <p>${esc(r.label || "")}</p>
       <div class="cols">${r.results.map(resultCard).join("") || empty("No scored runs yet.")}</div>
       <h3>What was done</h3><ul>${(r.changes || []).map(c => `<li>${esc(c)}</li>`).join("") || '<li class="muted">—</li>'}</ul>
@@ -2487,7 +2493,7 @@ function renderRound(d) {
   const roundJobs = d.jobs.filter(j => j.round === name).sort((a, b) => a.name.localeCompare(b.name));
   el.innerHTML = `
     <div class="panel">${head}
-      <div class="titlerow">${roundTitle(name, info.commit, info.host, info.model)}${info.split === "held-out" ? '<span class="badge">held-out</span>' : ""}${rows.some(h => h.current) ? '<span class="badge b-running">current</span>' : ""}${strayN ? `<span class="badge b-warn" title="trials in this round's jobs that ran another model; they are listed under Trials & logs and never counted here">${strayN} trial(s) on another model</span>` : ""}</div>
+      <div class="titlerow">${roundTitle(name, info.commit, info.host, info.model)}${info.split === "held-out" ? '<span class="badge">held-out</span>' : info.split === "all" ? '<span class="badge">all 89 tasks</span>' : ""}${rows.some(h => h.current) ? '<span class="badge b-running">current</span>' : ""}${strayN ? `<span class="badge b-warn" title="trials in this round's jobs that ran another model; they are listed under Trials & logs and never counted here">${strayN} trial(s) on another model</span>` : ""}</div>
       ${complianceStrip(info.compliance)}
       <p>${esc(info.label || "")}</p>${cards}</div>
     <div class="panel"><h2>Harbor</h2>
