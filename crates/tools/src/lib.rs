@@ -5,6 +5,7 @@
 
 mod exec;
 mod image_read;
+mod memory;
 mod patch;
 mod read_file;
 mod skill;
@@ -15,7 +16,7 @@ mod write_file;
 
 use std::time::Duration;
 
-use gitagent_loader::{AgentDef, EditTool, Skill, ToolsCfg};
+use gitagent_loader::{AgentDef, EditTool, MemoryCfg, Skill, ToolsCfg};
 use gitagent_provider::{ImageData, ToolCall, ToolSpec};
 use gitagent_record::Counters;
 use gitagent_shaper::Shaper;
@@ -23,6 +24,8 @@ use gitagent_terminal::Terminal;
 use serde_json::{json, Value};
 
 pub mod naming;
+
+pub use memory::spec as memory_spec;
 
 pub const EXEC: &str = "exec";
 pub const WRITE_STDIN: &str = "write_stdin";
@@ -35,6 +38,7 @@ pub const TODO: &str = "todo";
 pub const TASK_COMPLETE: &str = "task_complete";
 pub const SKILL: &str = "skill";
 pub const SUBAGENT: &str = "subagent";
+pub const MEMORY: &str = "memory";
 
 /// Upper bound on how long one call may wait.
 pub const MAX_YIELD_MS: u64 = 600_000;
@@ -278,6 +282,8 @@ pub struct ToolContext<'a> {
     pub tools: &'a ToolsCfg,
     pub edit_tool: EditTool,
     pub skills: &'a [Skill],
+    /// The project's memory, when the `memory` tool is offered.
+    pub memory: Option<&'a MemoryCfg>,
     pub default_yield_ms: u64,
     /// Time left in the run, used to cap waits.
     pub remaining: Option<Duration>,
@@ -313,6 +319,9 @@ pub async fn dispatch(call: &ToolCall, ctx: &mut ToolContext<'_>) -> ToolOutput 
         STR_REPLACE if ctx.edit_tool == EditTool::StrReplace => run_str_replace(call, ctx),
         APPLY_PATCH if ctx.edit_tool == EditTool::ApplyPatch => run_apply_patch(call, ctx),
         SKILL if !ctx.skills.is_empty() => skill::run(call, ctx.skills),
+        MEMORY if ctx.memory.is_some() => {
+            memory::run(call, ctx.memory.expect("checked above"), ctx.counters)
+        }
         IMAGE_READ if ctx.tools.image_read => image_read::run(call, ctx.terminal.cwd()),
         TODO if ctx.tools.todo => todo::run(call),
         TASK_COMPLETE => Ok(ToolOutput {

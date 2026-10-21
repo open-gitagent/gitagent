@@ -16,6 +16,11 @@ pub struct Config {
     /// `off` or `online`: after each finished task outside `--bench`, learn
     /// lessons into the project's `.gitagent/`.
     pub learning: String,
+    /// Persistent memory in the project's `memory/` and the `memory` tool
+    /// (always on for agent directories with an `agent.yaml`).
+    pub memory: bool,
+    /// Commit each memory save to git.
+    pub memory_commit: bool,
     pub repo: RepoConfig,
 }
 
@@ -32,6 +37,8 @@ impl Default for Config {
             skills: true,
             hooks: true,
             learning: "off".into(),
+            memory: false,
+            memory_commit: true,
             repo: RepoConfig::default(),
         }
     }

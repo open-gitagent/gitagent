@@ -736,6 +736,8 @@ fn bench_prompt_and_tools_match_the_published_run() {
         "---\nname: leak\ndescription: Should never be listed.\n---\n",
     )
     .unwrap();
+    std::fs::create_dir_all(work.join("memory")).unwrap();
+    std::fs::write(work.join("memory/MEMORY.md"), "- Should never be shown.\n").unwrap();
     let out = dir.path().join("logs");
     let status = gitagent()
         .args(["--bench", "-p", "Do nothing."])
@@ -809,4 +811,68 @@ fn allowed_tools_accept_v1_names() {
         .map(|d| d["name"].as_str().unwrap())
         .collect();
     assert_eq!(names, vec!["exec", "read_file", "task_complete"]);
+}
+
+/// An agent directory gets the `memory` tool; what one session saves is in
+/// the next session's system prompt.
+#[test]
+fn memory_saved_in_one_session_is_in_the_next_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir(&agent).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "spec_version: \"0.1.0\"\nname: lyra\nversion: 1.0.0\ndescription: A test agent.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    let run = |name: &str, script: &str| {
+        let path = dir.path().join(format!("{name}.yaml"));
+        std::fs::write(&path, script).unwrap();
+        let out = dir.path().join(name);
+        let status = gitagent()
+            .args(["-p", "x", "--model"])
+            .arg(format!("scripted:{}", path.display()))
+            .arg("--dir")
+            .arg(&agent)
+            .arg("--out-dir")
+            .arg(&out)
+            .env("HOME", dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let t: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(out.join("trajectory.json")).unwrap()).unwrap();
+        t
+    };
+    let first = run(
+        "first",
+        "- tool_calls: [{name: memory, arguments: {action: save, content: \"- The user prefers tabs.\", message: Preference}}]\n\
+         - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+    );
+    let names: Vec<&str> = first["agent"]["tool_definitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"memory"), "{names:?}");
+    assert!(!first["steps"][0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("# Memory"));
+    assert_eq!(
+        std::fs::read_to_string(agent.join("memory/MEMORY.md")).unwrap(),
+        "- The user prefers tabs.\n"
+    );
+
+    let second = run(
+        "second",
+        "- tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+    );
+    let prompt = second["steps"][0]["message"].as_str().unwrap();
+    assert!(
+        prompt.contains("# Memory\n") && prompt.contains("- The user prefers tabs."),
+        "{prompt}"
+    );
 }

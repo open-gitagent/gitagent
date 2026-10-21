@@ -7,6 +7,7 @@
 mod agents;
 mod config;
 pub mod manifest;
+pub mod memory;
 mod profile;
 pub mod sdk;
 mod skills;
@@ -15,6 +16,7 @@ pub mod v1;
 pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
 pub use config::{Config, RepoConfig};
 pub use manifest::AgentDir;
+pub use memory::MemoryCfg;
 pub use profile::{
     AnthropicCfg, CacheCfg, ContextCfg, EditTool, Effort, GuardsCfg, Masking, OpenAiCfg, Profile,
     ShapeCfg, StopCfg, ThinkingBinding, ThinkingDisplay, ToolCalling, ToolNaming, ToolsCfg,
@@ -159,6 +161,9 @@ pub struct AgentSpec {
     /// Models to switch to, in order, when the current one fails
     /// (`fallback_models` in gitagent.yaml, then the agent's `model.fallback`).
     pub fallbacks: Vec<Fallback>,
+    /// The project's persistent memory, for agent directories or with
+    /// `memory: true`. Never set in benchmark runs.
+    pub memory: Option<MemoryCfg>,
 }
 
 impl AgentSpec {
@@ -328,6 +333,19 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         system_prompt.push('\n');
         system_prompt.push_str(&skills::index(&skills));
     }
+    let memory = match &opts.project_dir {
+        Some(project) if agent.is_some() || config.memory => {
+            Some(MemoryCfg::for_project(project, config.memory_commit)?)
+        }
+        _ => None,
+    };
+    if let Some(m) = &memory {
+        let section = m.prompt_section();
+        if !section.is_empty() {
+            system_prompt.push('\n');
+            system_prompt.push_str(&section);
+        }
+    }
 
     let agents = if profile.tools.subagents {
         agents::discover(&config_dirs)
@@ -346,6 +364,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         skills,
         agent,
         fallbacks,
+        memory,
     })
 }
 
