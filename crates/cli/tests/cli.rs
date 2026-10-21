@@ -698,3 +698,57 @@ fn stream_json_prints_sdk_shaped_messages_and_tool_lists_apply() {
         .unwrap()
         .ends_with("Be terse.\n"));
 }
+
+/// The published Terminal-Bench 2.1 result was measured with exactly this
+/// system prompt and these tool definitions (taken from its trajectories).
+/// Benchmark mode must keep sending them byte for byte: a feature that
+/// changes either one changes what was measured, and needs a new full run.
+#[test]
+fn bench_prompt_and_tools_match_the_published_run() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("script.yaml");
+    std::fs::write(
+        &script,
+        "- tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+    )
+    .unwrap();
+    let work = dir.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    let out = dir.path().join("logs");
+    let status = gitagent()
+        .args(["--bench", "-p", "Do nothing."])
+        .arg("--model")
+        .arg(format!("scripted:{}", script.display()))
+        .arg("--profile")
+        .arg(root.join("bench/profiles/anthropic-m4-nolessons.yaml"))
+        .arg("--dir")
+        .arg(&work)
+        .arg("--out-dir")
+        .arg(&out)
+        .arg("--timeout-s")
+        .arg("60")
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let t: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(out.join("trajectory.json")).unwrap()).unwrap();
+    let expected_prompt =
+        std::fs::read_to_string(fixtures.join("bench_system_prompt.txt")).unwrap();
+    assert_eq!(t["steps"][0]["source"], "system");
+    assert_eq!(
+        t["steps"][0]["message"].as_str().unwrap(),
+        expected_prompt,
+        "the benchmark system prompt changed"
+    );
+    let expected_tools: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(fixtures.join("bench_tool_definitions.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        t["agent"]["tool_definitions"], expected_tools,
+        "the benchmark tool definitions changed"
+    );
+}
