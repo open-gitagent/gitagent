@@ -16,6 +16,7 @@ mod profile;
 pub mod sdk;
 mod skills;
 pub mod v1;
+pub mod validate;
 
 pub use agent_hooks::{HookEntry, HookEvent};
 pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};

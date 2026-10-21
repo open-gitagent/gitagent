@@ -1162,3 +1162,43 @@ fn the_kill_file_halts_a_supervised_agent() {
         "{stderr}"
     );
 }
+
+/// `gitagent validate` prints findings with file and line and exits 1 only
+/// when there are errors.
+#[test]
+fn validate_reports_and_sets_the_exit_code() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("agent.yaml"),
+        "name: helper\nversion: 1.0.0\ndescription: Helps.\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("SOUL.md"), "I help.\n").unwrap();
+    let out = gitagent().arg("validate").arg(dir.path()).output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("is valid"));
+
+    let out = gitagent()
+        .args(["validate", "--compliance", "-d"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "warning: agent.yaml: there is no `compliance` section\n"
+    );
+
+    std::fs::write(
+        dir.path().join("agent.yaml"),
+        "name: helper\nversion: one\ndescription: Helps.\n",
+    )
+    .unwrap();
+    let out = gitagent().arg("validate").arg(dir.path()).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        "error: agent.yaml:2: version: must be a semantic version like 1.0.0 (got \"one\")\n"
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("1 error, 0 warnings"));
+}

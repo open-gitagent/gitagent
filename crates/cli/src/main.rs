@@ -4,6 +4,7 @@ mod otel;
 mod repl;
 mod repo_mode;
 mod sandbox_exec;
+mod validate_cmd;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -143,6 +144,9 @@ fn main() -> ExitCode {
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
     if args.get(1).and_then(|a| a.to_str()) == Some("__sandbox") {
         return sandbox_exec::run(&args[2..]);
+    }
+    if args.get(1).and_then(|a| a.to_str()) == Some("validate") {
+        return validate_cmd::run(&args[2..]);
     }
     let learn = args.get(1).and_then(|a| a.to_str()) == Some("learn");
     match tokio::runtime::Builder::new_multi_thread()
