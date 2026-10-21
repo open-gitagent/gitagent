@@ -1,5 +1,9 @@
 //! Tool hooks: scripts that see every tool call before and after it runs and
-//! may allow, block or change it (BLUEPRINT §4). Two formats are read:
+//! may allow, block or change it (BLUEPRINT §4). Three formats are read:
+//!
+//! **The agent's `hooks/hooks.yaml`** (asked first): lifecycle hooks for the
+//! session, the prompt, each tool call and the final response; see
+//! [`AgentHooks`].
 //!
 //! **gitagent scripts**: `hooks/pre_tool_use` and `hooks/post_tool_use` in a
 //! config directory. A script gets one JSON object on stdin:
@@ -27,11 +31,15 @@
 //! (`allow` / `deny` / `ask`), `updatedInput`, `updatedToolOutput`, and
 //! top-level `decision: "block"` or `continue: false` are honoured.
 
+mod lifecycle;
+
+pub use lifecycle::AgentHooks;
+
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
-use gitagent_loader::sdk;
+use gitagent_loader::{sdk, HookEvent};
 use serde_json::{json, Map, Value};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -130,19 +138,25 @@ struct SettingsHook {
     source: PathBuf,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct Hooks {
     pre: Option<PathBuf>,
     post: Option<PathBuf>,
     settings: Vec<SettingsHook>,
     work_dir: PathBuf,
+    /// The agent's `hooks/hooks.yaml`, asked first.
+    agent: Option<AgentHooks>,
 }
 
 impl Hooks {
     /// Looks for the hook scripts in the first config directory that has
-    /// each, and for settings-file hooks in every config directory. Returns
-    /// `None` when there are none.
-    pub fn discover(config_dirs: &[PathBuf], work_dir: &Path) -> Option<Hooks> {
+    /// each, and for settings-file hooks in every config directory; `agent`
+    /// adds the agent's own hooks. Returns `None` when there are none.
+    pub fn discover(
+        config_dirs: &[PathBuf],
+        work_dir: &Path,
+        agent: Option<AgentHooks>,
+    ) -> Option<Hooks> {
         let find = |name: &str| {
             config_dirs.iter().find_map(|d| {
                 [name.to_string(), format!("{name}.sh")]
@@ -165,8 +179,40 @@ impl Hooks {
             post: find("post_tool_use"),
             settings,
             work_dir: work_dir.to_path_buf(),
+            agent,
         };
-        (hooks.pre.is_some() || hooks.post.is_some() || !hooks.settings.is_empty()).then_some(hooks)
+        let any = hooks.pre.is_some()
+            || hooks.post.is_some()
+            || !hooks.settings.is_empty()
+            || hooks.agent.is_some();
+        any.then_some(hooks)
+    }
+
+    /// The turn now running and the model answering it, for the agent's hooks.
+    pub fn set_turn(&self, turn: u32, model: &str) {
+        if let Some(a) = &self.agent {
+            a.set_turn(turn, model);
+        }
+    }
+
+    pub fn has(&self, event: HookEvent) -> bool {
+        self.agent.as_ref().is_some_and(|a| a.has(event))
+    }
+
+    /// Runs the agent's hooks for a session event (`on_session_start`,
+    /// `pre_query`, `pre_response`, …) on `data`; tool events go through
+    /// [`Hooks::pre`] and [`Hooks::post`], apart from the notifications
+    /// `post_tool_failure` and `file_changed`, which name their `tool`.
+    pub async fn event(
+        &self,
+        event: HookEvent,
+        tool: Option<&str>,
+        data: Map<String, Value>,
+    ) -> Decision {
+        match &self.agent {
+            Some(a) => a.fire(event, tool, data).await,
+            None => Decision::Allow,
+        }
     }
 
     /// How many settings-file hooks were found (for logs and tests).
@@ -177,6 +223,27 @@ impl Hooks {
     pub async fn pre(&self, tool: &str, arguments: &Map<String, Value>) -> Decision {
         let mut args = arguments.clone();
         let mut changed = false;
+        if let Some(a) = &self.agent {
+            let data = json!({"tool_name": tool, "arguments": args});
+            let data = data.as_object().cloned().unwrap_or_default();
+            match a.fire(HookEvent::PreToolUse, Some(tool), data).await {
+                Decision::Allow => {}
+                Decision::Modify(Value::Object(d)) => {
+                    match d.get("arguments") {
+                        Some(Value::Object(new_args)) => {
+                            args = new_args.clone();
+                            changed = true;
+                        }
+                        _ => return Decision::Block {
+                            reason:
+                                "a hook replaced the arguments with something that is not an object"
+                                    .into(),
+                        },
+                    }
+                }
+                other => return other,
+            }
+        }
         if let Some(script) = &self.pre {
             let input = json!({"event": "pre_tool_use", "tool": tool, "arguments": args});
             match self.call_script(script, &input, "arguments").await {
@@ -226,6 +293,27 @@ impl Hooks {
     ) -> Decision {
         let mut out = output.to_string();
         let mut changed = false;
+        if let Some(a) = &self.agent {
+            let data = json!({
+                "tool_name": tool,
+                "arguments": arguments,
+                "result": out,
+                "is_error": is_error,
+            });
+            let data = data.as_object().cloned().unwrap_or_default();
+            match a.fire(HookEvent::PostToolUse, Some(tool), data).await {
+                Decision::Allow => {}
+                Decision::Modify(Value::Object(d)) => {
+                    out = match d.get("result") {
+                        Some(Value::String(s)) => s.clone(),
+                        Some(other) => other.to_string(),
+                        None => out,
+                    };
+                    changed = true;
+                }
+                other => return other,
+            }
+        }
         if let Some(script) = &self.post {
             let input = json!({
                 "event": "post_tool_use",
@@ -478,7 +566,7 @@ mod tests {
         if let Some(s) = post {
             std::fs::write(dir.path().join("hooks/post_tool_use.sh"), s).unwrap();
         }
-        let hooks = Hooks::discover(&[dir.path().to_path_buf()], dir.path()).unwrap();
+        let hooks = Hooks::discover(&[dir.path().to_path_buf()], dir.path(), None).unwrap();
         (dir, hooks)
     }
 
@@ -546,7 +634,7 @@ esac"#;
     #[test]
     fn no_hook_files_means_no_hooks() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(Hooks::discover(&[dir.path().to_path_buf()], dir.path()).is_none());
+        assert!(Hooks::discover(&[dir.path().to_path_buf()], dir.path(), None).is_none());
     }
 
     /// A `.claude/settings.json` with hooks in the `.claude/` format.
@@ -558,7 +646,7 @@ esac"#;
         for (name, body) in scripts {
             std::fs::write(claude.join("hooks").join(name), body).unwrap();
         }
-        let hooks = Hooks::discover(&[claude], dir.path()).unwrap();
+        let hooks = Hooks::discover(&[claude], dir.path(), None).unwrap();
         (dir, hooks)
     }
 
@@ -674,6 +762,7 @@ esac"#;
         let h = Hooks::discover(
             &[dir.path().join(".gitagent"), dir.path().join(".claude")],
             dir.path(),
+            None,
         )
         .unwrap();
         // The script's change is what the settings hook sees, and both apply.

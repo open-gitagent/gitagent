@@ -4,6 +4,7 @@
 //! static binary runs with no files next to it. A config directory given with
 //! `--config` overrides the defaults file by file.
 
+pub mod agent_hooks;
 mod agents;
 mod config;
 pub mod declared;
@@ -14,6 +15,7 @@ pub mod sdk;
 mod skills;
 pub mod v1;
 
+pub use agent_hooks::{HookEntry, HookEvent};
 pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
 pub use config::{Config, RepoConfig};
 pub use declared::DeclaredTool;
@@ -169,6 +171,8 @@ pub struct AgentSpec {
     /// Tools the agent declares in `tools/*.yaml`. Never set in benchmark
     /// runs.
     pub declared_tools: Vec<DeclaredTool>,
+    /// The agent's `hooks/hooks.yaml`. Never set in benchmark runs.
+    pub agent_hooks: Vec<HookEntry>,
 }
 
 impl AgentSpec {
@@ -244,13 +248,15 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         Some(dir) => AgentDir::load(dir)?,
         None => None,
     };
-    let declared_tools = match agent.as_mut() {
+    let (declared_tools, agent_hooks) = match agent.as_mut() {
         Some(a) => {
             let (tools, warnings) = declared::discover(a);
             a.warnings.extend(warnings);
-            tools
+            let (hooks, warnings) = agent_hooks::load(a);
+            a.warnings.extend(warnings);
+            (tools, hooks)
         }
-        None => Vec::new(),
+        None => (Vec::new(), Vec::new()),
     };
 
     // --model, then gitagent.yaml, then the agent's `model.preferred`.
@@ -379,6 +385,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         fallbacks,
         memory,
         declared_tools,
+        agent_hooks,
     })
 }
 

@@ -230,7 +230,7 @@ fn read(file: &Path, root: &Path) -> Result<DeclaredTool, String> {
 
 /// The program that runs a script: the declared runtime, else one chosen by
 /// the file's extension, else the file itself when it is executable, else `sh`.
-fn interpreter(runtime: Option<&str>, path: &Path) -> Vec<String> {
+pub(crate) fn interpreter(runtime: Option<&str>, path: &Path) -> Vec<String> {
     let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     let by_name = |r: &str| match r {
         "python3" | "python" => Some(words(&["python3"])),

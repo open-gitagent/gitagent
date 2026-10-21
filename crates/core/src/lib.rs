@@ -5,7 +5,7 @@ mod fallback;
 mod snapshot;
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -14,8 +14,8 @@ use gitagent_context::{
     COMPACTION_REQUEST,
 };
 use gitagent_guards::{LoopDetector, StopCheck, StopVerdict, TimeBudget, TimeEvent, LOOP_MESSAGE};
-use gitagent_hooks::{Decision, Hooks};
-use gitagent_loader::{AgentSpec, Masking, ToolCalling};
+use gitagent_hooks::{AgentHooks, Decision, Hooks};
+use gitagent_loader::{AgentSpec, HookEvent, Masking, ToolCalling};
 use gitagent_provider::{
     CachePlan, ChatRequest, ChatResponse, Content, Message, Provider, ProviderError, ServerMasking,
     StopReason, Usage,
@@ -89,6 +89,9 @@ pub enum Outcome {
     /// The model's safety classifiers declined to continue.
     Refused,
     ProviderFailed(String),
+    /// An agent hook (`on_session_start`, `pre_query`) stopped the run
+    /// before its first turn.
+    HookBlocked(String),
 }
 
 impl fmt::Display for Outcome {
@@ -100,6 +103,7 @@ impl fmt::Display for Outcome {
             Outcome::NoToolCalls => f.write_str("no_tool_calls"),
             Outcome::Refused => f.write_str("refused"),
             Outcome::ProviderFailed(e) => write!(f, "provider_failed: {e}"),
+            Outcome::HookBlocked(r) => write!(f, "hook_blocked: {r}"),
         }
     }
 }
@@ -146,27 +150,7 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     let counters_path = opts.out_dir.join("counters.json");
     let mut counters = Counters::new();
 
-    let mut tools = gitagent_tools::specs(&spec.profile.tools, spec.profile.edit_tool);
-    if !spec.skills.is_empty() {
-        tools.push(gitagent_tools::skill_spec(&spec.skills));
-    }
-    if !spec.agents.is_empty() {
-        tools.push(gitagent_tools::subagent_spec(&spec.agents));
-    }
-    if let Some(memory) = &spec.memory {
-        tools.push(gitagent_tools::memory_spec(memory));
-    }
-    tools.extend(
-        spec.declared_tools
-            .iter()
-            .map(gitagent_tools::declared_spec),
-    );
-    if let Some(allow) = &opts.tool_allowlist {
-        tools.retain(|t| allow.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
-    }
-    tools.retain(|t| {
-        !opts.tool_denylist.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE
-    });
+    let mut tools = offered_tools(spec, opts.tool_allowlist.as_deref(), &opts.tool_denylist);
     let sdk_names = spec.profile.tool_naming == gitagent_loader::ToolNaming::Sdk;
     if sdk_names {
         tools = gitagent_tools::naming::sdk_specs(tools);
@@ -188,6 +172,50 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
         },
     );
     traj.push(Step::system(spec.system_prompt.clone()));
+    let session_id = opts
+        .session_id
+        .clone()
+        .unwrap_or_else(|| format!("run-{}", gitagent_record::utc_now_rfc3339()));
+    let hooks = discover_hooks(spec, &opts.work_dir, &session_id);
+    // Session-start and prompt hooks run before anything is sent; a block
+    // ends the run before its first turn.
+    let mut instruction = opts.instruction.clone();
+    let mut blocked: Option<String> = None;
+    if let Some(h) = hooks.as_ref() {
+        if opts.resume.is_none() {
+            if let Decision::Block { reason } =
+                h.event(HookEvent::SessionStart, None, Map::new()).await
+            {
+                blocked = Some(reason);
+            }
+        }
+        if blocked.is_none() {
+            match h
+                .event(
+                    HookEvent::PreQuery,
+                    None,
+                    object(json!({"prompt": instruction})),
+                )
+                .await
+            {
+                Decision::Allow => {}
+                Decision::Block { reason } => blocked = Some(reason),
+                Decision::Modify(d) => {
+                    if let Some(p) = d.get("prompt").and_then(Value::as_str) {
+                        counters.inc("hook_modifies");
+                        instruction = p.to_string();
+                    }
+                }
+            }
+        }
+        if let Some(reason) = &blocked {
+            counters.inc("hook_blocks");
+            events.emit(
+                "guard",
+                json!({"turn": 0, "kind": "hook_block", "reason": reason}),
+            );
+        }
+    }
     let snapshot = if spec.profile.snapshot {
         let snap = snapshot::probe(&opts.work_dir, SECRET_ENV).await;
         counters.inc(if snap.is_some() {
@@ -199,7 +227,7 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     } else {
         None
     };
-    let first_user = first_user_message(&opts.instruction, snapshot.as_deref());
+    let first_user = first_user_message(&instruction, snapshot.as_deref());
     traj.push(Step::user(first_user.clone()));
     traj.flush()?;
 
@@ -250,11 +278,6 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     let mut call_seq: u64 = 0;
     let mut subagent_runs: u32 = 0;
 
-    let hooks = if spec.config.hooks {
-        Hooks::discover(&spec.config_dirs, &opts.work_dir)
-    } else {
-        None
-    };
     let guards = &spec.profile.guards;
     let mut time_budget = match (guards.time_budget, opts.timeout) {
         (true, Some(total)) => Some(TimeBudget::new(
@@ -291,7 +314,7 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     } else {
         // A follow-up task: added to the last user turn if there is one, so
         // roles keep alternating.
-        let next = format!("# Next task\n\n{}\n", opts.instruction.trim());
+        let next = format!("# Next task\n\n{}\n", instruction.trim());
         match messages.last_mut() {
             Some(last) if last.role == gitagent_provider::Role::User => {
                 last.content.push(Content::Text { text: next })
@@ -306,6 +329,9 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     let mut turns = 0;
     let mut no_tool_turns = 0;
     let outcome = loop {
+        if let Some(reason) = blocked.take() {
+            break Outcome::HookBlocked(reason);
+        }
         if turns >= spec.config.max_turns {
             break Outcome::MaxTurns;
         }
@@ -392,6 +418,9 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
         }
         add_usage(&mut total, &resp.usage, &mut counters);
         let served_by = resp.model.clone().unwrap_or_else(|| spec.model.to_string());
+        if let Some(h) = hooks.as_ref() {
+            h.set_turn(turns, resp.model.as_deref().unwrap_or(&spec.model.model));
+        }
         events.emit(
             "model_text",
             json!({"turn": turns, "model": served_by, "text": resp.text, "reasoning": resp.reasoning}),
@@ -651,6 +680,9 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                                 }
                             }
                         }
+                        if let Some(h) = hooks.as_ref() {
+                            notify_tool_hooks(h, &run_call, &out).await;
+                        }
                         out
                     }
                 }
@@ -707,7 +739,7 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                                 json!({"turn": turns, "verdict": "reject", "unverified": last_edit}),
                             );
                             output.complete = false;
-                            output.content = rejection_message(&last_edit, &opts.instruction);
+                            output.content = rejection_message(&last_edit, &instruction);
                         }
                     }
                 }
@@ -718,6 +750,30 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                     .get("summary")
                     .and_then(Value::as_str)
                     .map(str::to_string);
+                if let Some(h) = hooks.as_ref().filter(|h| h.has(HookEvent::PreResponse)) {
+                    let data = object(json!({"response": summary.clone().unwrap_or_default()}));
+                    match h.event(HookEvent::PreResponse, None, data).await {
+                        Decision::Allow => {}
+                        Decision::Modify(d) => {
+                            if let Some(r) = d.get("response").and_then(Value::as_str) {
+                                counters.inc("hook_modifies");
+                                summary = Some(r.to_string());
+                            }
+                        }
+                        Decision::Block { reason } => {
+                            counters.inc("hook_blocks");
+                            events.emit(
+                                "guard",
+                                json!({"turn": turns, "kind": "hook_block", "reason": reason}),
+                            );
+                            output.complete = false;
+                            output.content = format!(
+                                "Your final response was blocked by a hook: {reason}\nAddress this, then call task_complete again."
+                            );
+                            summary = None;
+                        }
+                    }
+                }
             }
             completed |= output.complete;
             events.emit(
@@ -808,6 +864,20 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
         }
     };
 
+    if let Some(h) = hooks.as_ref() {
+        match &outcome {
+            Outcome::Completed if h.has(HookEvent::PostResponse) => {
+                let data = object(json!({"response": summary.clone().unwrap_or_default()}));
+                h.event(HookEvent::PostResponse, None, data).await;
+            }
+            Outcome::ProviderFailed(e) if h.has(HookEvent::OnError) => {
+                let data = object(json!({"error": {"message": e, "code": "provider_failed"}}));
+                h.event(HookEvent::OnError, None, data).await;
+            }
+            _ => {}
+        }
+    }
+
     traj.set_final_metrics(FinalMetrics {
         total_prompt_tokens: Some(total.input_tokens),
         total_completion_tokens: Some(total.output_tokens),
@@ -868,6 +938,122 @@ fn first_user_message(instruction: &str, snapshot: Option<&str>) -> String {
 /// `cwd`, half the remaining time, no sub-agents of its own, and the
 /// definition's tools and turn limit. Returns what the parent sees.
 #[allow(clippy::too_many_arguments)]
+/// The tools a run offers, in order, under gitagent's names: the profile's
+/// tools, then `skill`, `subagent`, `memory` and the agent's declared tools
+/// when there are any, after the allow and deny lists (`task_complete`
+/// always stays).
+pub fn offered_tools(
+    spec: &AgentSpec,
+    allow: Option<&[String]>,
+    deny: &[String],
+) -> Vec<gitagent_provider::ToolSpec> {
+    let mut tools = gitagent_tools::specs(&spec.profile.tools, spec.profile.edit_tool);
+    if !spec.skills.is_empty() {
+        tools.push(gitagent_tools::skill_spec(&spec.skills));
+    }
+    if !spec.agents.is_empty() {
+        tools.push(gitagent_tools::subagent_spec(&spec.agents));
+    }
+    if let Some(memory) = &spec.memory {
+        tools.push(gitagent_tools::memory_spec(memory));
+    }
+    tools.extend(
+        spec.declared_tools
+            .iter()
+            .map(gitagent_tools::declared_spec),
+    );
+    if let Some(allow) = allow {
+        tools.retain(|t| allow.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
+    }
+    tools.retain(|t| !deny.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
+    tools
+}
+
+/// Runs the agent's `on_session_end` hooks. Call it once when a session
+/// (one run, or a conversation of several) is over; their answers do not
+/// matter.
+pub async fn end_session(spec: &AgentSpec, work_dir: &Path, session_id: &str) {
+    if let Some(h) = discover_hooks(spec, work_dir, session_id) {
+        if h.has(HookEvent::SessionEnd) {
+            h.event(HookEvent::SessionEnd, None, Map::new()).await;
+        }
+    }
+}
+
+/// The hook scripts and settings-file hooks of the config directories (when
+/// hooks are on) and the agent's `hooks/hooks.yaml` (only its compliance
+/// hooks when hooks are off).
+fn discover_hooks(spec: &AgentSpec, work_dir: &Path, session_id: &str) -> Option<Hooks> {
+    let agent = spec.agent.as_ref().and_then(|a| {
+        AgentHooks::new(
+            &spec.agent_hooks,
+            &a.root,
+            session_id,
+            &a.manifest.name,
+            &spec.model.model,
+            spec.config.hooks,
+        )
+    });
+    let dirs: &[PathBuf] = if spec.config.hooks {
+        &spec.config_dirs
+    } else {
+        &[]
+    };
+    Hooks::discover(dirs, work_dir, agent)
+}
+
+/// The notification hooks after a tool call: `post_tool_failure` when it
+/// failed, `file_changed` for each file a file tool changed.
+async fn notify_tool_hooks(h: &Hooks, call: &gitagent_provider::ToolCall, out: &ToolOutput) {
+    let data = || object(json!({"tool_name": call.name, "arguments": call.arguments}));
+    if out.is_error {
+        if h.has(HookEvent::PostToolFailure) {
+            let mut d = data();
+            d.insert("error".into(), json!(out.content));
+            h.event(HookEvent::PostToolFailure, Some(&call.name), d)
+                .await;
+        }
+        return;
+    }
+    if !h.has(HookEvent::FileChanged) {
+        return;
+    }
+    let arg = |k: &str| call.arguments.get(k).and_then(Value::as_str);
+    let paths: Vec<String> = match call.name.as_str() {
+        gitagent_tools::WRITE_FILE | gitagent_tools::STR_REPLACE => {
+            arg("path").map(str::to_string).into_iter().collect()
+        }
+        gitagent_tools::APPLY_PATCH => arg("patch")
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| {
+                [
+                    "*** Add File: ",
+                    "*** Update File: ",
+                    "*** Delete File: ",
+                    "*** Move to: ",
+                ]
+                .iter()
+                .find_map(|p| l.strip_prefix(p))
+            })
+            .map(|p| p.trim().to_string())
+            .collect(),
+        _ => Vec::new(),
+    };
+    for path in paths {
+        let mut d = data();
+        d.insert("file_path".into(), json!(path));
+        h.event(HookEvent::FileChanged, Some(&call.name), d).await;
+    }
+}
+
+fn object(v: Value) -> Map<String, Value> {
+    match v {
+        Value::Object(m) => m,
+        _ => Map::new(),
+    }
+}
+
 /// What the hooks decided about a call before it runs.
 enum PreHooks {
     Run {
@@ -1014,6 +1200,9 @@ fn run_subagent<'a>(
         }
 
         let mut child = spec.clone();
+        // A sub-agent's calls go through the agent's tool hooks; the session
+        // and response hooks belong to the session that started it.
+        child.agent_hooks.retain(|h| h.event.is_tool_event());
         child.profile.snapshot = false;
         child.config.max_turns = def.max_turns;
         // Nesting: one level less for the child; at the last level it has no

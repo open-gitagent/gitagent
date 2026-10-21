@@ -745,6 +745,17 @@ fn bench_prompt_and_tools_match_the_published_run() {
         "name: leak\ndescription: Should never be offered.\nimplementation: {script: leak.sh}\n",
     )
     .unwrap();
+    std::fs::create_dir_all(work.join("hooks")).unwrap();
+    std::fs::write(
+        work.join("hooks/stop.sh"),
+        "echo '{\"action\":\"block\",\"reason\":\"x\"}'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        work.join("hooks/hooks.yaml"),
+        "hooks:\n  on_session_start: [{script: stop.sh, description: Stop, compliance: true}]\n",
+    )
+    .unwrap();
     let out = dir.path().join("logs");
     let status = gitagent()
         .args(["--bench", "-p", "Do nothing."])
@@ -780,6 +791,7 @@ fn bench_prompt_and_tools_match_the_published_run() {
         t["agent"]["tool_definitions"], expected_tools,
         "the benchmark tool definitions changed"
     );
+    assert_eq!(t["extra"]["outcome"], "completed");
 }
 
 /// Tool lists accept the 1.x names (`cli`, `read`, …) as well as gitagent's.
@@ -933,4 +945,96 @@ fn declared_tools_run_with_json_on_stdin() {
     assert_eq!(greet["description"], "Greets someone.");
     let text = t.to_string();
     assert!(text.contains("Hello, Ada"), "{text}");
+}
+
+/// `hooks/hooks.yaml`: session hooks bracket the run, a 1.x-style hook
+/// blocks a command, `file_changed` sees writes, `pre_response` rewrites the
+/// final answer, and a `pre_query` block stops the run before the model is
+/// called.
+#[test]
+fn agent_hooks_follow_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("hooks")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "spec_version: \"0.1.0\"\nname: lyra\nversion: 1.0.0\ndescription: A test agent.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    let log = dir.path().join("hooks.log");
+    let hook = |name: &str, body: &str| {
+        std::fs::write(agent.join("hooks").join(name), body).unwrap();
+    };
+    hook(
+        "log.sh",
+        &format!(
+            "input=$(cat)\nevent=$(printf '%s' \"$input\" | sed 's/.*\"event\":\"\\([a-z_]*\\)\".*/\\1/')\necho \"$event $(printf '%s' \"$input\" | grep -o '\"file_path\":\"[^\"]*\"' | head -1)\" >> {}\n",
+            log.display()
+        ),
+    );
+    hook(
+        "no-rm.sh",
+        "input=$(cat)\ncase \"$input\" in\n  *'\"tool\":\"cli\"'*'rm -rf'*|*'rm -rf'*'\"tool\":\"cli\"'*) echo '{\"action\":\"block\",\"reason\":\"rm is not allowed\"}' ;;\n  *) echo '{\"action\":\"allow\"}' ;;\nesac\n",
+    );
+    hook(
+        "review.sh",
+        "cat >/dev/null\necho '{\"action\":\"modify\",\"modifications\":{\"response\":\"[reviewed] done\"}}'\n",
+    );
+    let hooks_yaml = |pre_query: &str| {
+        std::fs::write(
+            agent.join("hooks/hooks.yaml"),
+            format!(
+                "hooks:\n  on_session_start: [{{script: log.sh, description: Log}}]\n  on_session_end: [{{script: log.sh, description: Log}}]\n  file_changed: [{{script: log.sh, description: Log}}]\n  pre_tool_use: [{{script: no-rm.sh, description: No rm}}]\n  pre_response: [{{script: review.sh, description: Review}}]\n{pre_query}"
+            ),
+        )
+        .unwrap();
+    };
+    let run = |name: &str, script: &str| {
+        let path = dir.path().join(format!("{name}.yaml"));
+        std::fs::write(&path, script).unwrap();
+        gitagent()
+            .args(["-p", "x", "--model"])
+            .arg(format!("scripted:{}", path.display()))
+            .arg("--dir")
+            .arg(&agent)
+            .arg("--out-dir")
+            .arg(dir.path().join(name))
+            .env("HOME", dir.path())
+            .output()
+            .unwrap()
+    };
+
+    hooks_yaml("");
+    let out = run(
+        "first",
+        "- tool_calls: [{name: exec, arguments: {cmd: \"rm -rf build\"}}]\n\
+         - tool_calls: [{name: write_file, arguments: {path: notes.txt, content: hi}}]\n\
+         - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+    );
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "[reviewed] done"
+    );
+    let t = std::fs::read_to_string(dir.path().join("first/trajectory.json")).unwrap();
+    assert!(t.contains("Blocked by a hook: rm is not allowed"), "{t}");
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        "on_session_start \nfile_changed \"file_path\":\"notes.txt\"\non_session_end \n"
+    );
+
+    hooks_yaml("  pre_query: [{script: missing.sh, description: Broken}, {script: no-rm.sh, description: Ok}]\n  user_prompt_submit: [{script: stop.sh, description: Stop}]\n");
+    hook(
+        "stop.sh",
+        "cat >/dev/null\necho '{\"action\":\"block\",\"reason\":\"closed today\"}'\n",
+    );
+    let out = run("second", "[]\n");
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("hooks/missing.sh does not exist"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("hook_blocked: closed today"), "{stderr}");
 }

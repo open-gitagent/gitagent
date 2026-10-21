@@ -18,6 +18,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut resume: Option<Resume> = None;
     let mut n = 0;
+    let session_id = format!("gitagent-{}", std::process::id());
     loop {
         eprint!("> ");
         let _ = std::io::stderr().flush();
@@ -38,7 +39,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             work_dir: s.work_dir.clone(),
             out_dir: out_dir.join(format!("task-{n}")),
             timeout: Some(s.timeout),
-            session_id: None,
+            session_id: Some(session_id.clone()),
             events: s.events.clone(),
             resume: resume.take(),
             sandbox: s.sandbox.clone(),
@@ -62,5 +63,6 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             }
         }
     }
+    gitagent_core::end_session(&s.spec, &s.work_dir, &session_id).await;
     Ok(())
 }

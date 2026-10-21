@@ -70,6 +70,10 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
         repo.base,
         repo.status().unwrap_or_default().trim_end()
     );
+    let session_id = cli
+        .session_id
+        .clone()
+        .unwrap_or_else(|| format!("gitagent-{}", std::process::id()));
     let finished = gitagent_core::run(
         &s.spec,
         s.provider.as_ref(),
@@ -78,7 +82,7 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
             work_dir: repo.dir.clone(),
             out_dir: cli.out_dir.clone(),
             timeout: Some(s.timeout),
-            session_id: cli.session_id.clone(),
+            session_id: Some(session_id.clone()),
             events: events.clone(),
             resume: None,
             sandbox: s.sandbox.clone(),
@@ -88,6 +92,7 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
         },
     )
     .await?;
+    gitagent_core::end_session(&s.spec, &repo.dir, &session_id).await;
     report(&finished, !events.enabled());
     crate::export_telemetry(&finished, &s.spec).await;
     drop(finished.terminal);

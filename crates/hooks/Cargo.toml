@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 async-trait.workspace = true
 gitagent-loader.workspace = true
+gitagent-record.workspace = true
 # Settings-file hook matchers are regular expressions.
 regex = "1.13.1"
 serde_json.workspace = true

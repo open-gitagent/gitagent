@@ -485,6 +485,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "gitagent-loader",
+ "gitagent-record",
  "regex",
  "serde_json",
  "tempfile",

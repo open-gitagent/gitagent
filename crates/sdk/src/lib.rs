@@ -918,7 +918,11 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
         u64::from(p.spec.profile.context_window),
         options.prices,
     )));
-    let tool_names: Vec<String> = gitagent_tools_offered(&p);
+    let tool_names: Vec<String> =
+        gitagent_core::offered_tools(&p.spec, p.tool_allowlist.as_deref(), &p.tool_denylist)
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
     let init = converter.lock().unwrap().init(
         &p.work_dir,
         &tool_names,
@@ -958,32 +962,14 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
         hook_callbacks: p.hook_callbacks.clone(),
     };
     let spec = p.spec;
+    let (work_dir, session_id) = (p.work_dir.clone(), p.session_id.clone());
     let handle = tokio::spawn(async move {
         let finished = gitagent_core::run(&spec, provider.as_ref(), run_opts).await?;
+        gitagent_core::end_session(&spec, &work_dir, &session_id).await;
         drop(tx);
         Ok(finished.report)
     });
     Ok(Query { rx, handle })
-}
-
-/// Tool names after the allow and deny lists, for the init message.
-fn gitagent_tools_offered(p: &Prepared) -> Vec<String> {
-    let mut tools: Vec<String> =
-        gitagent_tools::specs(&p.spec.profile.tools, p.spec.profile.edit_tool)
-            .into_iter()
-            .map(|t| t.name)
-            .collect();
-    if !p.spec.skills.is_empty() {
-        tools.push(gitagent_tools::SKILL.into());
-    }
-    if !p.spec.agents.is_empty() {
-        tools.push(gitagent_tools::SUBAGENT.into());
-    }
-    if let Some(allow) = &p.tool_allowlist {
-        tools.retain(|t| allow.contains(t) || t == gitagent_tools::TASK_COMPLETE);
-    }
-    tools.retain(|t| !p.tool_denylist.contains(t) || t == gitagent_tools::TASK_COMPLETE);
-    tools
 }
 
 /// The outcome a result message reports, for callers that want gitagent's enum.

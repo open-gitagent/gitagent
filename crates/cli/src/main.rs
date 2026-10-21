@@ -299,7 +299,14 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
             Some(c) => {
                 let init = c.lock().unwrap().init(
                     &s.work_dir,
-                    &tool_names(&s.spec, tool_allowlist.as_deref(), &tool_denylist),
+                    &gitagent_core::offered_tools(
+                        &s.spec,
+                        tool_allowlist.as_deref(),
+                        &tool_denylist,
+                    )
+                    .into_iter()
+                    .map(|t| t.name)
+                    .collect::<Vec<_>>(),
                     &s.spec
                         .agents
                         .iter()
@@ -331,7 +338,7 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
                 work_dir: s.work_dir.clone(),
                 out_dir: out_dir.clone(),
                 timeout: Some(s.timeout),
-                session_id: Some(session_id),
+                session_id: Some(session_id.clone()),
                 events,
                 resume: None,
                 sandbox: s.sandbox.clone(),
@@ -341,6 +348,9 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
             },
         )
         .await?;
+        if !cli.bench {
+            gitagent_core::end_session(&s.spec, &s.work_dir, &session_id).await;
+        }
         report(&finished, !s.events.enabled() && !stream_json);
         if !cli.bench {
             export_telemetry(&finished, &s.spec).await;
@@ -378,25 +388,6 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
         f.terminal.linger().await;
     }
     ExitCode::from(code)
-}
-
-/// The tools a run offers after the allow and deny lists.
-fn tool_names(spec: &AgentSpec, allow: Option<&[String]>, deny: &[String]) -> Vec<String> {
-    let mut tools: Vec<String> = gitagent_tools::specs(&spec.profile.tools, spec.profile.edit_tool)
-        .into_iter()
-        .map(|t| t.name)
-        .collect();
-    if !spec.skills.is_empty() {
-        tools.push(gitagent_tools::SKILL.into());
-    }
-    if !spec.agents.is_empty() {
-        tools.push(gitagent_tools::SUBAGENT.into());
-    }
-    if let Some(allow) = allow {
-        tools.retain(|t| allow.contains(t) || t == gitagent_tools::TASK_COMPLETE);
-    }
-    tools.retain(|t| !deny.contains(t) || t == gitagent_tools::TASK_COMPLETE);
-    tools
 }
 
 /// Sends traces and metrics when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. A
