@@ -207,10 +207,14 @@ pub async fn learn_from_run(
     let trajectory: gitagent_record::atif::Trajectory = serde_json::from_str(&text)
         .with_context(|| format!("parsing {}", trajectory_path.display()))?;
     let (instruction, trace) = trace::render(&trajectory);
+    // Each run is its own task; the counter keeps two runs in the same
+    // millisecond apart.
+    static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let id = format!(
-        "{}@{}",
+        "{}@{}#{}",
         trajectory.session_id.as_deref().unwrap_or("run"),
-        gitagent_record::utc_now_rfc3339()
+        gitagent_record::utc_now_rfc3339(),
+        RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     );
     let trial = Trial {
         id: id.clone(),
