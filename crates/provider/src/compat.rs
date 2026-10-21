@@ -54,12 +54,19 @@ impl CompatProvider {
                     "set {upper}_BASE_URL to the OpenAI-compatible endpoint for {name:?}"
                 )
             })?;
-        let key_var = known.map_or(format!("{upper}_API_KEY"), |(_, _, k)| k.to_string());
-        let key = [key_var.as_str(), "GITAGENT_API_KEY"]
-            .iter()
-            .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()));
-        Self::new(base, key)
+        Self::new(base, api_key(name))
     }
+}
+
+/// The key for an endpoint named `name`: its well-known variable or
+/// `{NAME}_API_KEY`, else `GITAGENT_API_KEY`.
+pub fn api_key(name: &str) -> Option<String> {
+    let upper = name.to_uppercase().replace('-', "_");
+    let known = KNOWN.iter().find(|(n, _, _)| *n == name);
+    let key_var = known.map_or(format!("{upper}_API_KEY"), |(_, _, k)| k.to_string());
+    [key_var.as_str(), "GITAGENT_API_KEY"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()))
 }
 
 #[async_trait]

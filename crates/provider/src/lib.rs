@@ -5,6 +5,7 @@
 
 pub mod anthropic;
 pub mod compat;
+mod fallback;
 pub mod google;
 pub mod openai;
 mod scripted;
@@ -15,6 +16,7 @@ mod types;
 
 pub use anthropic::AnthropicProvider;
 pub use compat::CompatProvider;
+pub use fallback::FallbackProvider;
 pub use google::GoogleProvider;
 pub use openai::OpenAiProvider;
 pub use scripted::ScriptedProvider;
@@ -45,21 +47,49 @@ pub enum ProviderError {
 /// The provider a loaded configuration asks for: `scripted`, `anthropic`,
 /// `openai`, `google` / `gemini`, or any OpenAI-compatible endpoint by name.
 pub fn for_spec(spec: &gitagent_loader::AgentSpec) -> anyhow::Result<Box<dyn Provider>> {
+    let primary = for_model(&spec.model, &spec.profile, &spec.profile_source)?;
+    if spec.fallbacks.is_empty() {
+        return Ok(primary);
+    }
+    let mut chain = vec![(spec.model.to_string(), spec.model.model.clone(), primary)];
+    for fb in &spec.fallbacks {
+        let provider = for_model(&fb.model, &fb.profile, "fallback profile")?;
+        chain.push((fb.model.to_string(), fb.model.model.clone(), provider));
+    }
+    Ok(Box::new(FallbackProvider::new(chain)))
+}
+
+/// One model's adapter. A model with a base URL goes to that
+/// OpenAI-compatible endpoint, with the key from `{PROVIDER}_API_KEY` or
+/// `GITAGENT_API_KEY`.
+fn for_model(
+    model: &gitagent_loader::ModelRef,
+    profile: &gitagent_loader::Profile,
+    profile_source: &str,
+) -> anyhow::Result<Box<dyn Provider>> {
     use anyhow::Context;
-    match spec.model.provider.as_str() {
+    if let Some(url) = &model.base_url {
+        return Ok(Box::new(CompatProvider::new(
+            url.clone(),
+            compat::api_key(&model.provider),
+        )?));
+    }
+    match model.provider.as_str() {
         "scripted" => Ok(Box::new(ScriptedProvider::from_file(
-            std::path::Path::new(&spec.model.model),
+            std::path::Path::new(&model.model),
         )?)),
         "anthropic" => {
-            let cfg = spec.profile.anthropic.clone().with_context(|| {
-                format!("profile {} has no `anthropic` section", spec.profile_source)
-            })?;
+            let cfg = profile
+                .anthropic
+                .clone()
+                .with_context(|| format!("profile {profile_source} has no `anthropic` section"))?;
             Ok(Box::new(AnthropicProvider::from_env(cfg)?))
         }
         "openai" => {
-            let cfg = spec.profile.openai.clone().with_context(|| {
-                format!("profile {} has no `openai` section", spec.profile_source)
-            })?;
+            let cfg = profile
+                .openai
+                .clone()
+                .with_context(|| format!("profile {profile_source} has no `openai` section"))?;
             Ok(Box::new(OpenAiProvider::from_env(cfg)?))
         }
         "google" | "gemini" => Ok(Box::new(GoogleProvider::from_env()?)),

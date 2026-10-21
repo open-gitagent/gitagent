@@ -201,22 +201,23 @@ impl AgentDir {
 }
 
 /// A model id from an agent manifest. `provider:model` and `provider/model`
-/// name the provider; a bare id is recognised by its prefix.
+/// name the provider; a bare id is recognised by its prefix. Any of them may
+/// end in `@https://…` for an OpenAI-compatible endpoint.
 pub fn model_ref(id: &str) -> Result<ModelRef> {
-    let id = id.trim();
-    if id.contains('@') {
-        bail!("model {id:?}: a base URL after `@` is not supported yet; set {{PROVIDER}}_BASE_URL instead");
-    }
+    let (id, base_url) = crate::split_base_url(id.trim());
+    let mut m = model_id(id)?;
+    m.base_url = base_url;
+    Ok(m)
+}
+
+fn model_id(id: &str) -> Result<ModelRef> {
     // `provider/model` (the model id may itself contain `:`, e.g. a tag),
     // then `provider:model`.
     let slash = id.find('/');
     if slash.is_some_and(|s| id.find(':').is_none_or(|c| s < c)) {
         if let Some((provider, model)) = id.split_once('/') {
             if !provider.is_empty() && !model.is_empty() {
-                return Ok(ModelRef {
-                    provider: provider.to_string(),
-                    model: model.to_string(),
-                });
+                return Ok(ModelRef::new(provider, model));
             }
         }
     }
@@ -232,10 +233,7 @@ pub fn model_ref(id: &str) -> Result<ModelRef> {
     } else {
         bail!("model {id:?}: cannot tell its provider; write it as provider:model")
     };
-    Ok(ModelRef {
-        provider: provider.into(),
-        model: id.into(),
-    })
+    Ok(ModelRef::new(provider, id))
 }
 
 /// Schema checks on the raw manifest. Only messages; the caller decides
@@ -395,7 +393,19 @@ mod tests {
             assert_eq!(model_ref(id).unwrap().to_string(), want, "{id}");
         }
         assert!(model_ref("mystery-model").is_err());
-        assert!(model_ref("openai:gpt-6@http://localhost:8000").is_err());
+        let m = model_ref("openai:my-model@http://localhost:8000/v1").unwrap();
+        assert_eq!(m.to_string(), "openai:my-model");
+        assert_eq!(m.base_url.as_deref(), Some("http://localhost:8000/v1"));
+        assert_eq!(m.family(), crate::Family::Compat);
+        let m = model_ref("llama-3@https://host.example/v1").unwrap_err();
+        assert!(m.to_string().contains("cannot tell its provider"));
+        assert_eq!(
+            model_ref("ollama/qwen3@https://h/v1")
+                .unwrap()
+                .base_url
+                .as_deref(),
+            Some("https://h/v1")
+        );
     }
 
     #[test]

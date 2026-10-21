@@ -65,25 +65,41 @@ impl fmt::Display for Family {
     }
 }
 
-/// A `provider:model` reference, e.g. `openai:<model-id>`.
+/// A `provider:model` reference, e.g. `openai:<model-id>`, optionally with
+/// an OpenAI-compatible endpoint: `provider:model@https://host/v1`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelRef {
     pub provider: String,
     pub model: String,
+    /// When set, the model is served by this OpenAI-compatible endpoint
+    /// whatever the provider name says.
+    pub base_url: Option<String>,
 }
 
 impl ModelRef {
+    pub fn new(provider: &str, model: &str) -> Self {
+        ModelRef {
+            provider: provider.to_string(),
+            model: model.to_string(),
+            base_url: None,
+        }
+    }
+
     pub fn parse(s: &str) -> Result<Self> {
+        let (s, base_url) = split_base_url(s);
         match s.split_once(':') {
             Some((p, m)) if !p.is_empty() && !m.is_empty() => Ok(ModelRef {
-                provider: p.to_string(),
-                model: m.to_string(),
+                base_url,
+                ..ModelRef::new(p, m)
             }),
             _ => bail!("model must look like provider:model, got {s:?}"),
         }
     }
 
     pub fn family(&self) -> Family {
+        if self.base_url.is_some() {
+            return Family::Compat;
+        }
         match self.provider.as_str() {
             "anthropic" => Family::Anthropic,
             "openai" => Family::OpenAI,
@@ -93,10 +109,28 @@ impl ModelRef {
     }
 }
 
+/// `id@https://…` into the id and the endpoint. An `@` not followed by an
+/// http(s) URL is part of the id.
+pub fn split_base_url(s: &str) -> (&str, Option<String>) {
+    match s.find("@http://").or_else(|| s.find("@https://")) {
+        Some(at) => (&s[..at], Some(s[at + 1..].to_string())),
+        None => (s, None),
+    }
+}
+
 impl fmt::Display for ModelRef {
+    /// `provider:model`; the endpoint is left out (it may carry credentials).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.provider, self.model)
     }
+}
+
+/// A model to switch to when the ones before it fail, with the profile of
+/// its family.
+#[derive(Debug, Clone)]
+pub struct Fallback {
+    pub model: ModelRef,
+    pub profile: Profile,
 }
 
 /// Everything the agent needs from its configuration files.
@@ -121,6 +155,9 @@ pub struct AgentSpec {
     /// The project's agent definition (`agent.yaml` and its identity files),
     /// when the project directory has one. Never set in benchmark runs.
     pub agent: Option<AgentDir>,
+    /// Models to switch to, in order, when the current one fails
+    /// (`fallback_models` in gitagent.yaml, then the agent's `model.fallback`).
+    pub fallbacks: Vec<Fallback>,
 }
 
 impl AgentSpec {
@@ -198,7 +235,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
     };
 
     // --model, then gitagent.yaml, then the agent's `model.preferred`.
-    let model = match opts.model.as_deref().or(config.model.as_deref()) {
+    let mut model = match opts.model.as_deref().or(config.model.as_deref()) {
         Some(s) => ModelRef::parse(s)?,
         None => match agent.as_ref().and_then(AgentDir::preferred_model) {
             Some(m) => m?,
@@ -207,6 +244,16 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
             ),
         },
     };
+    // GITAGENT_MODEL_BASE_URL sends any model to an OpenAI-compatible
+    // endpoint; never in benchmark runs (no project or home directory).
+    let outside_bench = opts.project_dir.is_some() || opts.home_dir.is_some();
+    if outside_bench && model.base_url.is_none() && model.provider != "scripted" {
+        if let Ok(url) = std::env::var("GITAGENT_MODEL_BASE_URL") {
+            if !url.trim().is_empty() {
+                model.base_url = Some(url.trim().to_string());
+            }
+        }
+    }
 
     let profile_sel = opts.profile.as_deref().unwrap_or(&config.profile);
     let (mut profile, profile_source) = load_profile(profile_sel, model.family(), &config_dirs)?;
@@ -246,6 +293,24 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
     } else {
         Vec::new()
     };
+    let mut fallbacks = Vec::new();
+    let manifest_fallbacks = agent
+        .iter()
+        .filter_map(|a| a.manifest.model.as_ref())
+        .flat_map(|m| m.fallback.iter());
+    for id in config.fallback_models.iter().chain(manifest_fallbacks) {
+        let fb = if id.contains(':') && !id.contains('/') {
+            ModelRef::parse(id)?
+        } else {
+            manifest::model_ref(id)?
+        };
+        if fb == model || fallbacks.iter().any(|f: &Fallback| f.model == fb) {
+            continue;
+        }
+        let (profile, _) = load_profile("auto", fb.family(), &config_dirs)?;
+        fallbacks.push(Fallback { model: fb, profile });
+    }
+
     let mut system_prompt = build_system_prompt(&config_dirs)?;
     if let Some(a) = &agent {
         system_prompt = format!("{}\n\n{system_prompt}", a.identity_prompt());
@@ -279,6 +344,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         config_dirs,
         skills,
         agent,
+        fallbacks,
     })
 }
 
@@ -791,6 +857,59 @@ profile: quiet
         })
         .unwrap();
         assert_eq!(spec.model.to_string(), "anthropic:m");
+    }
+
+    #[test]
+    fn fallbacks_come_from_config_then_manifest_with_their_own_profiles() {
+        let dir = agent_project();
+        std::fs::write(
+            dir.path().join("agent.yaml"),
+            "name: bot\nversion: 1.0.0\ndescription: d\nmodel:\n  preferred: anthropic:claude-opus-5-5\n  fallback: [gpt-6-astra, anthropic:claude-opus-5-5, ollama/qwen3:8b@http://localhost:11434/v1]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("gitagent.yaml"),
+            "fallback_models: [\"google:gemini-3.5-flash\", \"openai:gpt-6-astra\"]\n",
+        )
+        .unwrap();
+        let spec = load(&LoadOptions {
+            project_dir: Some(dir.path().to_path_buf()),
+            ..Default::default()
+        })
+        .unwrap();
+        let chain: Vec<(String, Family)> = spec
+            .fallbacks
+            .iter()
+            .map(|f| (f.model.to_string(), f.profile.family))
+            .collect();
+        // The primary and duplicates are skipped; each keeps its family's profile.
+        assert_eq!(
+            chain,
+            vec![
+                ("google:gemini-3.5-flash".to_string(), Family::Google),
+                ("openai:gpt-6-astra".to_string(), Family::OpenAI),
+                ("ollama:qwen3:8b".to_string(), Family::Compat),
+            ]
+        );
+        assert_eq!(
+            spec.fallbacks[2].model.base_url.as_deref(),
+            Some("http://localhost:11434/v1")
+        );
+    }
+
+    #[test]
+    fn a_base_url_after_the_model_makes_it_openai_compatible() {
+        let m = ModelRef::parse("openai:my-finetune@https://llm.internal/v1").unwrap();
+        assert_eq!(
+            (m.provider.as_str(), m.model.as_str()),
+            ("openai", "my-finetune")
+        );
+        assert_eq!(m.base_url.as_deref(), Some("https://llm.internal/v1"));
+        assert_eq!(m.family(), Family::Compat);
+        assert_eq!(m.to_string(), "openai:my-finetune");
+        // An `@` that does not start a URL belongs to the model id.
+        let m = ModelRef::parse("compat:model@v2").unwrap();
+        assert_eq!((m.model.as_str(), m.base_url), ("model@v2", None));
     }
 
     #[test]
