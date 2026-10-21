@@ -6,12 +6,14 @@
 
 mod agents;
 mod config;
+pub mod manifest;
 mod profile;
 pub mod sdk;
 mod skills;
 
 pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
 pub use config::{Config, RepoConfig};
+pub use manifest::AgentDir;
 pub use profile::{
     AnthropicCfg, CacheCfg, ContextCfg, EditTool, Effort, GuardsCfg, Masking, OpenAiCfg, Profile,
     ShapeCfg, StopCfg, ThinkingBinding, ThinkingDisplay, ToolCalling, ToolNaming, ToolsCfg,
@@ -116,6 +118,9 @@ pub struct AgentSpec {
     pub skills: Vec<Skill>,
     /// Sub-agents the `subagent` tool can start (when the profile enables it).
     pub agents: Vec<AgentDef>,
+    /// The project's agent definition (`agent.yaml` and its identity files),
+    /// when the project directory has one. Never set in benchmark runs.
+    pub agent: Option<AgentDir>,
 }
 
 impl AgentSpec {
@@ -182,24 +187,69 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         Some(path) => (read(path)?, path.display().to_string()),
         None => (DEFAULT_CONFIG.to_string(), "built-in".to_string()),
     };
-    let config: Config = serde_saphyr::from_str(&config_text)
+    let mut config: Config = serde_saphyr::from_str(&config_text)
         .with_context(|| format!("parsing gitagent.yaml ({config_source})"))?;
 
-    let model_str =
-        opts.model.as_deref().or(config.model.as_deref()).context(
-            "no model given: pass --model provider:model or set `model` in gitagent.yaml",
-        )?;
-    let model = ModelRef::parse(model_str)?;
+    // An agent directory (`agent.yaml`) in the project: only outside
+    // benchmark runs, which pass no project directory.
+    let agent = match &opts.project_dir {
+        Some(dir) => AgentDir::load(dir)?,
+        None => None,
+    };
+
+    // --model, then gitagent.yaml, then the agent's `model.preferred`.
+    let model = match opts.model.as_deref().or(config.model.as_deref()) {
+        Some(s) => ModelRef::parse(s)?,
+        None => match agent.as_ref().and_then(AgentDir::preferred_model) {
+            Some(m) => m?,
+            None => bail!(
+                "no model given: pass --model provider:model, set `model` in gitagent.yaml, or set `model.preferred` in agent.yaml"
+            ),
+        },
+    };
 
     let profile_sel = opts.profile.as_deref().unwrap_or(&config.profile);
-    let (profile, profile_source) = load_profile(profile_sel, model.family(), &config_dirs)?;
+    let (mut profile, profile_source) = load_profile(profile_sel, model.family(), &config_dirs)?;
+
+    if let Some(a) = &agent {
+        let m = &a.manifest;
+        if let Some(n) = m.runtime.as_ref().and_then(|r| r.max_turns) {
+            config.max_turns = n;
+        }
+        // Temperature: runtime, then model constraints.
+        let constraints = m.model.as_ref().and_then(|s| s.constraints.as_ref());
+        if let Some(t) = m
+            .runtime
+            .as_ref()
+            .and_then(|r| r.temperature)
+            .or(constraints.and_then(|c| c.temperature))
+        {
+            profile.temperature = Some(t);
+        }
+        if let Some(n) = constraints.and_then(|c| c.max_tokens) {
+            profile.max_output_tokens = n;
+        }
+    }
 
     let skills = if config.skills {
-        skills::discover(&config_dirs)
+        // The agent's own `skills/` first; its `skills:` list, when given,
+        // names the ones enabled.
+        let mut dirs: Vec<PathBuf> = agent.iter().map(|a| a.root.clone()).collect();
+        dirs.extend(config_dirs.iter().cloned());
+        let mut found = skills::discover(&dirs);
+        if let Some(enabled) = agent.as_ref().map(|a| &a.manifest.skills) {
+            if !enabled.is_empty() {
+                found.retain(|s| enabled.contains(&s.name));
+            }
+        }
+        found
     } else {
         Vec::new()
     };
     let mut system_prompt = build_system_prompt(&config_dirs)?;
+    if let Some(a) = &agent {
+        system_prompt = format!("{}\n\n{system_prompt}", a.identity_prompt());
+    }
     if profile.lessons {
         let lessons = lessons(&config_dirs)?;
         if !lessons.is_empty() {
@@ -228,6 +278,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         agents,
         config_dirs,
         skills,
+        agent,
     })
 }
 
@@ -678,5 +729,75 @@ profile: quiet
         let a = load(&opts("anthropic:a")).unwrap().system_prompt;
         let b = load(&opts("openai:b")).unwrap().system_prompt;
         assert_eq!(a, b);
+    }
+
+    fn agent_project() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(
+            root.join("agent.yaml"),
+            "name: support-bot\nversion: 1.0.0\ndescription: Answers billing questions.\nmodel:\n  preferred: gpt-6-astra\n  constraints: {max_tokens: 9000}\nruntime: {max_turns: 30, temperature: 0.3}\nskills: [refunds]\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("SOUL.md"), "I am calm and precise.\n").unwrap();
+        std::fs::write(root.join("RULES.md"), "- Never share card numbers.\n").unwrap();
+        for (name, desc) in [("refunds", "Issue refunds"), ("invoices", "Fix invoices")] {
+            let skill = root.join("skills").join(name);
+            std::fs::create_dir_all(&skill).unwrap();
+            std::fs::write(
+                skill.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: {desc}\n---\nSteps.\n"),
+            )
+            .unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn an_agent_directory_shapes_the_prompt_model_and_limits() {
+        let dir = agent_project();
+        let spec = load(&LoadOptions {
+            project_dir: Some(dir.path().to_path_buf()),
+            ..Default::default()
+        })
+        .unwrap();
+        let identity = "# support-bot v1.0.0\nAnswers billing questions.\n\nI am calm and precise.\n\n- Never share card numbers.\n\n";
+        assert!(
+            spec.system_prompt.starts_with(identity),
+            "{}",
+            spec.system_prompt
+        );
+        // gitagent's own working instructions follow the identity.
+        let built_in = load(&opts("anthropic:a")).unwrap().system_prompt;
+        let first_line = built_in.lines().next().unwrap();
+        assert!(spec.system_prompt[identity.len()..].starts_with(first_line));
+
+        assert_eq!(spec.model.to_string(), "openai:gpt-6-astra");
+        assert_eq!(spec.config.max_turns, 30);
+        assert_eq!(spec.profile.temperature, Some(0.3));
+        assert_eq!(spec.profile.max_output_tokens, 9000);
+        let names: Vec<&str> = spec.skills.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["refunds"]);
+        assert!(spec.agent.is_some());
+    }
+
+    #[test]
+    fn an_explicit_model_wins_over_the_agents_preferred_one() {
+        let dir = agent_project();
+        let spec = load(&LoadOptions {
+            project_dir: Some(dir.path().to_path_buf()),
+            model: Some("anthropic:m".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(spec.model.to_string(), "anthropic:m");
+    }
+
+    #[test]
+    fn without_a_project_directory_agent_files_are_never_read() {
+        // Benchmark runs pass no project directory.
+        let spec = load(&opts("anthropic:a")).unwrap();
+        assert!(spec.agent.is_none());
+        assert!(!spec.system_prompt.contains("support-bot"));
     }
 }

@@ -233,6 +233,11 @@ pub(crate) fn setup(cli: &Cli) -> Result<Setup> {
         );
     }
     let mut spec = spec;
+    if let Some(agent) = &spec.agent {
+        for w in &agent.warnings {
+            eprintln!("gitagent: warning: {w}");
+        }
+    }
     if let Some(n) = cli.max_turns {
         spec.config.max_turns = n;
     }
