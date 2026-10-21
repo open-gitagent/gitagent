@@ -484,6 +484,40 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
             break Outcome::Refused;
         }
 
+        if resp.tool_calls.is_empty()
+            && spec.conversation
+            && !cut_off
+            && !resp.text.trim().is_empty()
+        {
+            // Conversation mode: a plain reply ends the turn.
+            counters.inc("conversation_replies");
+            traj.push(step);
+            let check = FinalCheck {
+                hooks: hooks.as_ref(),
+                gate: &mut gate,
+                spec,
+                events: &events,
+                counters: &mut counters,
+                turn: turns,
+            };
+            match check.run(resp.text.trim().to_string()).await {
+                Ok(r) => {
+                    summary = Some(r);
+                    flush(&traj, &counters, &counters_path);
+                    events.emit(
+                        "turn_end",
+                        json!({"turn": turns, "usage": resp.usage, "prompt_tokens": prompt_tokens}),
+                    );
+                    break Outcome::Completed;
+                }
+                Err(message) => {
+                    messages.push(Message::user_text(message.clone()));
+                    traj.push(Step::user(message));
+                    flush(&traj, &counters, &counters_path);
+                    continue;
+                }
+            }
+        }
         if resp.tool_calls.is_empty() {
             no_tool_turns += 1;
             counters.inc("no_tool_turns");
@@ -817,57 +851,25 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                 }
             }
             if output.complete {
-                summary = run_call
+                let response = run_call
                     .arguments
                     .get("summary")
                     .and_then(Value::as_str)
-                    .map(str::to_string);
-                if let Some(h) = hooks.as_ref().filter(|h| h.has(HookEvent::PreResponse)) {
-                    let data = object(json!({"response": summary.clone().unwrap_or_default()}));
-                    match h.event(HookEvent::PreResponse, None, data).await {
-                        Decision::Allow => {}
-                        Decision::Modify(d) => {
-                            if let Some(r) = d.get("response").and_then(Value::as_str) {
-                                counters.inc("hook_modifies");
-                                summary = Some(r.to_string());
-                            }
-                        }
-                        Decision::Block { reason } => {
-                            counters.inc("hook_blocks");
-                            events.emit(
-                                "guard",
-                                json!({"turn": turns, "kind": "hook_block", "reason": reason}),
-                            );
-                            output.complete = false;
-                            output.content = format!(
-                                "Your final response was blocked by a hook: {reason}\nAddress this, then call task_complete again."
-                            );
-                            summary = None;
-                        }
-                    }
-                }
-                if output.complete && spec.supervision.review_responses {
-                    let request = ApprovalRequest {
-                        tool_name: gitagent_tools::TASK_COMPLETE.into(),
-                        arguments: object(json!({"summary": summary})),
-                        reason:
-                            "the final response needs review (communications.pre_review_required)"
-                                .into(),
-                    };
-                    let answer = gate.ask(&request).await;
-                    events.emit(
-                        "approval",
-                        json!({"turn": turns, "id": call.id, "approved": answer.approved, "reason": answer.reason}),
-                    );
-                    if answer.approved {
-                        counters.inc("approvals_granted");
-                    } else {
-                        counters.inc("approvals_denied");
+                    .unwrap_or_default()
+                    .to_string();
+                let check = FinalCheck {
+                    hooks: hooks.as_ref(),
+                    gate: &mut gate,
+                    spec,
+                    events: &events,
+                    counters: &mut counters,
+                    turn: turns,
+                };
+                match check.run(response).await {
+                    Ok(r) => summary = Some(r).filter(|r| !r.is_empty()),
+                    Err(message) => {
                         output.complete = false;
-                        output.content = format!(
-                            "Your final response was not approved: {}\nRevise it, then call task_complete again.",
-                            answer.reason.as_deref().unwrap_or("no reason given")
-                        );
+                        output.content = message;
                         summary = None;
                     }
                 }
@@ -1069,6 +1071,10 @@ pub fn offered_tools(
         tools.retain(|t| allow.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
     }
     tools.retain(|t| !deny.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
+    if spec.conversation {
+        // A plain reply ends the turn.
+        tools.retain(|t| t.name != gitagent_tools::TASK_COMPLETE);
+    }
     tools
 }
 
@@ -1170,6 +1176,74 @@ fn object(v: Value) -> Map<String, Value> {
     match v {
         Value::Object(m) => m,
         _ => Map::new(),
+    }
+}
+
+/// The checks a final response passes before it is delivered: the
+/// `pre_response` hooks (which may block or rewrite it), then approval when
+/// responses are reviewed.
+struct FinalCheck<'a, 'g> {
+    hooks: Option<&'a Hooks>,
+    gate: &'a mut approval::Gate<'g>,
+    spec: &'a AgentSpec,
+    events: &'a Events,
+    counters: &'a mut Counters,
+    turn: u32,
+}
+
+impl FinalCheck<'_, '_> {
+    /// The response to deliver, or what to tell the model instead.
+    async fn run(self, mut response: String) -> Result<String, String> {
+        let again = if self.spec.conversation {
+            "send your reply again"
+        } else {
+            "call task_complete again"
+        };
+        if let Some(h) = self.hooks.filter(|h| h.has(HookEvent::PreResponse)) {
+            let data = object(json!({ "response": response }));
+            match h.event(HookEvent::PreResponse, None, data).await {
+                Decision::Allow => {}
+                Decision::Modify(d) => {
+                    if let Some(r) = d.get("response").and_then(Value::as_str) {
+                        self.counters.inc("hook_modifies");
+                        response = r.to_string();
+                    }
+                }
+                Decision::Block { reason } => {
+                    self.counters.inc("hook_blocks");
+                    self.events.emit(
+                        "guard",
+                        json!({"turn": self.turn, "kind": "hook_block", "reason": reason}),
+                    );
+                    return Err(format!(
+                        "Your final response was blocked by a hook: {reason}\nAddress this, then {again}."
+                    ));
+                }
+            }
+        }
+        if self.spec.supervision.review_responses {
+            let request = ApprovalRequest {
+                tool_name: gitagent_tools::TASK_COMPLETE.into(),
+                arguments: object(json!({ "summary": response })),
+                reason: "the final response needs review (communications.pre_review_required)"
+                    .into(),
+            };
+            let answer = self.gate.ask(&request).await;
+            self.events.emit(
+                "approval",
+                json!({"turn": self.turn, "approved": answer.approved, "reason": answer.reason}),
+            );
+            if answer.approved {
+                self.counters.inc("approvals_granted");
+            } else {
+                self.counters.inc("approvals_denied");
+                return Err(format!(
+                    "Your final response was not approved: {}\nRevise it, then {again}.",
+                    answer.reason.as_deref().unwrap_or("no reason given")
+                ));
+            }
+        }
+        Ok(response)
     }
 }
 
@@ -1380,11 +1454,17 @@ fn run_subagent<'a>(
             None
         };
         let provider: &dyn Provider = own_provider.as_deref().unwrap_or(provider);
+        let finish = if spec.conversation {
+            "When done, reply without calling a tool, with a summary of what you found or did, \
+             including the paths, commands and results the other agent needs; that reply is all \
+             it sees."
+        } else {
+            "When done, call task_complete with a summary of what you found or did, including the \
+             paths, commands and results the other agent needs; that summary is all it sees."
+        };
         child.system_prompt = format!(
         "{}\n# Sub-agent\n\nYou were started by another agent for one piece of work: the task below. \
-         You cannot ask it questions. When done, call task_complete with a summary of what you \
-         found or did, including the paths, commands and results the other agent needs; that \
-         summary is all it sees.\n{}",
+         You cannot ask it questions. {finish}\n{}",
         spec.system_prompt,
         if def.instructions.is_empty() {
             String::new()

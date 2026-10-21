@@ -39,6 +39,7 @@ use anyhow::{bail, Context, Result};
 
 const DEFAULT_CONFIG: &str = include_str!("../../../gitagent.yaml");
 const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../../../prompts/system.md");
+const DEFAULT_CONVERSATION_PROMPT: &str = include_str!("../../../prompts/conversation.md");
 const DEFAULT_LESSONS: &str = include_str!("../../../prompts/lessons.md");
 const DEFAULT_PROFILES: &[(&str, &str)] = &[
     (
@@ -186,6 +187,8 @@ pub struct AgentSpec {
     /// Problems found while loading that did not stop it (besides the
     /// agent directory's own, in `agent.warnings`).
     pub warnings: Vec<String>,
+    /// Conversation mode (see [`LoadOptions::conversation`]).
+    pub conversation: bool,
 }
 
 impl AgentSpec {
@@ -210,6 +213,9 @@ pub struct LoadOptions {
     pub model: Option<String>,
     /// Overrides `profile` from the config: `auto`, a profile name or a path to a YAML file.
     pub profile: Option<String>,
+    /// Conversation mode: working instructions for talking with a person
+    /// (`prompts/conversation.md`), and a plain reply ends each turn.
+    pub conversation: bool,
 }
 
 pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
@@ -349,7 +355,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         fallbacks.push(Fallback { model: fb, profile });
     }
 
-    let mut system_prompt = build_system_prompt(&config_dirs)?;
+    let mut system_prompt = build_system_prompt(&config_dirs, opts.conversation)?;
     if let Some(a) = &agent {
         system_prompt = format!("{}\n\n{system_prompt}", a.identity_prompt());
     }
@@ -441,6 +447,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         mcp_servers,
         supervision,
         warnings,
+        conversation: opts.conversation,
     })
 }
 
@@ -520,10 +527,15 @@ fn validate_profile(p: &Profile) -> Result<()> {
 }
 
 /// `prompts/system.md`, followed by `prompts/rules.md` when present.
-fn build_system_prompt(dirs: &[PathBuf]) -> Result<String> {
-    let system = match find_in(dirs, "prompts/system.md") {
+fn build_system_prompt(dirs: &[PathBuf], conversation: bool) -> Result<String> {
+    let (file, default) = if conversation {
+        ("prompts/conversation.md", DEFAULT_CONVERSATION_PROMPT)
+    } else {
+        ("prompts/system.md", DEFAULT_SYSTEM_PROMPT)
+    };
+    let system = match find_in(dirs, file) {
         Some(p) => read(&p)?,
-        None => DEFAULT_SYSTEM_PROMPT.to_string(),
+        None => default.to_string(),
     };
     let mut out = strip_header_comment(&system).trim_end().to_string();
     if let Some(rules) = find_in(dirs, "prompts/rules.md") {

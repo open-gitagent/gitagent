@@ -1432,3 +1432,40 @@ async fn declared_tools_marked_for_confirmation_always_ask() {
     let t = r.trajectory().to_string();
     assert_eq!(t.matches("\"content\":\"ran\"").count(), 1, "{t}");
 }
+
+#[tokio::test]
+async fn in_conversation_mode_a_plain_reply_ends_the_turn() {
+    let chat = load(&LoadOptions {
+        model: Some("scripted:test".into()),
+        conversation: true,
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(chat.system_prompt.contains("# Ending your turn"));
+    assert!(!chat.system_prompt.contains("task_complete"));
+    let r = run_script(
+        &chat,
+        "What is in hello.txt?",
+        "- tool_calls: [{name: exec, arguments: {cmd: \"echo hi > hello.txt && cat hello.txt\"}}]\n\
+         - text: \"It says hi.\"\n",
+    )
+    .await;
+    assert_eq!(r.report.outcome, Outcome::Completed);
+    assert_eq!(r.report.summary.as_deref(), Some("It says hi."));
+    assert_eq!(r.counters()["conversation_replies"], 1);
+    let names: Vec<String> = r.provider.requests()[0]
+        .tools
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
+    assert!(!names.contains(&"task_complete".to_string()), "{names:?}");
+
+    // Task mode keeps asking for a tool call.
+    let r = run_script(
+        &spec(),
+        "x",
+        "- text: \"Done.\"\n- text: \"Done.\"\n- text: \"Done.\"\n",
+    )
+    .await;
+    assert_eq!(r.report.outcome, Outcome::NoToolCalls);
+}

@@ -1,6 +1,7 @@
-//! Interactive mode: tasks are read from stdin one line at a time. Each task
-//! continues the same conversation and shell. Ctrl-C stops the current task
-//! (and starts a fresh conversation); Ctrl-D or `exit` ends the session.
+//! Interactive mode: messages are read from stdin one line at a time, in
+//! conversation mode (a plain reply ends each turn). Each message continues
+//! the same conversation and shell. Ctrl-C stops the current turn (and starts
+//! a fresh conversation); Ctrl-D or `exit` ends the session.
 
 use std::io::Write;
 use std::path::Path;
@@ -13,7 +14,7 @@ use crate::{report, Setup};
 
 pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
     eprintln!(
-        "Type a task and press Enter. Ctrl-C stops the current task; Ctrl-D or `exit` quits."
+        "Type a message and press Enter. Ctrl-C stops the current turn; Ctrl-D or `exit` quits."
     );
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut resume: Option<Resume> = None;
@@ -63,7 +64,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             },
             _ = tokio::signal::ctrl_c() => {
                 // The run, its shell and its history were dropped with it.
-                eprintln!("\ngitagent: task stopped; the next task starts a fresh conversation");
+                eprintln!("\ngitagent: stopped; the next message starts a fresh conversation");
             }
         }
     }

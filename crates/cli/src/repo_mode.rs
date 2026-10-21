@@ -46,7 +46,8 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
     let repo = Repo::clone_for_task(&opts, &task)?;
 
     cli.dir = Some(repo.dir.clone());
-    let s = setup(cli)?;
+    // Repo mode commits when the agent calls task_complete.
+    let s = setup(cli, false)?;
     let events = s.events.clone();
     events.emit(
         "repo",

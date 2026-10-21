@@ -116,6 +116,9 @@ pub struct AgentOptions {
     /// Asked when a call or the final response needs a person's approval
     /// (the agent's `compliance` section); without one those are denied.
     pub approver: Option<Arc<dyn gitagent_core::Approver>>,
+    /// Conversation mode: a plain reply ends the run (instead of
+    /// `task_complete`), with working instructions for talking with a person.
+    pub conversation: bool,
 }
 
 // ---------------------------------------------------------------- hooks
@@ -849,6 +852,7 @@ pub fn prepare(options: &AgentOptions) -> Result<Prepared> {
             }
         }),
         profile: options.profile.clone(),
+        conversation: options.conversation,
         project_dir: project.then(|| work_dir.clone()),
         home_dir: if user {
             std::env::var_os("HOME").map(PathBuf::from)

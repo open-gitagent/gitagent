@@ -217,9 +217,9 @@ fn interactive_session_continues_between_tasks() {
     std::fs::write(
         &script,
         "- tool_calls: [{name: exec, arguments: {cmd: 'export GA_X=7'}}]\n\
-         - tool_calls: [{name: task_complete, arguments: {summary: first done}}]\n\
+         - text: first done\n\
          - tool_calls: [{name: exec, arguments: {cmd: 'echo $GA_X > x.txt'}}]\n\
-         - tool_calls: [{name: task_complete, arguments: {summary: second done}}]\n",
+         - text: second done\n",
     )
     .unwrap();
     let mut child = gitagent()
@@ -1201,4 +1201,39 @@ fn validate_reports_and_sets_the_exit_code() {
         "error: agent.yaml:2: version: must be a semantic version like 1.0.0 (got \"one\")\n"
     );
     assert!(String::from_utf8_lossy(&out.stderr).contains("1 error, 0 warnings"));
+}
+
+/// `--conversation`: the plain reply ends the run and is printed.
+#[test]
+fn conversation_mode_prints_the_reply() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(&script, "- text: \"Hello! How can I help?\"\n").unwrap();
+    let out = gitagent()
+        .args(["-p", "hi", "--conversation", "--model"])
+        .arg(format!("scripted:{}", script.display()))
+        .arg("--dir")
+        .arg(dir.path())
+        .arg("--out-dir")
+        .arg(dir.path().join("out"))
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "Hello! How can I help?"
+    );
+    let out = gitagent()
+        .args([
+            "--bench",
+            "--conversation",
+            "-p",
+            "x",
+            "--model",
+            "scripted:x",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
 }

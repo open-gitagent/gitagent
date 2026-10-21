@@ -30,6 +30,11 @@ pub(crate) struct Cli {
     #[arg(long)]
     bench: bool,
 
+    /// Conversation mode: a plain reply ends the run instead of
+    /// `task_complete` (always on in the interactive session).
+    #[arg(long, conflicts_with = "bench")]
+    conversation: bool,
+
     /// Read the task from this file.
     #[arg(long, conflicts_with = "prompt")]
     instruction_file: Option<PathBuf>,
@@ -180,7 +185,7 @@ async fn async_main() -> ExitCode {
         None if cli.bench => usage_error(anyhow::anyhow!(
             "--bench needs a task: give --instruction-file or -p/--prompt"
         )),
-        None => match setup(&cli) {
+        None => match setup(&cli, true) {
             Ok(s) => match repl::run(s, &cli.out_dir).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => usage_error(e),
@@ -209,7 +214,9 @@ fn task_from(cli: &Cli) -> Result<Option<String>> {
     Ok(task)
 }
 
-pub(crate) fn setup(cli: &Cli) -> Result<Setup> {
+/// Loads everything a run needs; `conversation` is conversation mode
+/// (`--conversation`, and always in the interactive session).
+pub(crate) fn setup(cli: &Cli, conversation: bool) -> Result<Setup> {
     let work_dir = match &cli.dir {
         Some(d) => d.clone(),
         None => std::env::current_dir().context("reading the current directory")?,
@@ -230,6 +237,7 @@ pub(crate) fn setup(cli: &Cli) -> Result<Setup> {
         profile: cli.profile.clone(),
         project_dir,
         home_dir,
+        conversation: conversation && !cli.bench,
     })?;
     if !matches!(spec.config.learning.as_str(), "off" | "online") {
         bail!(
@@ -281,7 +289,7 @@ pub(crate) fn setup(cli: &Cli) -> Result<Setup> {
 async fn single(cli: Cli, instruction: String) -> ExitCode {
     let out_dir = cli.out_dir.clone();
     let result = async {
-        let s = setup(&cli)?;
+        let s = setup(&cli, cli.conversation)?;
         let stream_json = cli.output_format == OutputFormat::StreamJson;
         let session_id = cli
             .session_id
