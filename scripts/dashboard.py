@@ -14,7 +14,7 @@ output, tests or solutions.
 Usage:
   python3 scripts/dashboard.py [--root bench/jobs] [--port 8731]
 
-Stdlib only (Python 3.9+); binds to 127.0.0.1.
+Stdlib only (Python 3.9+); binds to localhost only.
 """
 
 import argparse
@@ -425,6 +425,43 @@ def newest_mtime(trial_dir: Path):
     return newest
 
 
+TIMEOUT_MULTIPLIERS = ("timeout_multiplier", "agent_timeout_multiplier", "verifier_timeout_multiplier",
+                       "agent_setup_timeout_multiplier", "environment_build_timeout_multiplier")
+TIMEOUT_OVERRIDES = (("agent", "override_timeout_sec"), ("agent", "max_timeout_sec"), ("agent", "override_setup_timeout_sec"),
+                     ("verifier", "override_timeout_sec"), ("verifier", "max_timeout_sec"))
+
+
+def effective_multipliers(raw):
+    """Each timeout multiplier as Harbor applies it: an unset per-phase one
+    falls back to timeout_multiplier (itself 1.0 when unset)."""
+    if not raw:
+        return None
+    base = raw.get("timeout_multiplier")
+    base = 1.0 if base is None else base
+    return {k: (base if raw.get(k) is None else raw[k]) for k in TIMEOUT_MULTIPLIERS}
+
+
+def trial_harbor(result, cfg):
+    """What Harbor recorded about how a trial was run: the task's version and
+    checksum, the verifier mode and the timeout settings. The settings come
+    from result.json's config, or the trial's config.json while it runs."""
+    result = result if isinstance(result, dict) else {}
+    tcfg = result.get("config") if isinstance(result.get("config"), dict) else (cfg if isinstance(cfg, dict) else {})
+    task_id = result.get("task_id") if isinstance(result.get("task_id"), dict) else {}
+    raw = {k: tcfg.get(k) for k in TIMEOUT_MULTIPLIERS} if tcfg else None
+    overrides = {f"{sec}.{key}": (tcfg.get(sec) or {}).get(key) for sec, key in TIMEOUT_OVERRIDES
+                 if isinstance(tcfg.get(sec), dict) and (tcfg.get(sec) or {}).get(key) is not None}
+    return {
+        "task_checksum": result.get("task_checksum"),
+        "task_id": {k: task_id.get(k) for k in ("org", "name", "ref")} if task_id else None,
+        "source": result.get("source"),
+        "verifier_environment_mode": result.get("verifier_environment_mode"),
+        "timeout_multipliers": raw,
+        "effective_multipliers": effective_multipliers(raw),
+        "timeout_overrides": overrides,
+    }
+
+
 def read_trial(trial_dir: Path, with_live=True, job_running=False):
     """One row per trial, from result.json and gitagent's own agent/ files."""
     result = load_json(trial_dir / "result.json")
@@ -469,6 +506,9 @@ def read_trial(trial_dir: Path, with_live=True, job_running=False):
         "live": None,
         "counters": None,
         "cost_usd": None,
+        # Harbor's per-trial record (task version, timeout settings); scan() and
+        # trial_detail() take it out of the row before it is sent.
+        "_harbor": trial_harbor(result, cfg),
     }
 
     if result is None:
@@ -566,10 +606,168 @@ def round_of(job_name, rounds):
     return None
 
 
+# bench/hub.json (optional): {"<job name>": "<Harbor Hub URL>"}; `harbor upload` leaves nothing in the job dir once it succeeds, so the link is recorded there by hand.
+HUB_FILE = REPO / "bench" / "hub.json"
+# The .harbor-upload/ folder holds Harbor's upload archive only while an upload runs; one left behind means it did not finish.
+UPLOAD_SCRATCH = ".harbor-upload"
+# The difference, in points, between Harbor's mean reward and the dashboard's accuracy that gets a warning.
+MEAN_TOLERANCE_PTS = 0.5
+
+
+def hub_links():
+    data = load_json(HUB_FILE)
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, str) and re.match(r"^https?://", v)}
+
+
+def harbor_job(job_dir: Path, trials, metas, hub):
+    """Harbor's own record of a job, from its result.json and config.json:
+    counts, mean reward and pass@k per agent/model/dataset, and the settings
+    the job ran with (Harbor leaves out settings at their default value)."""
+    res = load_json(job_dir / "result.json")
+    cfg = load_json(job_dir / "config.json")
+    # Harbor writes the job's result.json while it runs; finished_at is set at the end.
+    finished = isinstance(res, dict) and bool(res.get("finished_at"))
+    res = res if finished else {}
+    cfg = cfg if isinstance(cfg, dict) else {}
+    stats = res.get("stats") or {}
+
+    agents_cfg = cfg.get("agents")
+    agents = []
+    for a in agents_cfg if isinstance(agents_cfg, list) else [{}]:
+        a = a if isinstance(a, dict) else {}
+        kwargs = a.get("kwargs") if isinstance(a.get("kwargs"), dict) else {}
+        agents.append({
+            "name": a.get("import_path") or a.get("name") or "oracle",
+            "model_name": a.get("model_name"),
+            "model_id": model_id(a.get("model_name")),
+            "kwargs": kwargs,
+            "profile": kwargs.get("profile"),
+            "timeout_s": kwargs.get("timeout_s"),
+        })
+    datasets = []
+    for ds in cfg.get("datasets") or []:
+        if isinstance(ds, dict):
+            names = ds.get("task_names")
+            datasets.append({"name": ds.get("name") or ds.get("path"), "ref": ds.get("ref"),
+                             "n_tasks": len(names) if isinstance(names, list) and names else None})
+    n_attempts = cfg.get("n_attempts")
+    attempts = n_attempts if isinstance(n_attempts, int) else 1
+    listed = [d["n_tasks"] for d in datasets]
+    tasks_known = bool(listed) and all(n is not None for n in listed)
+    n_tasks = sum(listed) if tasks_known else len({t["task"] for t in trials})
+
+    evals = []
+    for key, e in (stats.get("evals") or {}).items():
+        e = e if isinstance(e, dict) else {}
+        parts = key.split("__")
+        agent, dataset = parts[0], parts[-1]
+        model = parts[1] if len(parts) >= 3 else None
+        mine = [t for t in trials if t["kind"] == agent_kind(agent) and (t["model_id"] or None) == (model or None)]
+        if not mine and len(stats.get("evals") or {}) == 1:
+            mine = trials
+        scored = [t for t in mine if t["reward"] is not None]
+        passed = sum(1 for t in scored if t["reward"] >= 1.0)
+        mean = next((m.get("mean") for m in e.get("metrics") or [] if isinstance(m, dict) and m.get("mean") is not None), None)
+        dash = passed / len(scored) if scored else None
+        diff = round(100 * (mean - dash), 2) if mean is not None and dash is not None else None
+        evals.append({
+            "key": key, "agent": agent, "model": model, "dataset": dataset,
+            "n_trials": e.get("n_trials"), "n_errors": e.get("n_errors"), "mean": mean,
+            "pass_at_k": {str(k): v for k, v in sorted((e.get("pass_at_k") or {}).items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 0)},
+            "exceptions": {k: len(v) if isinstance(v, list) else v for k, v in (e.get("exception_stats") or {}).items()},
+            "dash_passed": passed, "dash_scored": len(scored), "dash_accuracy": dash,
+            "diff_pts": diff, "differs": diff is not None and abs(diff) > MEAN_TOLERANCE_PTS,
+        })
+
+    multipliers, overrides, versions = {}, {}, {}
+    for t, m in zip(trials, metas):
+        for k, v in (m.get("effective_multipliers") or {}).items():
+            multipliers.setdefault(k, set()).add(v)
+        for k, v in (m.get("timeout_overrides") or {}).items():
+            overrides.setdefault(k, set()).add(v)
+        versions.setdefault(t["task"], set())
+        if m.get("task_checksum"):
+            versions[t["task"]].add(m["task_checksum"])
+    count = lambda k: stats.get(k) if finished else None  # noqa: E731
+    return {
+        "id": res.get("id"),
+        "finished": finished,
+        "started_at": res.get("started_at"),
+        "finished_at": res.get("finished_at"),
+        "n_total_trials": res.get("n_total_trials"),
+        "completed": count("n_completed_trials"),
+        "errored": count("n_errored_trials"),
+        "running": count("n_running_trials"),
+        "pending": count("n_pending_trials"),
+        "cancelled": count("n_cancelled_trials"),
+        "retries": count("n_retries"),
+        "n_attempts": attempts,
+        "n_attempts_default": not isinstance(n_attempts, int),
+        "n_concurrent_trials": cfg.get("n_concurrent_trials") if isinstance(cfg.get("n_concurrent_trials"), int) else 4,
+        "n_concurrent_default": not isinstance(cfg.get("n_concurrent_trials"), int),
+        "agents": agents,
+        "agents_default": not isinstance(agents_cfg, list),
+        "datasets": datasets,
+        "n_tasks": n_tasks,
+        "tasks_listed": tasks_known,
+        "expected_trials": n_tasks * attempts * max(len(agents), 1),
+        "present_trials": len(trials),
+        "evals": evals,
+        "multipliers": {k: sorted(v) for k, v in multipliers.items()},
+        "timeout_overrides": {k: sorted(v) for k, v in overrides.items()},
+        "task_versions": max((len(v) for v in versions.values()), default=0),
+        "hub_url": hub.get(job_dir.name),
+        "upload_unfinished": (job_dir / UPLOAD_SCRATCH).is_dir(),
+        # Internal: the checksums seen per task, for the round's version check; summary() drops it.
+        "_versions": {k: sorted(v) for k, v in versions.items()},
+    }
+
+
+def round_compliance(jobs):
+    """The round's run settings against what a publishable result needs: the
+    same trials per task everywhere, timeouts unscaled, nothing retried or
+    errored, every expected trial present, and one version of each task."""
+    if not jobs:
+        return None
+    hs = [j["harbor"] for j in jobs]
+    mult, over, versions = {}, {}, {}
+    for h in hs:
+        for k, v in h["multipliers"].items():
+            mult.setdefault(k, set()).update(v)
+        for k, v in h["timeout_overrides"].items():
+            over.setdefault(k, set()).update(v)
+        for task, sums in h["_versions"].items():
+            versions.setdefault(task, set()).update(sums)
+    num = lambda k: sum(h[k] or 0 for h in hs)  # noqa: E731
+    return {
+        "jobs": len(hs),
+        "unfinished_jobs": sorted(j["name"] for j in jobs if not j["harbor"]["finished"]),
+        "n_attempts": sorted({h["n_attempts"] for h in hs}),
+        "n_attempts_defaulted": sorted(j["name"] for j in jobs if j["harbor"]["n_attempts_default"]),
+        "multipliers": {k: sorted(v) for k, v in mult.items()},
+        "multipliers_ok": bool(mult) and all(x == 1.0 for v in mult.values() for x in v) and not over,
+        "timeout_overrides": {k: sorted(v) for k, v in over.items()},
+        "retries": num("retries"),
+        "errored": num("errored"),
+        "cancelled": num("cancelled"),
+        "present": num("present_trials"),
+        "expected": num("expected_trials"),
+        "expected_exact": all(h["tasks_listed"] for h in hs),
+        "harbor_total": num("n_total_trials"),
+        "tasks": len(versions),
+        "multi_version_tasks": sorted(t for t, v in versions.items() if len(v) > 1),
+        "unversioned_tasks": sorted(t for t, v in versions.items() if not v),
+        "max_versions": max((len(v) for v in versions.values()), default=0),
+    }
+
+
 def scan(root: Path):
     jobs = []
     rounds = load_rounds()
     round_model = {r["name"]: r.get("model") for r in rounds}
+    hub = hub_links()
     try:
         job_list = sorted((d for d in root.iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime, reverse=True)
     except OSError:
@@ -580,6 +778,7 @@ def scan(root: Path):
         trials = [read_trial(d, job_running=job_running) for d in trial_dirs(job_dir)]
         if not trials:
             continue
+        metas = [t.pop("_harbor") for t in trials]
         job_round = round_of(job_dir.name, rounds)
         declared = round_model.get(job_round)
         for t in trials:
@@ -610,6 +809,7 @@ def scan(root: Path):
                 "errors": sum(1 for t in trials if t["status"] == "error"),
                 "cost_usd": round(sum(t["cost_usd"] or 0 for t in trials), 2),
                 "unpriced_runs": sum(1 for t in trials if t["cost_usd"] is None and (t["input_tokens"] or 0) > 0),
+                "harbor": harbor_job(job_dir, trials, metas, hub),
                 "trials": trials,
             }
         )
@@ -924,9 +1124,10 @@ def lessons_at(commit):
     return _lessons_cache[commit]
 
 
-def rounds_page(progress):
+def rounds_page(progress, jobs=()):
     """Each round with what it did, why it scored as it did, its accuracy per
-    harness, and the lessons its binary carried compared with the previous round's."""
+    harness, the lessons its binary carried compared with the previous round's,
+    and how its Harbor jobs were run (the compliance strip)."""
     out, prev = [], None
     for r in load_rounds():
         if not r.get("counts", True):
@@ -938,7 +1139,8 @@ def rounds_page(progress):
             diff = {"added": [l for l in lessons if l not in prev], "dropped": [l for l in prev if l not in lessons]}
         out.append({k: r.get(k) for k in ("name", "label", "host", "commit", "changes", "reasoning", "lessons_commit", "model")}
                    | {"split": "held-out" if r.get("split") == "heldout" else "dev",
-                      "results": rows, "lessons": lessons, "lessons_diff": diff})
+                      "results": rows, "lessons": lessons, "lessons_diff": diff,
+                      "compliance": round_compliance([j for j in jobs if j["round"] == r["name"]])})
         if lessons is not None:
             prev = lessons
     return out
@@ -1074,11 +1276,14 @@ def summary(root: Path):
     compare = dict(by_model_cmp[primary]) if primary else dict(comparison([], task_meta), gitagent_round=None)
     compare.update(models=model_ids, default_model=primary, by_model=by_model_cmp)
     lessons = load_json(REPO / "bench" / "lessons" / "lessons.json")
+    rounds_view = rounds_page(progress, jobs)
+    for job in jobs:
+        job["harbor"].pop("_versions", None)
     return {
         "models": {m: model_info(m, i, has_rounds) for i, (m, has_rounds) in enumerate(models)},
         "compare": compare,
         "progress": progress,
-        "rounds_page": rounds_page(progress),
+        "rounds_page": rounds_view,
         "leaderboard": load_json(REPO / "bench" / "leaderboard.json") or {},
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "root": str(root),
@@ -1147,6 +1352,7 @@ def trial_detail(root: Path, job: str, trial: str):
         return None
     result = load_json(trial_dir / "result.json") or {}
     row = read_trial(trial_dir)
+    task_record = row.pop("_harbor", None) or {}
     detail = {"row": row, "timings": [], "steps": [], "events": [], "turns": [], "files": [], "log_tail": ""}
 
     for key in ("environment_setup", "agent_setup", "agent_execution", "verifier"):
@@ -1225,11 +1431,12 @@ def trial_detail(root: Path, job: str, trial: str):
     exc = result.get("exception_info")
     detail["harbor"] = {
         "exception": exc if isinstance(exc, dict) else ({"exception_message": str(exc)} if exc else None),
-        "trial_log": read_text(trial_dir / "trial.log", 64 * 1024),
         "done": (read_text(agent_dir / "done", 64) or "").strip(),
         "has_trajectory": (agent_dir / "trajectory.json").is_file(),
         "has_log": (agent_dir / "gitagent.log").is_file(),
     }
+    # Task version and run settings from the trial's result.json (see trial_harbor).
+    detail["harbor"].update(task_record)
     return detail
 
 
@@ -1307,6 +1514,7 @@ pre code { background:none; padding:0; }
 .chip b { color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
 .chip.chip-alarm { border-color:var(--fail); background:var(--fail-bg); color:var(--fail); }
 .chip.chip-alarm b { color:var(--fail); }
+.chips.strip { margin:0 0 var(--s3); }
 
 /* ---- tabs ---- */
 .tabs { position:sticky; top:0; z-index:20; display:flex; flex-wrap:wrap; gap:2px; background:var(--bg);
@@ -1486,9 +1694,9 @@ details > pre, details > div, details > ol { margin-top:var(--s1); }
     <div class="panel"><h2>Accuracy</h2><p class="muted">Per model; a card never averages two models together.</p><div class="bymodel" id="accuracy"></div></div>
     <div class="panel"><h2>Tokens and cost (all model-calling runs)</h2><p class="muted">Money adds up across models; tokens, cache shares and per-run costs are shown per model because prices and caching differ between providers.</p><div class="bymodel" id="cost"></div></div>
     <div class="panel" id="live-panel"><h2>Running now</h2><div class="live" id="live"></div></div>
-    <div class="panel"><h2>Jobs</h2><p class="muted">One job is one <code>harbor run</code>. Oracle jobs run the tasks' reference solutions to check the machine, not the agent; terminus jobs are the baseline agent. Click a job to see its trials; click a heading to sort.</p>
+    <div class="panel"><h2>Jobs</h2><p class="muted">One job is one <code>harbor run</code>. Oracle jobs run the tasks' reference solutions to check the machine, not the agent; terminus jobs are the baseline agent. "Harbor mean" is Harbor's own mean reward from the job's result.json; a warn badge marks a gap of more than 0.5 points from the accuracy beside it. Click a job to see its trials and Harbor's record of it; click a heading to sort.</p>
       <div class="scroll"><table id="jobs" class="sortable"><thead><tr><th>Job</th><th>Started</th><th>Agent</th><th>Model</th><th>Profile</th>
-      <th>Trials</th><th>Pass</th><th>Accuracy</th><th></th><th>Est. cost</th></tr></thead><tbody></tbody></table></div></div>
+      <th>Trials</th><th>Pass</th><th>Accuracy</th><th></th><th>Harbor mean</th><th>Est. cost</th></tr></thead><tbody></tbody></table></div></div>
     <div class="panel"><h2>Accuracy by task, per harness and model</h2><p class="muted">One row per task, harness and model (oracle runs are the machine check, shown alongside). Rows of different models are never averaged.</p><div class="scroll"><table id="taskacc" class="sortable">
       <thead><tr><th>Task</th><th>Difficulty</th><th>Harness</th><th>Model</th><th>Runs</th><th>Passed</th><th>Accuracy</th><th></th><th>Oracle</th></tr></thead><tbody></tbody></table></div></div>
   </section>
@@ -1517,6 +1725,7 @@ details > pre, details > div, details > ol { margin-top:var(--s1); }
   </section>
 
   <section class="view" id="v-trials" hidden>
+    <div id="job-harbor"></div>
     <div class="panel">
       <div class="filters">
         <label>job <select id="f-job"><option value="">all</option></select></label>
@@ -1778,6 +1987,7 @@ function hashFor() {
   const parts = [];
   if (!["trial", "round"].includes(S.tab)) parts.push("tab=" + S.tab);
   if (S.model) parts.push("model=" + encodeURIComponent(S.model));
+  if (S.job && S.tab === "trials") parts.push("job=" + encodeURIComponent(S.job));
   return parts.length ? "#" + parts.join("&") : location.pathname;
 }
 function setModel(id) {
@@ -1986,8 +2196,10 @@ function renderOverview(d) {
       <td><b>${esc(j.name)}</b></td><td class="muted dt">${when(j.started)}</td><td>${kind(j.kind)}</td>
       <td>${j.model_ids.length ? j.model_ids.map(m => mchip(m, j.model)).join(" ") : `<span class="muted">${esc(j.model)}</span>`}</td><td class="muted">${esc(j.profile)}</td>
       <td class="num">${j.n_trials}${j.running?` <span class="badge b-running pulse">${j.running} live</span>`:""}${j.errors?` <span class="badge b-error">${j.errors} err</span>`:""}</td>
-      <td class="num">${j.passed}/${j.scored}</td><td class="num">${pct(j.passed,j.scored)}</td><td>${bar(j.passed,j.scored)}</td><td class="num">${costCell(j.cost_usd, j.unpriced_runs)}</td></tr>`).join("")
-    : `<tr><td colspan="10" class="muted">${S.model ? `No job ran ${esc(M(S.model).label)} yet.` : `No jobs under ${esc(d.root)} yet.`}</td></tr>`;
+      <td class="num">${j.passed}/${j.scored}</td><td class="num">${pct(j.passed,j.scored)}</td><td>${bar(j.passed,j.scored)}</td>
+      <td class="num">${(j.harbor || {}).evals && j.harbor.evals.length ? j.harbor.evals.map(e => `${pp(e.mean)}${meanGap(e)}`).join("<br>") : `<span class="muted" title="${(j.harbor || {}).finished ? "no mean in the job's result.json" : "the job has not written its result.json yet"}">—</span>`}</td>
+      <td class="num">${costCell(j.cost_usd, j.unpriced_runs)}</td></tr>`).join("")
+    : `<tr><td colspan="11" class="muted">${S.model ? `No job ran ${esc(M(S.model).label)} yet.` : `No jobs under ${esc(d.root)} yet.`}</td></tr>`;
   // One row per (task, harness, model); the oracle column is the machine check for the task.
   const taskRows = [];
   for (const r of d.tasks) {
@@ -2086,6 +2298,96 @@ const resultCard = h => card(pp(h.accuracy), `${kind(h.kind)} ${h.model ? mchip(
   · timeouts ${h.timeouts} · median ${fmtS(h.median_agent_s)} · cost ${costCell(h.cost_usd, h.unpriced_runs)}${h.per_run.length > 1 ? `<br>Single run: ${h.per_run.map(x => `run ${x.run} ${pp(x.accuracy)} (${x.passed}/${x.tasks})`).join(" · ")}` : ""}${h.failed.length ? `<br>Not always passed: ${h.failed.map(esc).join(", ")}` : ""}${h.model_mismatch ? `<br><span class="bad">bench/rounds.json says this round ran ${esc(M(h.round_model).label)}; these trials ran ${esc(M(h.model).label)} and are kept apart.</span>` : ""}`,
   h.kind === "gitagent" ? "final" : "");
 
+// ---- Harbor's own record of a job (its result.json and config.json) ----
+const MULT_LABEL = { timeout_multiplier:"base", agent_timeout_multiplier:"agent", verifier_timeout_multiplier:"verifier",
+  agent_setup_timeout_multiplier:"agent setup", environment_build_timeout_multiplier:"env build" };
+const okBadge = ok => `<span class="badge ${ok ? "b-pass" : "b-warn"}">${ok ? "ok" : "warn"}</span>`;
+const dflt = (v, isDefault) => `${esc(v)}${isDefault ? ' <span class="muted" title="not in config.json, so Harbor used its default">(default)</span>' : ""}`;
+const shortHash = (s, n = 12) => s ? `<span class="mono" title="${esc(s)}">${esc(String(s).replace(/^sha256:/, "").slice(0, n))}</span>` : '<span class="muted">—</span>';
+const baseName = p => p ? String(p).split("/").pop() : null;
+const passK = e => e && Object.keys(e.pass_at_k || {}).length ? Object.entries(e.pass_at_k).map(([k, v]) => `pass@${esc(k)} <b>${pp(v)}</b>`).join(" · ")
+  : '<span class="muted" title="Harbor writes pass@k for k = 2, 4, 8… and 5, 10… up to the fewest trials any task has, so none when a task has one trial">none</span>';
+const meanGap = e => e && e.differs ? ` <span class="badge b-warn" title="Harbor's mean ${pp(e.mean)} against this dashboard's ${pp(e.dash_accuracy)} (${e.dash_passed}/${e.dash_scored} trials with a reward): more than 0.5 points apart">${e.diff_pts > 0 ? "+" : ""}${e.diff_pts.toFixed(1)} pts</span>` : "";
+const hubCell = h => h.hub_url ? `<a href="${esc(h.hub_url)}" target="_blank" rel="noopener">Hub</a>`
+  : h.upload_unfinished ? '<span class="badge b-warn" title="a .harbor-upload folder is left in the job directory: an upload started and did not finish">upload unfinished</span>'
+  : '<span class="muted" title="no link for this job in bench/hub.json">—</span>';
+const kwargsText = a => { const rest = Object.entries(a.kwargs || {}).filter(([k]) => k !== "profile" && k !== "timeout_s");
+  return rest.length ? rest.map(([k, v]) => `${esc(k)}=${esc(typeof v === "object" ? JSON.stringify(v) : v)}`).join(", ") : ""; };
+const fmtMult = x => typeof x === "number" && Number.isInteger(x) ? x.toFixed(1) : String(x);
+// Multipliers as {name: [values seen]} (a job or round) or {name: value} (one trial).
+const multText = m => { const vals = Object.entries(m || {}).map(([k, v]) => [k, Array.isArray(v) ? v : [v]]);
+  if (!vals.length) return '<span class="muted">not recorded</span>';
+  const all = [...new Set(vals.flatMap(([, v]) => v))];
+  return all.length === 1 ? `all <b>${esc(fmtMult(all[0]))}</b>` : vals.map(([k, v]) => `${esc(MULT_LABEL[k] || k)} <b>${v.map(x => esc(fmtMult(x))).join("/")}</b>`).join(", "); };
+
+function complianceStrip(c) {
+  if (!c) return "";
+  const item = (ok, html, title = "") => `<span class="chip"${title ? ` title="${esc(title)}"` : ""}>${okBadge(ok)} ${html}</span>`;
+  const overrides = Object.entries(c.timeout_overrides || {});
+  return `<div class="chips strip" id="compliance">` + [
+    item(c.n_attempts.length === 1, `<b>${c.n_attempts.join(" / ")}</b> trial${c.n_attempts.join() === "1" ? "" : "s"} per task`,
+      `n_attempts in each job's config.json${c.n_attempts_defaulted.length ? `; not set (Harbor's default of 1) in ${c.n_attempts_defaulted.join(", ")}` : ""}${c.n_attempts.length > 1 ? "; the round's jobs differ" : ""}`),
+    item(c.multipliers_ok, `timeout multipliers ${multText(c.multipliers)}${overrides.length ? ` · overrides ${overrides.map(([k, v]) => `${esc(k)} <b>${v.map(esc).join("/")}</b>`).join(", ")}` : ""}`,
+      `As Harbor applied them to every trial (an unset per-phase multiplier uses the base one): ${Object.entries(c.multipliers || {}).map(([k, v]) => `${MULT_LABEL[k] || k} ${v.map(fmtMult).join("/")}`).join(", ") || "none recorded"}`),
+    item(c.retries === 0, `retries <b>${c.retries}</b>`, "n_retries in the jobs' result.json, summed"),
+    item(c.errored === 0 && c.cancelled === 0, `errored <b>${c.errored}</b>${c.cancelled ? ` · cancelled <b>${c.cancelled}</b>` : ""}`, "n_errored_trials and n_cancelled_trials in the jobs' result.json, summed"),
+    item(c.present === c.expected && c.expected_exact, `trials present <b>${c.present}</b> of expected <b>${c.expected}</b>`,
+      `Expected: each job's tasks × n_attempts × agents, summed over ${c.jobs} job(s)${c.expected_exact ? "" : " (a job's config.json does not list its tasks, so the tasks seen stand in for them)"}. Harbor's own total: ${c.harbor_total}.`),
+    item(c.max_versions === 1 && !c.multi_version_tasks.length && !c.unversioned_tasks.length,
+      `task versions <b>${c.max_versions}</b> checksum${c.max_versions === 1 ? "" : "s"} per task${c.multi_version_tasks.length ? ` · ${c.multi_version_tasks.length} task(s) with several: ${c.multi_version_tasks.map(esc).join(", ")}` : ""}${c.unversioned_tasks.length ? ` · ${c.unversioned_tasks.length} without one yet` : ""}`,
+      `Distinct task_checksum values per task over the round's ${c.tasks} task(s); 1 means every trial of a task ran the same task version.`),
+    ...(c.unfinished_jobs.length ? [item(false, `${c.unfinished_jobs.length} job(s) not finished: ${c.unfinished_jobs.map(esc).join(", ")}`, "no job-level result.json yet")] : []),
+  ].join("") + `</div>`;
+}
+
+function harborTable(jobs, id) {
+  const rows = jobs.flatMap(j => { const h = j.harbor || {}; return (h.evals && h.evals.length ? h.evals : [null]).map(e => ({ j, h, e })); });
+  const cnt = v => v == null ? '<span class="muted">—</span>' : v;
+  return `<table id="${id}" class="sortable"><thead><tr><th>Job</th><th>Harbor mean</th><th>Dashboard</th><th>pass@k</th><th>Completed</th><th>Errored</th><th>Retries</th><th>Cancelled</th><th>Pending</th>
+    <th>Trials / task</th><th>Concurrency</th><th>Agent</th><th>Model</th><th>Profile</th><th>timeout_s</th><th>Dataset</th><th>Started</th><th>Finished</th><th>Hub</th></tr></thead><tbody>` +
+    (rows.length ? rows.map(({ j, h, e }) => `<tr class="click" data-jobview="${esc(j.name)}" title="Open the job's trials and Harbor record">
+      <td><b>${esc(j.name)}</b>${h.finished ? "" : ' <span class="badge b-running pulse">running</span>'}</td>
+      <td class="num"><b>${e ? pp(e.mean) : "—"}</b>${meanGap(e)}</td>
+      <td class="num">${e ? `${pp(e.dash_accuracy)} <span class="muted">(${e.dash_passed}/${e.dash_scored})</span>` : "—"}</td>
+      <td>${passK(e)}</td>
+      <td class="num">${cnt(h.completed)}${h.n_total_trials != null ? `<span class="muted">/${h.n_total_trials}</span>` : ""}</td>
+      <td class="num ${h.errored ? "bad" : ""}">${cnt(h.errored)}</td><td class="num">${cnt(h.retries)}</td><td class="num">${cnt(h.cancelled)}</td><td class="num">${cnt(h.pending)}</td>
+      <td class="num">${dflt(h.n_attempts, h.n_attempts_default)}</td><td class="num">${dflt(h.n_concurrent_trials, h.n_concurrent_default)}</td>
+      <td class="mono">${h.agents.map(a => dflt(a.name, h.agents_default)).join("<br>")}</td>
+      <td>${h.agents.map(a => a.model_id ? `${mchip(a.model_id, a.model_name)} <span class="muted mono">${esc(a.model_name)}</span>` : '<span class="muted">—</span>').join("<br>")}</td>
+      <td>${h.agents.map(a => a.profile ? `<span class="mono" title="${esc(a.profile)}">${esc(baseName(a.profile))}</span>` : '<span class="muted">—</span>').join("<br>")}${h.agents.some(kwargsText) ? `<br><span class="muted mono">${h.agents.map(kwargsText).join("; ")}</span>` : ""}</td>
+      <td class="num">${h.agents.map(a => a.timeout_s ?? "—").join("<br>")}</td>
+      <td>${h.datasets.map(ds => `${esc(ds.name)} ${shortHash(ds.ref, 8)} <span class="muted">${ds.n_tasks != null ? ds.n_tasks + " tasks" : "all tasks"}</span>`).join("<br>") || '<span class="muted">—</span>'}</td>
+      <td class="dt muted">${when(h.started_at)}</td><td class="dt muted">${when(h.finished_at)}</td><td>${hubCell(h)}</td></tr>`).join("")
+    : `<tr><td colspan="19" class="muted">No Harbor job matched.</td></tr>`) + "</tbody></table>";
+}
+
+function harborJobView(j) {
+  const h = j.harbor; if (!h) return "";
+  const cards = (h.evals || []).map(e => card(`${pp(e.mean)}${meanGap(e)}`, `Harbor mean reward ${kind(e.agent)} ${e.model ? mchip(e.model) : ""}`,
+    `Harbor's own figure from the job's result.json, over ${e.n_trials ?? "?"} trial(s) of ${esc(e.dataset)}, ${e.n_errors ?? 0} errored${Object.keys(e.exceptions || {}).length ? ` (${Object.entries(e.exceptions).map(([k, v]) => `${esc(k)} ${v}`).join(", ")})` : ""}. This dashboard: ${pp(e.dash_accuracy)} (${e.dash_passed}/${e.dash_scored} trials with a reward)${e.differs ? `, more than 0.5 points apart, usually because Harbor's mean also counts trials that ended without a reward (errored or cancelled) as 0.` : ", the same within 0.5 points."}`, "final")
+    + card(passK(e), "pass@k (Harbor)", "Harbor writes pass@k for k = 2, 4, 8… and 5, 10… up to the fewest trials any task has in the job, so a job with one trial per task has none.")).join("");
+  const counts = card(h.finished ? `${h.completed}/${h.n_total_trials}` : "—", "Trials completed (Harbor)",
+    h.finished ? `errored ${h.errored} · retries ${h.retries} · cancelled ${h.cancelled} · pending ${h.pending} · running ${h.running}. ${h.present_trials} trial folder(s) here, ${h.expected_trials} expected (${h.n_tasks} task(s) × ${h.n_attempts} × ${h.agents.length} agent(s)).`
+      : "The job has not written its result.json yet, so Harbor's counts are not in.");
+  const kv = [
+    ["job id", h.id ? `<span class="mono">${esc(h.id)}</span>` : "—"],
+    ["agent", h.agents.map(a => `<span class="mono">${dflt(a.name, h.agents_default)}</span>`).join(", ")],
+    ["model", h.agents.map(a => a.model_id ? `${mchip(a.model_id, a.model_name)} <span class="mono">${esc(a.model_name)}</span>` : "—").join(", ")],
+    ["agent kwargs", h.agents.map(a => Object.keys(a.kwargs || {}).length ? Object.entries(a.kwargs).map(([k, v]) => `<span class="mono">${esc(k)}=${esc(typeof v === "object" ? JSON.stringify(v) : v)}</span>`).join("<br>") : '<span class="muted">none</span>').join("<br>")],
+    ["trials per task", dflt(h.n_attempts, h.n_attempts_default)],
+    ["concurrency", dflt(h.n_concurrent_trials, h.n_concurrent_default)],
+    ["dataset", h.datasets.map(ds => `${esc(ds.name)} ${shortHash(ds.ref, 16)} <span class="muted">${ds.n_tasks != null ? ds.n_tasks + " tasks listed" : "all tasks"}</span>`).join("<br>") || "—"],
+    ["timeout multipliers", `${multText(h.multipliers)}${Object.keys(h.timeout_overrides || {}).length ? ` · overrides ${Object.entries(h.timeout_overrides).map(([k, v]) => `${esc(k)} ${v.map(esc).join("/")}`).join(", ")}` : ""}`],
+    ["task versions", `${h.task_versions} checksum(s) per task ${okBadge(h.task_versions <= 1)}`],
+    ["started / finished", `<span class="dt">${when(h.started_at)}</span> → <span class="dt">${when(h.finished_at)}</span> <span class="muted">(Harbor's job clock)</span>`],
+    ["Harbor Hub", h.hub_url ? `<a href="${esc(h.hub_url)}" target="_blank" rel="noopener">${esc(h.hub_url)}</a>` : `${hubCell(h)} <span class="muted">add the job to bench/hub.json once it is uploaded</span>`],
+  ].map(([k, v]) => `<span class="k">${k}</span><span>${v}</span>`).join("");
+  return `<div class="panel"><div class="titlerow"><h2>Harbor: job ${esc(j.name)}</h2>${j.round ? `<button class="btn" data-round="${esc(j.round)}">Round ${esc(j.round)}</button>` : ""}<span class="spacer"></span><button class="btn" id="clear-job">Show all jobs</button></div>
+    <p class="muted">What Harbor itself recorded for this job in its result.json and config.json, next to this dashboard's own numbers for the same trials. Settings Harbor left at their default are marked.</p>
+    <div class="cols">${cards}${counts}</div><h3>Configuration</h3><div class="kv">${kv}</div></div>`;
+}
+
 function renderRounds(d) {
   const models = modelList(d), ourFull = new Set(models.map(m => m.full));
   // Our rows carry the model their trials ran (from the trials, not the label), one row per model.
@@ -2182,16 +2484,20 @@ function renderRound(d) {
     }).join("") : `<tr><td colspan="8" class="muted">No trials matched to this round yet.</td></tr>`) + "</tbody></table>";
 
   const jobs = [...new Set(allTr.map(t => t._job))].sort();
+  const roundJobs = d.jobs.filter(j => j.round === name).sort((a, b) => a.name.localeCompare(b.name));
   el.innerHTML = `
     <div class="panel">${head}
       <div class="titlerow">${roundTitle(name, info.commit, info.host, info.model)}${info.split === "held-out" ? '<span class="badge">held-out</span>' : ""}${rows.some(h => h.current) ? '<span class="badge b-running">current</span>' : ""}${strayN ? `<span class="badge b-warn" title="trials in this round's jobs that ran another model; they are listed under Trials & logs and never counted here">${strayN} trial(s) on another model</span>` : ""}</div>
+      ${complianceStrip(info.compliance)}
       <p>${esc(info.label || "")}</p>${cards}</div>
+    <div class="panel"><h2>Harbor</h2>
+      <p class="muted">What Harbor itself recorded for each of the round's ${jobs.length} job(s) (matched by bench/rounds.json): its mean reward and pass@k from the job's result.json, beside this dashboard's accuracy over the same trials (a warn badge marks a gap over 0.5 points); its trial counts; and the settings from the job's config.json. Settings Harbor left at their default are marked. The strip above sums them for the round. Click a job for its trials.</p>
+      <div class="scroll">${harborTable(roundJobs, "round-harbor")}</div></div>
     <div class="panel"><h2>What was done</h2><ul>${(info.changes || []).map(c => `<li>${esc(c)}</li>`).join("") || '<li class="muted">—</li>'}</ul>
       <h2 style="margin-top:12px">Why it scored as it did</h2><p>${esc(info.reasoning || "—")}</p></div>
     <div class="panel"><div class="titlerow"><h2>Per task</h2>${info.model ? mchip(info.model) : ""}</div><p class="muted">Lowest pass rate first${info.model ? `, ${esc(M(info.model).full)} runs only` : ""}. Each badge is one attempt; click it for the trial's log and trajectory.${prevRow ? ` The "In ${esc(prevRow.round)}" column is the same task's pass rate in the previous ${esc(M(prevRow.model).label)} round of this harness; green or red marks a task that flipped.` : ""}</p>
       <div class="scroll">${taskTable}</div></div>
-    <div class="panel"><h2>Lessons</h2>${roundLessons(name, info.lessons, info.lessons_diff, info.lessons_commit)}</div>
-    <div class="panel"><h2>Jobs</h2><p class="muted">${jobs.length} Harbor job(s) in bench/jobs, matched to this round by bench/rounds.json: ${jobs.map(esc).join(", ") || "none"}.</p></div>`;
+    <div class="panel"><h2>Lessons</h2>${roundLessons(name, info.lessons, info.lessons_diff, info.lessons_commit)}</div>`;
 }
 
 function renderTrials(d) {
@@ -2199,6 +2505,8 @@ function renderTrials(d) {
   sel.innerHTML = `<option value="">all</option>` + d.jobs.map(j => `<option ${j.name===S.job?"selected":""}>${esc(j.name)}</option>`).join("");
   const msel = $("#f-model");
   msel.innerHTML = `<option value="">all</option>` + modelList(d).map(m => `<option value="${esc(m.id)}" ${m.id===S.model?"selected":""}>${esc(m.label)}</option>`).join("");
+  const job = S.job ? d.jobs.find(j => j.name === S.job) : null;
+  $("#job-harbor").innerHTML = job ? harborJobView(job) : "";
   let rows = allTrials(d).filter(t => (!S.job || t._job===S.job) && (!S.kind || t.kind===S.kind) && (!S.status || t.status===S.status) && inModel(t));
   rows.sort((a,b) => (b.started||"").localeCompare(a.started||""));
   $("#trials-n").textContent = `${rows.length} trial(s)${S.model ? ` · ${M(S.model).label} only` : ""}`;
@@ -2316,10 +2624,9 @@ function renderDetail() {
   const subs = [["harbor", h.exception ? "Harbor (error)" : "Harbor"],["turns","Turns"],["trajectory",`Trajectory (${d.steps.length})`],["events",`Guard events (${d.events.length})`],["counters","Counters"],["files",`Commands & files (${d.files.length})`],["log","gitagent.log"]];
   let body = "";
   if (S.sub === "harbor") body = `
-    <p class="muted">What Harbor (the benchmark runner) recorded about this trial: its exception if the trial errored, its lifecycle log, and gitagent's exit code. gitagent's own records are in the other views${h.has_trajectory ? "" : " (none here: gitagent never wrote a trajectory, so it did not start or this is not a gitagent run)"}.</p>
+    <p class="muted">What Harbor (the benchmark runner) recorded about this trial: its exception if the trial errored, and gitagent's exit code. Harbor's per-trial log is not shown: it can contain the checker's commands and output, which we never read. gitagent's own records are in the other views${h.has_trajectory ? "" : " (none here: gitagent never wrote a trajectory, so it did not start or this is not a gitagent run)"}.</p>
     ${h.exception ? `<h3 class="bad">${esc(h.exception.exception_type || "error")}</h3><p>${esc(h.exception.exception_message || "")} <span class="muted">${esc((h.exception.occurred_at||"").slice(0,19).replace("T"," "))}</span></p>
       ${h.exception.exception_traceback ? `<details open><summary>traceback</summary><pre>${esc(h.exception.exception_traceback)}</pre></details>` : ""}` : `<p class="ok">No Harbor exception.</p>`}
-    <h3>trial.log (Harbor)</h3><pre>${esc(h.trial_log || "(empty)")}</pre>
     <h3>gitagent exit code</h3><p>${h.done === "" ? '<span class="muted">no done file: gitagent did not finish on its own (killed, timed out, or never started)</span>' : `<code>${esc(h.done)}</code> ${h.done==="0"?"(normal end)":h.done==="3"?"(the model API failed)":h.done==="2"?"(usage or setup error)":""}`}</p>`;
   else if (S.sub === "turns") body = d.turns.length ? `<div class="scroll"><table class="sortable" id="turns-table"><thead><tr><th>Step</th><th>Tools called</th><th>Prompt tok</th><th>Out tok</th><th>Since prev</th></tr></thead><tbody>` +
     d.turns.map(t => `<tr><td class="num">${t.step}</td><td>${esc(t.tools.join(", ")||"(text only)")}</td><td class="num">${fmtN(t.prompt_tokens)}</td><td class="num">${fmtN(t.completion_tokens)}</td><td class="num">${fmtS(t.since_prev_s)}</td></tr>`).join("") + "</tbody></table></div>"
@@ -2352,6 +2659,10 @@ function renderDetail() {
           <span class="k">model / profile</span><span>${row.model_id ? `${mchip(row.model_id)} ${esc(row.model_id)}${row.provider ? ` <span class="muted">(${esc(row.provider)}, configured as ${esc(row.model)})</span>` : ""}` : "—"} / ${esc(row.profile ?? "—")}</span>
           <span class="k">turns / tokens</span><span>${row.turns ?? "—"} · in ${fmtN(row.input_tokens)} (cached ${fmtN(row.cache_tokens)}) · out ${fmtN(row.output_tokens)}</span>
           <span class="k">est. cost</span><span>${trialCost(row)}${row.model_id && !M(row.model_id).priced && (row.input_tokens || 0) > 0 ? ` <span class="muted">(${esc(row.model_id)} has no price in bench/pricing.json)</span>` : ""}</span>
+          <span class="k">task checksum</span><span>${shortHash(h.task_checksum)}</span>
+          <span class="k">task ref</span><span>${h.task_id ? `${esc([h.task_id.org, h.task_id.name].filter(Boolean).join("/"))} ${shortHash(h.task_id.ref, 16)}` : '<span class="muted">—</span>'}${h.source ? ` <span class="muted">from ${esc(h.source)}</span>` : ""}</span>
+          <span class="k">verifier env</span><span>${h.verifier_environment_mode ? esc(h.verifier_environment_mode) : '<span class="muted">—</span>'}</span>
+          <span class="k">timeout multipliers</span><span>${multText(h.effective_multipliers)}${h.timeout_multipliers && Object.entries(h.timeout_multipliers).some(([k, v]) => k !== "timeout_multiplier" && v == null) ? ' <span class="muted">(per-phase ones unset use the base one)</span>' : ""}${Object.keys(h.timeout_overrides || {}).length ? ` · overrides ${Object.entries(h.timeout_overrides).map(([k, v]) => `${esc(k)} ${esc(v)}`).join(", ")}` : ""}</span>
           ${d.timings.map(t=>`<span class="k">${esc(t.phase)}</span><span>${fmtS(t.seconds)}</span>`).join("")}
           ${row.status==="running" ? `<span class="k">live</span><span class="pulse">${esc(row.live?.text||"")} · ${fmtS(row.elapsed_s)} elapsed</span>`:""}
         </div>
@@ -2374,12 +2685,13 @@ function openFromHash() {
   if (r) { S.round = decodeURIComponent(r[1]); S.tab = "round"; render(); return; }
   const m = location.hash.match(/^#trial=([^/]+)\/(.+)$/);
   if (m) { openTrial(decodeURIComponent(m[1]), decodeURIComponent(m[2])); return; }
-  // #tab=overview&model=gpt-6-astra, in either order, either alone.
+  // #tab=overview&model=gpt-6-astra (&job=<name> on the trials tab), in any order.
   let touched = false;
   for (const part of location.hash.replace(/^#/, "").split("&")) {
     const [k, v = ""] = part.split("=");
     if (k === "tab" && TABS.some(([id]) => id === v)) { S.tab = v; touched = true; }
     else if (k === "model") { S.model = decodeURIComponent(v); if (S.model) S.cmpModel = S.model; touched = true; }
+    else if (k === "job") { S.job = decodeURIComponent(v); touched = true; }
   }
   if (touched) { render(); return; }
   if (S.trial) closeTrial();
@@ -2415,12 +2727,14 @@ document.addEventListener("click", e => {
   const mf = e.target.closest("[data-model]"); if (mf) { setModel(mf.dataset.model); return; }
   const sub = e.target.closest(".subtab"); if (sub) { S.sub = sub.dataset.sub; renderDetail(); return; }
   if (e.target.id === "close") { closeTrial(); return; }
+  if (e.target.id === "clear-job") { S.job = ""; history.replaceState(null, "", hashFor()); render(); return; }
+  const jv = e.target.closest("[data-jobview]"); if (jv && !e.target.closest("a")) { S.job = jv.dataset.jobview; S.tab = "trials"; history.replaceState(null, "", hashFor()); render(); window.scrollTo(0, 0); return; }
   const rr = e.target.closest("[data-round]"); if (rr) { openRound(rr.dataset.round); return; }
   if (e.target.id === "close-round") { closeRound(); return; }
-  const jr = e.target.closest("#jobs tbody tr"); if (jr) { S.job = S.job === jr.dataset.job ? "" : jr.dataset.job; S.tab = "trials"; render(); return; }
+  const jr = e.target.closest("#jobs tbody tr"); if (jr) { S.job = S.job === jr.dataset.job ? "" : jr.dataset.job; S.tab = "trials"; history.replaceState(null, "", hashFor()); render(); return; }
 });
 document.addEventListener("toggle", e => { const d = e.target; if (d.dataset && d.dataset.file && d.open) loadFile(d); }, true);
-for (const id of ["f-job","f-kind","f-status"]) $("#"+id).addEventListener("change", e => { S[{ "f-job":"job","f-kind":"kind","f-status":"status" }[id]] = e.target.value; render(); });
+for (const id of ["f-job","f-kind","f-status"]) $("#"+id).addEventListener("change", e => { S[{ "f-job":"job","f-kind":"kind","f-status":"status" }[id]] = e.target.value; history.replaceState(null, "", hashFor()); render(); });
 $("#f-model").addEventListener("change", e => setModel(e.target.value));
 for (const id of ["t-search","t-diff","t-cat","t-split","t-seen"]) $("#"+id).addEventListener("input", () => { if (S.data) { renderTasks(S.data); postRender(); } });
 for (const id of ["c-paired","c-sort"]) $("#"+id).addEventListener("input", () => { if (S.data) { renderCompare(S.data); postRender(); } });
@@ -2479,8 +2793,8 @@ def main():
     ap.add_argument("--port", type=int, default=8731)
     args = ap.parse_args()
     Handler.root = args.root.resolve()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"gitagent dashboard: http://127.0.0.1:{args.port}  (watching {Handler.root})")
+    server = ThreadingHTTPServer(("localhost", args.port), Handler)
+    print(f"gitagent dashboard: http://localhost:{args.port}  (watching {Handler.root})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
