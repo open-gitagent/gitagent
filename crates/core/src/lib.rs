@@ -156,6 +156,11 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     if let Some(memory) = &spec.memory {
         tools.push(gitagent_tools::memory_spec(memory));
     }
+    tools.extend(
+        spec.declared_tools
+            .iter()
+            .map(gitagent_tools::declared_spec),
+    );
     if let Some(allow) = &opts.tool_allowlist {
         tools.retain(|t| allow.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
     }
@@ -597,6 +602,7 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                                 edit_tool: spec.profile.edit_tool,
                                 skills: &spec.skills,
                                 memory: spec.memory.as_ref(),
+                                declared: &spec.declared_tools,
                                 default_yield_ms: spec.profile.exec_default_yield_ms,
                                 remaining: remaining(),
                                 minutes_left: time_budget

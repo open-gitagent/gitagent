@@ -3,6 +3,7 @@
 //! Tool definitions are part of the cached prompt prefix, so their text and
 //! order must not change between tasks.
 
+mod declared;
 mod exec;
 mod image_read;
 mod memory;
@@ -16,7 +17,7 @@ mod write_file;
 
 use std::time::Duration;
 
-use gitagent_loader::{AgentDef, EditTool, MemoryCfg, Skill, ToolsCfg};
+use gitagent_loader::{AgentDef, DeclaredTool, EditTool, MemoryCfg, Skill, ToolsCfg};
 use gitagent_provider::{ImageData, ToolCall, ToolSpec};
 use gitagent_record::Counters;
 use gitagent_shaper::Shaper;
@@ -25,6 +26,7 @@ use serde_json::{json, Value};
 
 pub mod naming;
 
+pub use declared::spec as declared_spec;
 pub use memory::spec as memory_spec;
 
 pub const EXEC: &str = "exec";
@@ -284,6 +286,8 @@ pub struct ToolContext<'a> {
     pub skills: &'a [Skill],
     /// The project's memory, when the `memory` tool is offered.
     pub memory: Option<&'a MemoryCfg>,
+    /// Tools the agent declares in `tools/*.yaml`.
+    pub declared: &'a [DeclaredTool],
     pub default_yield_ms: u64,
     /// Time left in the run, used to cap waits.
     pub remaining: Option<Duration>,
@@ -328,13 +332,19 @@ pub async fn dispatch(call: &ToolCall, ctx: &mut ToolContext<'_>) -> ToolOutput 
             complete: true,
             ..ToolOutput::ok("Task marked complete.")
         }),
+        name if ctx.declared.iter().any(|t| t.name == name) => {
+            ctx.counters.inc_labelled("declared_tool_calls", name);
+            let tool = ctx.declared.iter().find(|t| t.name == name);
+            declared::run(call, tool.expect("checked above"), ctx.remaining).await
+        }
         other => {
             ctx.counters.inc("malformed_calls");
             let mut offered = specs(ctx.tools, ctx.edit_tool);
             if ctx.sdk_names {
                 offered = naming::sdk_specs(offered);
             }
-            let names: Vec<String> = offered.into_iter().map(|t| t.name).collect();
+            let mut names: Vec<String> = offered.into_iter().map(|t| t.name).collect();
+            names.extend(ctx.declared.iter().map(|t| t.name.clone()));
             Ok(ToolOutput::error(format!(
                 "Unknown tool `{other}`. Available tools: {}.",
                 names.join(", ")

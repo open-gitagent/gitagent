@@ -50,8 +50,9 @@ pub fn model_alias(name: &str) -> &str {
 }
 
 /// A tool list as gitagent tool names: `.claude/` and 1.x names
-/// (`cli`, `read`, `edit`, …) are expanded, gitagent names pass through,
-/// names with no equivalent are dropped.
+/// (`cli`, `read`, `edit`, …) are expanded, and those with no equivalent
+/// (`Grep`, `capture_photo`, …) are dropped. Other names pass through: they
+/// are gitagent's own, or the agent's declared and MCP tools.
 pub fn normalize_tool_list(names: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for name in names {
@@ -64,10 +65,13 @@ pub fn normalize_tool_list(names: &[String]) -> Vec<String> {
             mapped = crate::v1::gitagent_tools_for(name);
         }
         let expanded: Vec<String> = if mapped.is_empty() {
-            if is_gitagent_tool(name) {
-                vec![name.to_string()]
-            } else {
+            // `.claude/` names start with a capital letter.
+            let no_equivalent =
+                crate::v1::is_v1_tool(name) || name.starts_with(|c: char| c.is_ascii_uppercase());
+            if no_equivalent {
                 Vec::new()
+            } else {
+                vec![name.to_string()]
             }
         } else {
             mapped.iter().map(|s| s.to_string()).collect()
@@ -79,24 +83,6 @@ pub fn normalize_tool_list(names: &[String]) -> Vec<String> {
         }
     }
     out
-}
-
-fn is_gitagent_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "exec"
-            | "write_stdin"
-            | "read_file"
-            | "write_file"
-            | "str_replace"
-            | "apply_patch"
-            | "image_read"
-            | "todo"
-            | "task_complete"
-            | "skill"
-            | "subagent"
-            | "memory"
-    )
 }
 
 /// The gitagent tool behind a call the model made under `.claude/` names, with
@@ -196,6 +182,11 @@ mod tests {
             vec!["str_replace", "apply_patch"]
         );
         // 1.x names, mixed with the others; duplicates collapse.
+        // The agent's own tools pass through.
+        assert_eq!(
+            normalize_tool_list(&list("search-docs, Glob, jira__create_issue")),
+            vec!["search-docs", "jira__create_issue"]
+        );
         assert_eq!(
             normalize_tool_list(&list("cli, read, edit, capture_photo, memory, Bash")),
             vec![

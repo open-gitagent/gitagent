@@ -606,6 +606,7 @@ dependencies = [
  "gitagent-record",
  "gitagent-shaper",
  "gitagent-terminal",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",

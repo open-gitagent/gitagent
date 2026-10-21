@@ -6,6 +6,7 @@
 
 mod agents;
 mod config;
+pub mod declared;
 pub mod manifest;
 pub mod memory;
 mod profile;
@@ -15,6 +16,7 @@ pub mod v1;
 
 pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
 pub use config::{Config, RepoConfig};
+pub use declared::DeclaredTool;
 pub use manifest::AgentDir;
 pub use memory::MemoryCfg;
 pub use profile::{
@@ -164,6 +166,9 @@ pub struct AgentSpec {
     /// The project's persistent memory, for agent directories or with
     /// `memory: true`. Never set in benchmark runs.
     pub memory: Option<MemoryCfg>,
+    /// Tools the agent declares in `tools/*.yaml`. Never set in benchmark
+    /// runs.
+    pub declared_tools: Vec<DeclaredTool>,
 }
 
 impl AgentSpec {
@@ -235,9 +240,17 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
 
     // An agent directory (`agent.yaml`) in the project: only outside
     // benchmark runs, which pass no project directory.
-    let agent = match &opts.project_dir {
+    let mut agent = match &opts.project_dir {
         Some(dir) => AgentDir::load(dir)?,
         None => None,
+    };
+    let declared_tools = match agent.as_mut() {
+        Some(a) => {
+            let (tools, warnings) = declared::discover(a);
+            a.warnings.extend(warnings);
+            tools
+        }
+        None => Vec::new(),
     };
 
     // --model, then gitagent.yaml, then the agent's `model.preferred`.
@@ -365,6 +378,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         agent,
         fallbacks,
         memory,
+        declared_tools,
     })
 }
 

@@ -738,6 +738,13 @@ fn bench_prompt_and_tools_match_the_published_run() {
     .unwrap();
     std::fs::create_dir_all(work.join("memory")).unwrap();
     std::fs::write(work.join("memory/MEMORY.md"), "- Should never be shown.\n").unwrap();
+    std::fs::create_dir_all(work.join("tools")).unwrap();
+    std::fs::write(work.join("tools/leak.sh"), "echo leak\n").unwrap();
+    std::fs::write(
+        work.join("tools/leak.yaml"),
+        "name: leak\ndescription: Should never be offered.\nimplementation: {script: leak.sh}\n",
+    )
+    .unwrap();
     let out = dir.path().join("logs");
     let status = gitagent()
         .args(["--bench", "-p", "Do nothing."])
@@ -875,4 +882,55 @@ fn memory_saved_in_one_session_is_in_the_next_prompt() {
         prompt.contains("# Memory\n") && prompt.contains("- The user prefers tabs."),
         "{prompt}"
     );
+}
+
+/// Tools declared in `tools/*.yaml` are offered and run with their
+/// arguments as JSON on stdin.
+#[test]
+fn declared_tools_run_with_json_on_stdin() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("tools")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "spec_version: \"0.1.0\"\nname: lyra\nversion: 1.0.0\ndescription: A test agent.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    std::fs::write(
+        agent.join("tools/greet.yaml"),
+        "name: greet\ndescription: Greets someone.\ninput_schema:\n  type: object\n  properties: {who: {type: string}}\n  required: [who]\nimplementation: {type: script, path: greet.sh, runtime: bash}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join("tools/greet.sh"),
+        "read input\nwho=$(printf '%s' \"$input\" | sed 's/.*\"who\":\"\\([^\"]*\\)\".*/\\1/')\nprintf '{\"text\": \"Hello, %s\"}' \"$who\"\n",
+    )
+    .unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(
+        &script,
+        "- tool_calls: [{name: greet, arguments: {who: Ada}}]\n\
+         - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+    )
+    .unwrap();
+    let out = dir.path().join("out");
+    let status = gitagent()
+        .args(["-p", "x", "--model"])
+        .arg(format!("scripted:{}", script.display()))
+        .arg("--dir")
+        .arg(&agent)
+        .arg("--out-dir")
+        .arg(&out)
+        .env("HOME", dir.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let t: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(out.join("trajectory.json")).unwrap()).unwrap();
+    let defs = t["agent"]["tool_definitions"].as_array().unwrap();
+    let greet = defs.iter().find(|d| d["name"] == "greet").unwrap();
+    assert_eq!(greet["description"], "Greets someone.");
+    let text = t.to_string();
+    assert!(text.contains("Hello, Ada"), "{text}");
 }
