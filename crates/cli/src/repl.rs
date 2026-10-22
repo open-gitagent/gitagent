@@ -51,6 +51,8 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             mcp: mcp.clone(),
             approver: Some(crate::approver()),
             kill: None,
+            steer: None,
+            external_tools: None,
         };
         tokio::select! {
             result = gitagent_core::run(&s.spec, s.provider.as_ref(), opts) => match result {

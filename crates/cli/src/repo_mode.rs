@@ -94,6 +94,8 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
             mcp,
             approver: Some(crate::approver()),
             kill: None,
+            steer: None,
+            external_tools: None,
         },
     )
     .await?;

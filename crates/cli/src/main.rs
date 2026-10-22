@@ -1,4 +1,5 @@
 mod approval;
+mod ipc;
 mod learn_cmd;
 mod otel;
 mod repl;
@@ -17,7 +18,7 @@ use gitagent_loader::{AgentSpec, LoadOptions};
 use gitagent_provider::Provider;
 use gitagent_record::Events;
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Clone, Parser)]
 #[command(
     name = "gitagent",
     version,
@@ -34,6 +35,11 @@ pub(crate) struct Cli {
     /// `task_complete` (always on in the interactive session).
     #[arg(long, conflicts_with = "bench")]
     conversation: bool,
+
+    /// Serve the IPC protocol on stdin and stdout (JSON Lines) for a client
+    /// library; the session's settings come in its `initialize` message.
+    #[arg(long, conflicts_with_all = ["bench", "prompt", "instruction_file", "repo"])]
+    ipc: bool,
 
     /// Read the task from this file.
     #[arg(long, conflicts_with = "prompt")]
@@ -172,6 +178,9 @@ async fn async_main() -> ExitCode {
     };
     if cli.repo.is_some() && cli.bench {
         return usage_error(anyhow::anyhow!("--repo cannot be used with --bench"));
+    }
+    if cli.ipc {
+        return ipc::run(cli).await;
     }
     match task {
         Some(instruction) if cli.repo.is_some() => {
@@ -315,6 +324,7 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
                     &gitagent_core::offered_tools(
                         &s.spec,
                         mcp.as_deref(),
+                        None,
                         tool_allowlist.as_deref(),
                         &tool_denylist,
                     )
@@ -362,6 +372,8 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
                 mcp: mcp.clone(),
                 approver: (!cli.bench).then(approver),
                 kill: None,
+                steer: None,
+                external_tools: None,
             },
         )
         .await?;

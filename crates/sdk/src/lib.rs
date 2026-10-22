@@ -950,6 +950,7 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
     let tool_names: Vec<String> = gitagent_core::offered_tools(
         &p.spec,
         mcp.as_deref(),
+        None,
         p.tool_allowlist.as_deref(),
         &p.tool_denylist,
     )
@@ -996,6 +997,8 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
         mcp,
         approver: options.approver.clone(),
         kill: Some(kill.clone()),
+        steer: None,
+        external_tools: None,
     };
     let spec = p.spec;
     let (work_dir, session_id) = (p.work_dir.clone(), p.session_id.clone());

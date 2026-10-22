@@ -57,6 +57,8 @@ async fn run_script_for(spec: &AgentSpec, instruction: &str, script: &str, secs:
             mcp: None,
             approver: None,
             kill: None,
+            steer: None,
+            external_tools: None,
         },
     )
     .await
@@ -100,6 +102,8 @@ async fn a_tool_denylist_removes_tools_but_never_task_complete() {
             mcp: None,
             approver: None,
             kill: None,
+            steer: None,
+            external_tools: None,
         },
     )
     .await
@@ -984,6 +988,8 @@ async fn events_describe_the_run_as_json_lines() {
             mcp: None,
             approver: None,
             kill: None,
+            steer: None,
+            external_tools: None,
         },
     )
     .await
@@ -1043,6 +1049,8 @@ async fn a_follow_up_task_continues_the_conversation_and_shell() {
         mcp: None,
         approver: None,
         kill: None,
+        steer: None,
+        external_tools: None,
     };
     let first = run(&spec(), &provider, opts("First task.", "t1", None))
         .await
@@ -1267,6 +1275,8 @@ async fn run_supervised(
             mcp: None,
             approver: approver.map(|a| a as std::sync::Arc<dyn Approver>),
             kill,
+            steer: None,
+            external_tools: None,
         },
     )
     .await

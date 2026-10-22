@@ -84,12 +84,47 @@ pub struct RunOptions {
     pub approver: Option<std::sync::Arc<dyn Approver>>,
     /// Stops the run before its next step once tripped.
     pub kill: Option<KillSwitch>,
+    /// Messages from the user to add while the run works.
+    pub steer: Option<Steering>,
+    /// Tools the caller runs itself.
+    pub external_tools: Option<std::sync::Arc<dyn ExternalTools>>,
 }
 
 /// What a follow-up task continues from.
 pub struct Resume {
     pub messages: Vec<Message>,
-    pub terminal: Terminal,
+    /// The shell to keep using; `None` starts a new one (a conversation
+    /// restored from storage).
+    pub terminal: Option<Terminal>,
+}
+
+/// Messages from the user that arrive while a run is working; each is
+/// added to the conversation before the next model call. Clones share the
+/// queue.
+#[derive(Clone, Default)]
+pub struct Steering(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+impl Steering {
+    pub fn push(&self, text: impl Into<String>) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(text.into());
+    }
+
+    fn take(&self) -> Vec<String> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+}
+
+/// Tools the caller runs itself (an IPC client's own tools). They are
+/// offered after all others, and a call is handed to [`ExternalTools::call`]
+/// after the hooks and approvals.
+#[async_trait::async_trait]
+pub trait ExternalTools: Send + Sync {
+    fn specs(&self) -> Vec<gitagent_provider::ToolSpec>;
+    /// The result's text and whether it is an error.
+    async fn call(&self, name: &str, arguments: &Map<String, Value>) -> (String, bool);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,7 +183,7 @@ impl Finished {
     pub fn into_resume(self) -> Resume {
         Resume {
             messages: self.messages,
-            terminal: self.terminal,
+            terminal: Some(self.terminal),
         }
     }
 }
@@ -168,6 +203,7 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     let mut tools = offered_tools(
         spec,
         opts.mcp.as_deref(),
+        opts.external_tools.as_deref(),
         opts.tool_allowlist.as_deref(),
         &opts.tool_denylist,
     );
@@ -202,7 +238,8 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     let mut instruction = opts.instruction.clone();
     let mut blocked: Option<String> = None;
     if let Some(h) = hooks.as_ref() {
-        if opts.resume.is_none() {
+        // A new session: not a follow-up in a running one.
+        if opts.resume.as_ref().is_none_or(|r| r.terminal.is_none()) {
             if let Decision::Block { reason } =
                 h.event(HookEvent::SessionStart, None, Map::new()).await
             {
@@ -278,7 +315,14 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
     // but extreme commands.
     shell_cfg.max_buffer_bytes = 8 << 20;
     let (mut terminal, mut messages) = match opts.resume {
-        Some(r) => (r.terminal, r.messages),
+        Some(Resume {
+            messages,
+            terminal: Some(t),
+        }) => (t, messages),
+        Some(Resume {
+            messages,
+            terminal: None,
+        }) => (Terminal::start(shell_cfg).await?, messages),
         None => (Terminal::start(shell_cfg).await?, Vec::new()),
     };
     let shape = &spec.profile.shape;
@@ -360,6 +404,23 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
         }
         if let Some(reason) = gate.halted() {
             break Outcome::Killed(reason);
+        }
+        let steered = opts.steer.as_ref().map(Steering::take).unwrap_or_default();
+        if !steered.is_empty() {
+            counters.add("steer_messages", steered.len() as u64);
+            let text = format!(
+                "# Message from the user while you were working\n\n{}\n",
+                steered.join("\n\n")
+            );
+            events.emit("steer", json!({"turn": turns, "text": text}));
+            traj.push(Step::user(text.clone()));
+            prompt_tokens += estimate_tokens(text.len());
+            match messages.last_mut() {
+                Some(last) if last.role == gitagent_provider::Role::User => {
+                    last.content.push(Content::Text { text })
+                }
+                _ => messages.push(Message::user_text(text)),
+            }
         }
         if turns >= spec.config.max_turns {
             break Outcome::MaxTurns;
@@ -452,7 +513,15 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
         }
         events.emit(
             "model_text",
-            json!({"turn": turns, "model": served_by, "text": resp.text, "reasoning": resp.reasoning}),
+            json!({
+                "turn": turns,
+                "model": served_by,
+                "text": resp.text,
+                "reasoning": resp.reasoning,
+                "usage": resp.usage,
+                "stop_reason": resp.stop_reason,
+                "tool_calls": resp.tool_calls.len(),
+            }),
         );
         if resp.model.as_deref().is_some_and(|m| m != spec.model.model) {
             counters.inc("fallback_turns");
@@ -725,8 +794,20 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
                                 json!({"turn": turns, "kind": "advisory", "name": run_call.name}),
                             );
                         }
+                        let external = opts
+                            .external_tools
+                            .as_ref()
+                            .filter(|e| e.specs().iter().any(|t| t.name == run_call.name));
                         let mut out = if let Some(message) = denied {
                             error_output(message)
+                        } else if let Some(ext) = external {
+                            counters.inc_labelled("external_tool_calls", &run_call.name);
+                            let (content, is_error) =
+                                ext.call(&run_call.name, &run_call.arguments).await;
+                            ToolOutput {
+                                is_error,
+                                ..error_output(content)
+                            }
                         } else {
                             let mut ctx = ToolContext {
                                 terminal: &mut terminal,
@@ -876,16 +957,21 @@ pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) ->
             }
             gate.observe(output.is_error);
             completed |= output.complete;
-            events.emit(
-                "tool_result",
-                json!({
+            events.emit("tool_result", {
+                let preview = truncate_chars(&output.content, 2000);
+                let mut e = json!({
                     "turn": turns,
                     "id": call.id,
                     "name": call.name,
                     "is_error": output.is_error,
-                    "content": truncate_chars(&output.content, 2000),
-                }),
-            );
+                    "content": preview,
+                });
+                // The whole result, when the preview is cut.
+                if preview.len() != output.content.len() {
+                    e["output"] = json!(output.content);
+                }
+                e
+            });
             observations.push(ObservationResult {
                 source_call_id: Some(call.id.clone()),
                 content: Some(output.content.clone()),
@@ -1042,12 +1128,14 @@ fn first_user_message(instruction: &str, snapshot: Option<&str>) -> String {
 /// definition's tools and turn limit. Returns what the parent sees.
 #[allow(clippy::too_many_arguments)]
 /// The tools a run offers, in order, under gitagent's names: the profile's
-/// tools, then `skill`, `subagent`, `memory`, the agent's declared tools and
-/// the MCP servers' tools when there are any, after the allow and deny lists
-/// (`task_complete` always stays).
+/// tools, then `skill`, `subagent`, `memory`, the agent's declared tools, the
+/// MCP servers' tools and the caller's own tools when there are any, after
+/// the allow and deny lists (`task_complete` stays, except in conversation
+/// mode).
 pub fn offered_tools(
     spec: &AgentSpec,
     mcp: Option<&gitagent_mcp::Servers>,
+    external: Option<&dyn ExternalTools>,
     allow: Option<&[String]>,
     deny: &[String],
 ) -> Vec<gitagent_provider::ToolSpec> {
@@ -1067,6 +1155,7 @@ pub fn offered_tools(
             .map(gitagent_tools::declared_spec),
     );
     tools.extend(mcp.into_iter().flat_map(|m| m.specs()));
+    tools.extend(external.into_iter().flat_map(|e| e.specs()));
     if let Some(allow) = allow {
         tools.retain(|t| allow.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
     }
@@ -1086,7 +1175,7 @@ pub async fn connect_mcp(
     if spec.mcp_servers.is_empty() {
         return (None, Vec::new());
     }
-    let taken: Vec<String> = offered_tools(spec, None, None, &[])
+    let taken: Vec<String> = offered_tools(spec, None, None, None, &[])
         .into_iter()
         .map(|t| t.name)
         .collect();
@@ -1487,6 +1576,8 @@ fn run_subagent<'a>(
             mcp,
             approver,
             kill,
+            steer: None,
+            external_tools: None,
         };
         let nested: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Finished>> + Send + '_>,

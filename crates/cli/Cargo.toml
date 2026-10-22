@@ -17,6 +17,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 gitagent-core.workspace = true
+gitagent-hooks.workspace = true
 gitagent-mcp.workspace = true
 gitagent-learn.workspace = true
 gitagent-loader.workspace = true

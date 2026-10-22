@@ -431,6 +431,7 @@ dependencies = [
  "async-trait",
  "clap",
  "gitagent-core",
+ "gitagent-hooks",
  "gitagent-learn",
  "gitagent-loader",
  "gitagent-mcp",

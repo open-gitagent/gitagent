@@ -6,8 +6,7 @@
 //! answer comes in time, the request is denied.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use gitagent_loader::compliance::{Hitl, Trigger};
 use gitagent_loader::AgentSpec;
@@ -48,15 +47,28 @@ pub trait Approver: Send + Sync {
 /// Stops the agent before its next model call or tool call once tripped.
 /// Clones share the switch.
 #[derive(Clone, Default)]
-pub struct KillSwitch(Arc<AtomicBool>);
+pub struct KillSwitch(Arc<Mutex<Option<String>>>);
 
 impl KillSwitch {
     pub fn trip(&self) {
-        self.0.store(true, Ordering::SeqCst);
+        self.stop("the kill switch was used");
+    }
+
+    /// Trips the switch with the reason the run reports (the first one
+    /// given stays).
+    pub fn stop(&self, reason: impl Into<String>) {
+        let mut r = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if r.is_none() {
+            *r = Some(reason.into());
+        }
     }
 
     pub fn is_tripped(&self) -> bool {
-        self.0.load(Ordering::SeqCst)
+        self.reason().is_some()
+    }
+
+    pub fn reason(&self) -> Option<String> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
@@ -106,8 +118,8 @@ impl<'a> Gate<'a> {
 
     /// Why the agent must stop now, if it must.
     pub fn halted(&self) -> Option<String> {
-        if self.kill.is_some_and(KillSwitch::is_tripped) {
-            return Some("the kill switch was used".into());
+        if let Some(reason) = self.kill.and_then(KillSwitch::reason) {
+            return Some(reason);
         }
         self.kill_file
             .as_ref()
