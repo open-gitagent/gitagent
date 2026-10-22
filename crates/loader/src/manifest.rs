@@ -147,7 +147,9 @@ impl AgentDir {
             Some(_) => {}
         }
         Ok(Some(AgentDir {
-            root: root.to_path_buf(),
+            // Scripts of hooks and tools run in other directories, so their
+            // paths are built from an absolute root.
+            root: std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf()),
             manifest,
             soul,
             rules: file("RULES.md"),

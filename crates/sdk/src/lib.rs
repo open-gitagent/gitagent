@@ -837,7 +837,7 @@ pub struct Prepared {
 
 pub fn prepare(options: &AgentOptions) -> Result<Prepared> {
     let work_dir = match &options.cwd {
-        Some(d) => d.clone(),
+        Some(d) => std::path::absolute(d).with_context(|| format!("resolving {}", d.display()))?,
         None => std::env::current_dir().context("reading the current directory")?,
     };
     let project = options.setting_sources.contains(&SettingSource::Project);

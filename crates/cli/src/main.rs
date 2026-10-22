@@ -180,7 +180,7 @@ async fn async_main() -> ExitCode {
         return usage_error(anyhow::anyhow!("--repo cannot be used with --bench"));
     }
     if cli.ipc {
-        return ipc::run(cli).await;
+        ipc::run(cli).await;
     }
     match task {
         Some(instruction) if cli.repo.is_some() => {
@@ -226,8 +226,10 @@ fn task_from(cli: &Cli) -> Result<Option<String>> {
 /// Loads everything a run needs; `conversation` is conversation mode
 /// (`--conversation`, and always in the interactive session).
 pub(crate) fn setup(cli: &Cli, conversation: bool) -> Result<Setup> {
+    // Absolute, because hooks, tools and MCP servers run in other
+    // directories than gitagent itself.
     let work_dir = match &cli.dir {
-        Some(d) => d.clone(),
+        Some(d) => std::path::absolute(d).with_context(|| format!("resolving {}", d.display()))?,
         None => std::env::current_dir().context("reading the current directory")?,
     };
     // Benchmark runs use only the built-in files and explicit flags, so the

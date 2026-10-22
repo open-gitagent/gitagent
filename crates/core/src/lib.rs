@@ -188,7 +188,17 @@ impl Finished {
     }
 }
 
-pub async fn run(spec: &AgentSpec, provider: &dyn Provider, opts: RunOptions) -> Result<Finished> {
+pub async fn run(
+    spec: &AgentSpec,
+    provider: &dyn Provider,
+    mut opts: RunOptions,
+) -> Result<Finished> {
+    // The shell runs in the work directory and reads its command scripts
+    // from the output directory, so neither may be relative.
+    opts.work_dir = std::path::absolute(&opts.work_dir)
+        .with_context(|| format!("resolving {}", opts.work_dir.display()))?;
+    opts.out_dir = std::path::absolute(&opts.out_dir)
+        .with_context(|| format!("resolving {}", opts.out_dir.display()))?;
     let started = Instant::now();
     let deadline = opts.timeout.map(|t| started + t);
     let events = opts.events.clone();

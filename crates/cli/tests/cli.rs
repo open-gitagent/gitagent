@@ -1237,3 +1237,47 @@ fn conversation_mode_prints_the_reply() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
+
+/// Relative `--dir` and `--out-dir`: hooks find their scripts and shell
+/// commands run.
+#[test]
+fn relative_directories_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("hooks")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: lyra\nversion: 1.0.0\ndescription: A test agent.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    std::fs::write(agent.join("hooks/log.sh"), "cat > hook-saw.json\n").unwrap();
+    std::fs::write(
+        agent.join("hooks/hooks.yaml"),
+        "hooks:\n  pre_tool_use: [{script: log.sh, description: Log}]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("s.yaml"),
+        "- tool_calls: [{name: exec, arguments: {cmd: \"echo hi > hi.txt\"}}]\n- text: done\n",
+    )
+    .unwrap();
+    let out = gitagent()
+        .current_dir(dir.path())
+        .args(["-p", "x", "--conversation", "--model", "scripted:s.yaml"])
+        .args(["--dir", "agent", "--out-dir", "out"])
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(agent.join("hi.txt")).unwrap(),
+        "hi\n"
+    );
+    assert!(agent.join("hook-saw.json").is_file());
+    assert!(dir.path().join("out/trajectory.json").is_file());
+}
