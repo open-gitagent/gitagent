@@ -196,6 +196,9 @@ fn agent(name: &str, max_turns: u32) -> gitagent_loader::AgentDef {
         model: None,
         effort: None,
         instructions: String::new(),
+        root: None,
+        triggers: Vec::new(),
+        delegation: None,
     }
 }
 
@@ -1174,6 +1177,9 @@ async fn subagents_run_with_a_fresh_context_and_return_only_a_summary() {
         model: None,
         effort: None,
         instructions: "Only run commands; do not edit.".into(),
+        root: None,
+        triggers: Vec::new(),
+        delegation: None,
     }];
     // Parent turn 1 starts the sub-agent; its two turns follow; then the
     // parent finishes.
@@ -1542,4 +1548,66 @@ async fn the_kill_switch_cancels_a_model_call_in_progress() {
     assert!(started.elapsed() < Duration::from_secs(5));
     // The conversation and shell survive for the next turn.
     assert_eq!(finished.messages.len(), 1);
+}
+
+#[tokio::test]
+async fn a_sub_agent_directory_runs_as_its_own_agent() {
+    let dir = tempfile::tempdir().unwrap();
+    let lead = dir.path().join("lead");
+    let write = |p: PathBuf, t: &str| {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, t).unwrap();
+    };
+    write(
+        lead.join("agent.yaml"),
+        "name: lead\nversion: 1.0.0\ndescription: Lead.\nagents:\n  helper: {description: Checks things., delegation: {triggers: [check_requested]}}\n",
+    );
+    write(lead.join("SOUL.md"), "Lead soul.\n");
+    write(
+        lead.join("agents/helper/agent.yaml"),
+        "name: helper\nversion: 1.0.0\ndescription: Helper.\nruntime: {max_turns: 5}\n",
+    );
+    write(lead.join("agents/helper/SOUL.md"), "I am Helper.\n");
+    write(lead.join("agents/helper/RULES.md"), "- Helper rule.\n");
+    let spec = load(&LoadOptions {
+        project_dir: Some(lead.clone()),
+        model: Some("scripted:test".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(spec.profile.tools.subagents);
+    let names: Vec<&str> = spec.agents.iter().map(|a| a.name.as_str()).collect();
+    assert_eq!(names, vec!["general", "helper"]);
+    assert!(spec
+        .system_prompt
+        .contains("- helper: Checks things. Use it when: check_requested.\n"));
+
+    let r = run_script_for(
+        &spec,
+        "check it",
+        "- tool_calls: [{name: subagent, arguments: {description: check, prompt: \"check the thing\", agent: helper}}]\n\
+         - tool_calls: [{name: task_complete, arguments: {summary: \"Helper checked: fine\"}}]\n\
+         - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+        600,
+    )
+    .await;
+    assert_eq!(r.report.outcome, Outcome::Completed);
+    let parent = r.trajectory().to_string();
+    assert!(parent.contains("Helper checked: fine"));
+    assert!(
+        !parent.contains("could not") && !parent.contains("Not enough time"),
+        "{parent}"
+    );
+    let child: Value = serde_json::from_slice(
+        &std::fs::read(r.dir.path().join("out/subagents/1/trajectory.json")).unwrap(),
+    )
+    .unwrap();
+    let prompt = child["steps"][0]["message"].as_str().unwrap();
+    assert!(
+        prompt.starts_with("# helper v1.0.0\nHelper.\n\nI am Helper.\n\n- Helper rule."),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("Lead soul."));
+    assert!(prompt.contains("# Sub-agent\n"));
+    assert_eq!(child["extra"]["counters"]["turns"], 1);
 }

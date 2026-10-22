@@ -135,3 +135,26 @@ fn the_compliance_rules() {
         assert!(got.iter().any(|g| g.ends_with(expected)), "missing {expected:?} in\n{}", got.join("\n"));
     }
 }
+
+#[test]
+fn sub_agent_directories_are_checked_too() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), GOOD);
+    write(
+        dir.path(),
+        &[
+            (
+                "agents/helper/agent.yaml",
+                "name: helper\nversion: one\ndescription: Helper.\n",
+            ),
+            ("agents/helper/SOUL.md", "# Heading only\n"),
+        ],
+    );
+    let got = messages(&validate(dir.path(), false));
+    for expected in [
+        "error: agents/helper/agent.yaml:2: version: must be a semantic version like 1.0.0 (got \"one\")",
+        "error: agents/helper/SOUL.md: has headings but no text",
+    ] {
+        assert!(got.iter().any(|g| g == expected), "missing {expected:?} in\n{}", got.join("\n"));
+    }
+}

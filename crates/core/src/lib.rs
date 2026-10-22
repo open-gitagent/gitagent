@@ -1511,12 +1511,74 @@ fn run_subagent<'a>(
             ));
         }
 
-        let mut child = spec.clone();
-        // A sub-agent's calls go through the agent's tool hooks; the session
-        // and response hooks belong to the session that started it.
-        child.agent_hooks.retain(|h| h.event.is_tool_event());
+        // A whole agent of its own: loaded from its directory, with its own
+        // prompt, skills, tools, hooks and memory. It takes the parent's
+        // model and supervision when it has none, and the parent's tool
+        // hooks apply to it as well.
+        let mut full_provider: Option<Box<dyn Provider>> = None;
+        let mut child = match &def.root {
+            Some(root) => {
+                let parent_model = match &spec.model.base_url {
+                    Some(url) => format!("{}@{url}", spec.model),
+                    None => spec.model.to_string(),
+                };
+                let loaded = gitagent_loader::load(&gitagent_loader::LoadOptions {
+                    project_dir: Some(root.clone()),
+                    model: def.model.is_none().then_some(parent_model),
+                    conversation: spec.conversation,
+                    env: spec.env_config.name.clone(),
+                    ..Default::default()
+                });
+                let mut child = match loaded {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return SubagentRun::failed(error_output(format!(
+                            "Sub-agent `{name}` could not be loaded: {e:#}"
+                        )))
+                    }
+                };
+                let manifest = child.agent.as_ref().map(|a| &a.manifest);
+                if manifest.is_none_or(|m| m.compliance.is_none()) {
+                    child.supervision = spec.supervision.clone();
+                }
+                if manifest
+                    .and_then(|m| m.runtime.as_ref())
+                    .and_then(|r| r.max_turns)
+                    .is_none()
+                {
+                    child.config.max_turns = def.max_turns;
+                }
+                child.agent_hooks.retain(|h| h.event.is_tool_event());
+                child.agent_hooks.extend(
+                    spec.agent_hooks
+                        .iter()
+                        .filter(|h| h.event.is_tool_event())
+                        .cloned(),
+                );
+                if child.model != spec.model {
+                    match gitagent_provider::for_spec(&child) {
+                        Ok(p) => full_provider = Some(p),
+                        Err(e) => {
+                            return SubagentRun::failed(error_output(format!(
+                                "The sub-agent's model could not be set up: {e:#}"
+                            )))
+                        }
+                    }
+                }
+                child
+            }
+            None => {
+                let mut child = spec.clone();
+                // A sub-agent's calls go through the agent's tool hooks; the
+                // session and response hooks belong to the session that
+                // started it.
+                child.agent_hooks.retain(|h| h.event.is_tool_event());
+                child.config.max_turns = def.max_turns;
+                child
+            }
+        };
+        let full = def.root.is_some();
         child.profile.snapshot = false;
-        child.config.max_turns = def.max_turns;
         // Nesting: one level less for the child; at the last level it has no
         // sub-agents of its own.
         let depth = spec.profile.tools.subagent_depth;
@@ -1526,7 +1588,7 @@ fn run_subagent<'a>(
             child.agents.clear();
         }
         let mut effort_override = false;
-        if let Some(e) = &def.effort {
+        if let Some(e) = def.effort.as_ref().filter(|_| !full) {
             match serde_json::from_value::<gitagent_loader::Effort>(Value::String(e.clone())) {
                 Ok(level) => {
                     child.profile.effort = level;
@@ -1539,8 +1601,8 @@ fn run_subagent<'a>(
                 }
             }
         }
-        let mut model_override = false;
-        if let Some(m) = &def.model {
+        let mut model_override = full && child.model != spec.model;
+        if let Some(m) = def.model.as_ref().filter(|_| !full) {
             let (provider_name, model_id) = match m.split_once(':') {
                 Some((p, id)) => (p, id),
                 None => (spec.model.provider.as_str(), m.as_str()),
@@ -1554,7 +1616,9 @@ fn run_subagent<'a>(
             child.model.model = gitagent_loader::sdk::model_alias(model_id).to_string();
             model_override = child.model.model != spec.model.model;
         }
-        let own_provider: Option<Box<dyn Provider>> = if model_override {
+        let own_provider: Option<Box<dyn Provider>> = if full {
+            full_provider
+        } else if model_override {
             match gitagent_provider::for_spec(&child) {
                 Ok(p) => Some(p),
                 Err(e) => {
@@ -1575,11 +1639,16 @@ fn run_subagent<'a>(
             "When done, call task_complete with a summary of what you found or did, including the \
              paths, commands and results the other agent needs; that summary is all it sees."
         };
+        let base_prompt = if full {
+            child.system_prompt.clone()
+        } else {
+            spec.system_prompt.clone()
+        };
         child.system_prompt = format!(
         "{}\n# Sub-agent\n\nYou were started by another agent for one piece of work: the task below. \
          You cannot ask it questions. {finish}\n{}",
-        spec.system_prompt,
-        if def.instructions.is_empty() {
+        base_prompt,
+        if def.instructions.is_empty() || full {
             String::new()
         } else {
             format!("\n{}\n", def.instructions)

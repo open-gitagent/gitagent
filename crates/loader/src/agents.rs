@@ -24,6 +24,14 @@ pub struct AgentDef {
     /// The agent file's `effort` field: `low`, `medium`, `high`, `xhigh` or `max`.
     pub effort: Option<String>,
     pub instructions: String,
+    /// A whole agent of its own (`agents/<name>/`), run with its own prompt,
+    /// skills, tools, hooks and memory; `None` for a definition that runs
+    /// on the parent's prompt with `instructions`.
+    pub root: Option<PathBuf>,
+    /// When to delegate to it (`delegation.triggers`), as written.
+    pub triggers: Vec<String>,
+    /// Its `delegation.mode`.
+    pub delegation: Option<String>,
 }
 
 pub const GENERAL: &str = "general";
@@ -41,6 +49,9 @@ pub fn general() -> AgentDef {
         model: None,
         effort: None,
         instructions: String::new(),
+        root: None,
+        triggers: Vec::new(),
+        delegation: None,
     }
 }
 
@@ -130,6 +141,9 @@ pub fn discover(config_dirs: &[PathBuf]) -> Vec<AgentDef> {
                 effort: field("effort").filter(|e| !e.is_empty()),
                 instructions: body.trim().to_string(),
                 name,
+                root: None,
+                triggers: Vec::new(),
+                delegation: None,
             };
             // A file can redefine the built-in agent.
             agents.retain(|a| a.name != def.name);

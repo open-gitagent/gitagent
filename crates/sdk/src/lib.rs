@@ -67,6 +67,9 @@ impl AgentDefinition {
             model: self.model.clone().filter(|m| m != "inherit"),
             effort: self.effort.clone(),
             instructions: self.prompt.clone(),
+            root: None,
+            triggers: Vec::new(),
+            delegation: None,
         }
     }
 }
@@ -903,6 +906,9 @@ pub fn prepare(options: &AgentOptions) -> Result<Prepared> {
                 model: None,
                 effort: None,
                 instructions: String::new(),
+                root: None,
+                triggers: Vec::new(),
+                delegation: None,
             });
         }
         spec.agents.sort_by(|a, b| a.name.cmp(&b.name));

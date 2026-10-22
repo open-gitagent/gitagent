@@ -589,6 +589,28 @@ pub fn validate(root: &Path, compliance: bool) -> Report {
     skill_files(root, &mut out);
     config_files(root, &mut out);
     knowledge_index(root, &mut out);
+    // Sub-agents that are whole agents are checked the same way.
+    let mut subs: Vec<_> = std::fs::read_dir(root.join("agents"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join("agent.yaml").is_file())
+        .collect();
+    subs.sort();
+    for sub in subs {
+        let name = sub
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        for f in validate(&sub, compliance).findings {
+            out.push(Finding {
+                file: format!("agents/{name}/{}", f.file),
+                ..f
+            });
+        }
+    }
     out.sort_by(|a, b| (a.severity, &a.file, a.line).cmp(&(b.severity, &b.file, b.line)));
     Report { findings: out }
 }

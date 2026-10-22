@@ -17,6 +17,7 @@ pub mod memory;
 mod profile;
 pub mod sdk;
 mod skills;
+pub mod subagents;
 pub mod v1;
 pub mod validate;
 
@@ -435,6 +436,33 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         system_prompt.push('\n');
         system_prompt.push_str(&skills::index(&skills));
     }
+    // Sub-agents: the config directories' (when the profile allows them)
+    // and the agent directory's own, which turn the tool on.
+    let mut agents = if profile.tools.subagents {
+        agents::discover(&config_dirs)
+    } else {
+        Vec::new()
+    };
+    if let Some(a) = &agent {
+        let (own, problems) = subagents::discover(a);
+        warnings.extend(problems);
+        if !own.is_empty() {
+            profile.tools.subagents = true;
+            if agents.is_empty() {
+                agents.push(agents::general());
+            }
+            let section = subagents::prompt_section(&own, a.manifest.delegation.as_ref());
+            for def in own {
+                agents.retain(|x| x.name != def.name);
+                agents.push(def);
+            }
+            agents.sort_by(|x, y| x.name.cmp(&y.name));
+            if !section.is_empty() {
+                system_prompt.push('\n');
+                system_prompt.push_str(&section);
+            }
+        }
+    }
     // Knowledge and examples from the agent directory.
     let knowledge = match &agent {
         Some(a) => {
@@ -513,11 +541,6 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         }
     }
 
-    let agents = if profile.tools.subagents {
-        agents::discover(&config_dirs)
-    } else {
-        Vec::new()
-    };
     Ok(AgentSpec {
         config,
         model,

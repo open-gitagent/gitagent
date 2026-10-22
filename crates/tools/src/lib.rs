@@ -575,7 +575,18 @@ pub fn subagent_spec(agents: &[AgentDef]) -> ToolSpec {
     let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
     let list: Vec<String> = agents
         .iter()
-        .map(|a| format!("- {}: {}", a.name, a.description))
+        .map(|a| {
+            if a.triggers.is_empty() {
+                format!("- {}: {}", a.name, a.description)
+            } else {
+                format!(
+                    "- {}: {} Use it when: {}.",
+                    a.name,
+                    a.description,
+                    a.triggers.join(", ")
+                )
+            }
+        })
         .collect();
     ToolSpec {
         name: SUBAGENT.into(),
