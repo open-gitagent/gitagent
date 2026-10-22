@@ -2038,3 +2038,60 @@ async fn audit_log_handoffs_and_spending_rules() {
         "{err}"
     );
 }
+
+#[tokio::test]
+async fn a_workflow_step_naming_a_missing_tool_fails_plainly() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("workflows")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: a\nversion: 1.0.0\ndescription: A.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am A.\n").unwrap();
+    std::fs::write(
+        agent.join("workflows/w.yaml"),
+        "name: w\nsteps:\n  - {id: s, action: Go., tool: nonexistent}\n",
+    )
+    .unwrap();
+    let spec = load(&LoadOptions {
+        project_dir: Some(agent.clone()),
+        model: Some("scripted:test".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let provider = ScriptedProvider::from_yaml("- text: should not be asked\n").unwrap();
+    let report = run_workflow(
+        &spec,
+        &provider,
+        "w",
+        &Map::new(),
+        RunOptions {
+            instruction: String::new(),
+            work_dir: agent.clone(),
+            out_dir: dir.path().join("out"),
+            timeout: None,
+            session_id: None,
+            events: gitagent_record::Events::disabled(),
+            resume: None,
+            sandbox: None,
+            tool_allowlist: None,
+            tool_denylist: Vec::new(),
+            hook_callbacks: None,
+            mcp: None,
+            approver: None,
+            kill: None,
+            steer: None,
+            external_tools: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(&report.steps[0].status, crate::workflow::StepStatus::Failed(why) if why.contains("\"nonexistent\" is not available")),
+        "{:?}",
+        report.steps[0].status
+    );
+    assert!(provider.requests().is_empty());
+}

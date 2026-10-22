@@ -371,7 +371,21 @@ async fn run_step(
                 Ok(out.text)
             };
         }
-        // A built-in tool: the agent makes the call.
+        // A built-in tool: the agent makes the call. Anything else is a
+        // mistake in the workflow, not a job for the model.
+        let built_in = gitagent_tools::specs(&spec.profile.tools, spec.profile.edit_tool)
+            .iter()
+            .any(|t| &t.name == tool)
+            || gitagent_loader::v1::is_v1_tool(tool)
+            || matches!(
+                tool.as_str(),
+                gitagent_tools::SKILL | gitagent_tools::SUBAGENT | gitagent_tools::MEMORY
+            );
+        if !built_in {
+            return Err(format!(
+                "the tool {tool:?} is not available to this agent (not declared in tools/, enabled in agent.yaml, or offered by an MCP server)"
+            ));
+        }
         return model_step(spec, provider, wf, step, inputs, child, out_dir, remaining).await;
     }
     if let Some(agent) = &step.agent {
