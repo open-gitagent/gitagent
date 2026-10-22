@@ -24,7 +24,6 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -585,7 +584,7 @@ fn session_file(dir: &Path, id: &str) -> Result<PathBuf, String> {
         .join("messages.json"))
 }
 
-pub(crate) async fn run(cli: Cli) -> ExitCode {
+pub(crate) async fn run(cli: Cli) -> ! {
     let (tx, mut rx) = mpsc::unbounded_channel::<Value>();
     let out = Out(tx);
     let writer = tokio::spawn(async move {
@@ -602,18 +601,21 @@ pub(crate) async fn run(cli: Cli) -> ExitCode {
             let _ = stdout.flush().await;
         }
     });
+    // `session` drops its shells and MCP servers before returning.
     let code = session(cli, out.clone()).await;
     out.send(Value::Null);
     let _ = writer.await;
-    code
+    // The stdin reader may still be waiting in a blocking read the runtime
+    // would wait for (a client may keep its end open after `session_end`).
+    std::process::exit(code)
 }
 
-async fn session(cli: Cli, out: Out) -> ExitCode {
+async fn session(cli: Cli, out: Out) -> i32 {
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let fatal = |out: &Out, why: String| {
         out.system("error", why, None);
         out.system("session_end", "The session could not start", None);
-        ExitCode::from(2)
+        2
     };
     let first = match lines.next_line().await {
         Ok(Some(l)) => l,
@@ -864,7 +866,7 @@ async fn session(cli: Cli, out: Out) -> ExitCode {
             format!("Agent {agent_name} finished"),
             Some(json!({"sessionId": session_id, "costs": Totals::default().json()})),
         );
-        return ExitCode::SUCCESS;
+        return 0;
     }
     out.system(
         "session_start",
@@ -1062,7 +1064,7 @@ async fn session(cli: Cli, out: Out) -> ExitCode {
         format!("Agent {agent_name} finished"),
         Some(json!({"sessionId": session_id, "costs": totals.json()})),
     );
-    ExitCode::SUCCESS
+    0
 }
 
 fn save(path: &Path, messages: &[Message]) -> std::io::Result<()> {
