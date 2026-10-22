@@ -53,8 +53,18 @@ pub fn for_spec(spec: &gitagent_loader::AgentSpec) -> anyhow::Result<Box<dyn Pro
     }
     let mut chain = vec![(spec.model.to_string(), spec.model.model.clone(), primary)];
     for fb in &spec.fallbacks {
-        let provider = for_model(&fb.model, &fb.profile, "fallback profile")?;
-        chain.push((fb.model.to_string(), fb.model.model.clone(), provider));
+        // A fallback that cannot be set up (no key, say) must not stop a
+        // run whose own model works.
+        match for_model(&fb.model, &fb.profile, "fallback profile") {
+            Ok(provider) => chain.push((fb.model.to_string(), fb.model.model.clone(), provider)),
+            Err(e) => eprintln!(
+                "gitagent: warning: fallback model {} left out: {e:#}",
+                fb.model
+            ),
+        }
+    }
+    if chain.len() == 1 {
+        return Ok(chain.pop().expect("the primary").2);
     }
     Ok(Box::new(FallbackProvider::new(chain)))
 }
@@ -110,4 +120,23 @@ pub(crate) fn http_client() -> anyhow::Result<reqwest::Client> {
 /// A temperature as JSON with the digits as written (0.7, not 0.699999988).
 pub(crate) fn temperature_json(t: f32) -> serde_json::Value {
     serde_json::from_str(&t.to_string()).unwrap_or_else(|_| serde_json::json!(t))
+}
+
+#[cfg(test)]
+mod for_spec_tests {
+    use super::*;
+
+    #[test]
+    fn a_fallback_that_cannot_be_set_up_is_left_out() {
+        let mut spec = gitagent_loader::load(&gitagent_loader::LoadOptions {
+            model: Some("openai:m@http://127.0.0.1:9/v1".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        spec.fallbacks.push(gitagent_loader::Fallback {
+            model: gitagent_loader::ModelRef::parse("scripted:/nonexistent/script.yaml").unwrap(),
+            profile: spec.profile.clone(),
+        });
+        assert!(for_spec(&spec).is_ok());
+    }
 }

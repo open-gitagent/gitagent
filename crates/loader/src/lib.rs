@@ -342,7 +342,13 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         .iter()
         .filter_map(|a| a.manifest.model.as_ref())
         .flat_map(|m| m.fallback.iter());
-    for id in config.fallback_models.iter().chain(manifest_fallbacks) {
+    // A scripted model is a test run: no real model takes over from it.
+    let fallback_ids = config
+        .fallback_models
+        .iter()
+        .chain(manifest_fallbacks)
+        .filter(|_| model.provider != "scripted");
+    for id in fallback_ids {
         let fb = if id.contains(':') && !id.contains('/') {
             ModelRef::parse(id)?
         } else {
@@ -1003,6 +1009,15 @@ profile: quiet
             spec.fallbacks[2].model.base_url.as_deref(),
             Some("http://localhost:11434/v1")
         );
+
+        // A scripted (test) model gets no real model behind it.
+        let spec = load(&LoadOptions {
+            project_dir: Some(dir.path().to_path_buf()),
+            model: Some("scripted:s.yaml".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(spec.fallbacks.is_empty());
     }
 
     #[test]
