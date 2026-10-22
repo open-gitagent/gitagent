@@ -165,7 +165,17 @@ fn read_result(text: &str) -> ToolOutput {
         };
     }
     if let Ok(Value::Object(v)) = serde_json::from_str::<Value>(text) {
-        if let Some(e) = v.get("error").filter(|e| !e.is_null()) {
+        // `error: false`, `error: null` and `error: ""` mean no error.
+        let is_error = match v.get("error") {
+            Some(Value::String(s)) => !s.trim().is_empty(),
+            Some(Value::Bool(b)) => *b,
+            Some(Value::Object(o)) => !o.is_empty(),
+            Some(Value::Array(a)) => !a.is_empty(),
+            Some(Value::Number(n)) => n.as_f64() != Some(0.0),
+            Some(Value::Null) | None => false,
+        };
+        if is_error {
+            let e = &v["error"];
             let e = e.as_str().map_or_else(|| e.to_string(), str::to_string);
             return ToolOutput::error(cap(&e));
         }
@@ -383,6 +393,11 @@ mod tests {
         assert_eq!(read_result("").content, "(no output)");
         assert_eq!(read_result(r#"{"text": "hi"}"#).content, "hi");
         assert_eq!(read_result(r#"{"result": {"a": 1}}"#).content, r#"{"a":1}"#);
+        let fine = read_result(r#"{"ok": true, "error": false, "result": "42"}"#);
+        assert!(!fine.is_error && fine.content == "42");
+        assert!(!read_result(r#"{"error": null, "text": "t"}"#).is_error);
+        assert!(!read_result(r#"{"error": "", "text": "t"}"#).is_error);
+        assert!(read_result(r#"{"error": {"code": 7}}"#).is_error);
         let e = read_result(r#"{"error": "no such user"}"#);
         assert!(e.is_error && e.content == "no such user");
         let m = read_result(

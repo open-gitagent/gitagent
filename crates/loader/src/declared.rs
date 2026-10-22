@@ -170,6 +170,13 @@ fn read(file: &Path, root: &Path) -> Result<DeclaredTool, String> {
             if !path.is_file() {
                 return Err(format!("the script tools/{rel} does not exist"));
             }
+            let inside = match (path.canonicalize(), root.canonicalize()) {
+                (Ok(p), Ok(r)) => p.starts_with(r),
+                _ => false,
+            };
+            if !inside {
+                return Err(format!("the script {rel} is outside the agent directory"));
+            }
             let mut command = interpreter(field("runtime"), &path);
             command.push(path.display().to_string());
             Runner::Script {
@@ -314,7 +321,8 @@ mod tests {
     #[test]
     fn both_layouts_are_read_and_problems_are_warnings() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
+        let root = &dir.path().join("agent");
+        std::fs::create_dir(root).unwrap();
         tool(root, "lint.sh", "echo ok\n");
         tool(
             root,
@@ -336,6 +344,12 @@ mod tests {
             "exec.yaml",
             "name: exec\ndescription: Shadowing.\nimplementation: {script: lint.sh}\n",
         );
+        std::fs::write(dir.path().join("outside.sh"), "echo out\n").unwrap();
+        tool(
+            root,
+            "escape.yaml",
+            "name: escape\ndescription: Leaves the agent directory.\nimplementation: {script: ../../outside.sh}\n",
+        );
         let (tools, warnings) = discover(&agent(root, ""));
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert_eq!(names, vec!["lint", "search"]);
@@ -355,9 +369,10 @@ mod tests {
         assert_eq!(tools[1].timeout, Duration::from_secs(5));
         assert!(matches!(&tools[1].runner, Runner::Http { method, .. } if method == "GET"));
 
-        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert_eq!(warnings.len(), 3, "{warnings:?}");
         assert!(warnings[0].contains("tools/nope.py does not exist"));
-        assert!(warnings[1].contains("built-in tool"));
+        assert!(warnings[1].contains("outside the agent directory"));
+        assert!(warnings[2].contains("built-in tool"));
     }
 
     #[test]

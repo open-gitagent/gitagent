@@ -112,7 +112,8 @@ impl Steering {
             .push(text.into());
     }
 
-    fn take(&self) -> Vec<String> {
+    /// Everything queued so far, leaving the queue empty.
+    pub fn take(&self) -> Vec<String> {
         std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
     }
 }
@@ -474,7 +475,18 @@ pub async fn run(
             cache: cache_plan,
             server_masking,
         };
-        let mut resp = match complete_with_retry(provider, &req, deadline).await {
+        // The kill switch cancels a model call in progress.
+        let halted = async {
+            match opts.kill.as_ref() {
+                Some(k) => k.wait().await,
+                None => std::future::pending().await,
+            }
+        };
+        let answer = tokio::select! {
+            r = complete_with_retry(provider, &req, deadline) => r,
+            reason = halted => break Outcome::Killed(reason),
+        };
+        let mut resp = match answer {
             Ok(Some(r)) => r,
             Ok(None) => break Outcome::TimeUp,
             Err(ProviderError::ContextOverflow(_))

@@ -6,7 +6,7 @@
 //! answer comes in time, the request is denied.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use gitagent_loader::compliance::{Hitl, Trigger};
 use gitagent_loader::AgentSpec;
@@ -44,10 +44,16 @@ pub trait Approver: Send + Sync {
     async fn approve(&self, request: &ApprovalRequest) -> Approval;
 }
 
-/// Stops the agent before its next model call or tool call once tripped.
-/// Clones share the switch.
-#[derive(Clone, Default)]
-pub struct KillSwitch(Arc<Mutex<Option<String>>>);
+/// Stops the agent once tripped: a model call in progress is cancelled,
+/// and no further tool call starts. Clones share the switch.
+#[derive(Clone)]
+pub struct KillSwitch(Arc<tokio::sync::watch::Sender<Option<String>>>);
+
+impl Default for KillSwitch {
+    fn default() -> Self {
+        KillSwitch(Arc::new(tokio::sync::watch::channel(None).0))
+    }
+}
 
 impl KillSwitch {
     pub fn trip(&self) {
@@ -57,10 +63,15 @@ impl KillSwitch {
     /// Trips the switch with the reason the run reports (the first one
     /// given stays).
     pub fn stop(&self, reason: impl Into<String>) {
-        let mut r = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if r.is_none() {
-            *r = Some(reason.into());
-        }
+        let reason = reason.into();
+        self.0.send_if_modified(|r| {
+            if r.is_none() {
+                *r = Some(reason);
+                true
+            } else {
+                false
+            }
+        });
     }
 
     pub fn is_tripped(&self) -> bool {
@@ -68,7 +79,18 @@ impl KillSwitch {
     }
 
     pub fn reason(&self) -> Option<String> {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.0.borrow().clone()
+    }
+
+    /// Waits until the switch is tripped and gives the reason.
+    pub async fn wait(&self) -> String {
+        let mut rx = self.0.subscribe();
+        let reason = rx.wait_for(|r| r.is_some()).await.map(|r| r.clone());
+        match reason {
+            Ok(r) => r.unwrap_or_default(),
+            // The sender never goes away while a run holds the switch.
+            Err(_) => std::future::pending().await,
+        }
     }
 }
 

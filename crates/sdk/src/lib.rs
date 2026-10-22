@@ -770,7 +770,8 @@ fn usd(x: f64) -> f64 {
     (x * 1e6).round() / 1e6
 }
 
-fn cost_of(prices: Option<Prices>, u: &Usage) -> f64 {
+/// The cost of some usage at `prices` (0 without prices).
+pub fn cost_of(prices: Option<Prices>, u: &Usage) -> f64 {
     let Some(p) = prices else {
         return 0.0;
     };

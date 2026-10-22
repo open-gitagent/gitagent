@@ -332,6 +332,17 @@ fn startup_problems_and_blocking_hooks() {
     s.send(json!({"type": "initialize", "protocol": 9, "options": {}}));
     let (code, rest) = s.finish();
     assert_eq!(code, 2);
+
+    // A malformed client tool is refused, not a crash.
+    let mut s = Session::start(tmp.path(), &tmp.path().join("out0"));
+    s.send(json!({"type": "initialize", "protocol": 1, "options": {},
+                  "tools": [{"name": "t", "inputSchema": "string"}]}));
+    let (code, rest0) = s.finish();
+    assert_eq!(code, 2);
+    assert!(rest0[0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("`inputSchema` must be an object"));
     assert!(rest[0]["content"]
         .as_str()
         .unwrap()

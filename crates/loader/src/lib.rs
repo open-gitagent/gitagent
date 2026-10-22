@@ -307,6 +307,9 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         if let Some(n) = m.runtime.as_ref().and_then(|r| r.max_turns) {
             config.max_turns = n;
         }
+        if let Some(t) = m.runtime.as_ref().and_then(|r| r.timeout) {
+            config.timeout_s = t;
+        }
         // Temperature: runtime, then model constraints.
         let constraints = m.model.as_ref().and_then(|s| s.constraints.as_ref());
         if let Some(t) = m
@@ -931,6 +934,23 @@ profile: quiet
             .unwrap();
         }
         dir
+    }
+
+    #[test]
+    fn the_agents_runtime_timeout_applies() {
+        let dir = agent_project();
+        std::fs::write(
+            dir.path().join("agent.yaml"),
+            "name: bot\nversion: 1.0.0\ndescription: d\nruntime: {timeout: 120}\n",
+        )
+        .unwrap();
+        let spec = load(&LoadOptions {
+            project_dir: Some(dir.path().to_path_buf()),
+            model: Some("scripted:s.yaml".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(spec.config.timeout_s, 120);
     }
 
     #[test]

@@ -46,8 +46,9 @@ const PROTOCOL: u64 = 1;
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(30);
 /// Approvals wait as long as the agent's compliance settings allow.
 const APPROVAL_WAIT: Duration = Duration::from_secs(24 * 3600);
-/// How long an aborted turn may take to stop at its next step before it is
-/// dropped (its shell is then closed and the conversation starts fresh).
+/// How long an aborted turn may take to stop before it is dropped (its
+/// shell is then closed and the conversation starts fresh). A model call in
+/// progress is cancelled at once; this covers a tool call that is running.
 const ABORT_GRACE: Duration = Duration::from_secs(5);
 
 /// Messages to the client, written in order by one task.
@@ -124,18 +125,15 @@ impl Callbacks {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(id.clone(), tx);
+        // Forgets the request when it is answered, times out, or is given
+        // up on (an approval's own timeout drops this future).
+        let _forget = Forget { cb: self, id: &id };
         self.out.send(json!({
             "type": "callback_request", "id": id, "kind": kind, "name": name, "input": input
         }));
         match tokio::time::timeout(wait, rx).await {
             Ok(Ok(v)) => Some(v),
-            _ => {
-                self.pending
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .remove(&id);
-                None
-            }
+            _ => None,
         }
     }
 
@@ -213,6 +211,21 @@ impl Callbacks {
             input.extend(extra);
             self.send("hook", name, Value::Object(input));
         }
+    }
+}
+
+struct Forget<'a> {
+    cb: &'a Callbacks,
+    id: &'a str,
+}
+
+impl Drop for Forget<'_> {
+    fn drop(&mut self) {
+        self.cb
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(self.id);
     }
 }
 
@@ -385,21 +398,12 @@ impl Totals {
     }
 }
 
-/// USD per million tokens, for the cost figures.
-#[derive(Clone, Copy)]
-struct Prices {
-    input: f64,
-    output: f64,
-    cache_read: f64,
-    cache_write: f64,
-}
-
 /// Turns gitagent's events into protocol messages.
 struct Stream {
     out: Out,
     cb: Arc<Callbacks>,
     provider: String,
-    prices: Option<Prices>,
+    prices: Option<gitagent_sdk::Prices>,
     totals: Mutex<Totals>,
 }
 
@@ -451,16 +455,15 @@ impl Stream {
             output: n("output_tokens"),
             cache_read: n("cache_read_tokens"),
             cache_write: n("cache_write_tokens"),
-            cost: self.prices.map_or(0.0, |p| {
-                let uncached = n("input_tokens")
-                    .saturating_sub(n("cache_read_tokens"))
-                    .saturating_sub(n("cache_write_tokens"));
-                (uncached as f64 * p.input
-                    + n("cache_read_tokens") as f64 * p.cache_read
-                    + n("cache_write_tokens") as f64 * p.cache_write
-                    + n("output_tokens") as f64 * p.output)
-                    / 1e6
-            }),
+            cost: gitagent_sdk::cost_of(
+                self.prices,
+                &gitagent_sdk::Usage {
+                    input_tokens: n("input_tokens"),
+                    output_tokens: n("output_tokens"),
+                    cache_read_input_tokens: n("cache_read_tokens"),
+                    cache_creation_input_tokens: n("cache_write_tokens"),
+                },
+            ),
             requests: 1,
         };
         {
@@ -544,11 +547,15 @@ fn read_init(line: &str) -> Result<Init, String> {
     let mut tools = Vec::new();
     for t in v["tools"].as_array().into_iter().flatten() {
         let name = t["name"].as_str().ok_or("a client tool has no `name`")?;
-        let mut schema = t
-            .get("inputSchema")
-            .or(t.get("input_schema"))
-            .cloned()
-            .unwrap_or_else(|| json!({}));
+        let mut schema = match t.get("inputSchema").or(t.get("input_schema")) {
+            None | Some(Value::Null) => json!({}),
+            Some(Value::Object(m)) => Value::Object(m.clone()),
+            Some(_) => {
+                return Err(format!(
+                    "client tool {name:?}: `inputSchema` must be an object"
+                ))
+            }
+        };
         schema["type"] = json!("object");
         if schema.get("properties").is_none() {
             schema["properties"] = json!({});
@@ -740,7 +747,7 @@ async fn session(cli: Cli, out: Out) -> i32 {
     });
     let prices = o["prices"].as_object().map(|p| {
         let f = |k: &str| p.get(k).and_then(Value::as_f64).unwrap_or(0.0);
-        Prices {
+        gitagent_sdk::Prices {
             input: f("input"),
             output: f("output"),
             cache_read: f("cacheRead"),
@@ -976,6 +983,11 @@ async fn session(cli: Cli, out: Out) -> i32 {
             }
         };
         *turn.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        // A steer message that arrived as the turn ended becomes the next
+        // user message instead of being lost.
+        for late in ctl.steering.take().into_iter().rev() {
+            queue.push_front(late);
+        }
         let after = *stream.totals.lock().unwrap_or_else(|e| e.into_inner());
         let turn_usage = Totals {
             input: after.input - before.input,

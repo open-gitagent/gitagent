@@ -346,7 +346,7 @@ pub async fn dispatch(call: &ToolCall, ctx: &mut ToolContext<'_>) -> ToolOutput 
         APPLY_PATCH if ctx.edit_tool == EditTool::ApplyPatch => run_apply_patch(call, ctx),
         SKILL if !ctx.skills.is_empty() => skill::run(call, ctx.skills),
         MEMORY if ctx.memory.is_some() => {
-            memory::run(call, ctx.memory.expect("checked above"), ctx.counters)
+            memory::run(call, ctx.memory.expect("checked above"), ctx.counters).await
         }
         IMAGE_READ if ctx.tools.image_read => image_read::run(call, ctx.terminal.cwd()),
         TODO if ctx.tools.todo => todo::run(call),

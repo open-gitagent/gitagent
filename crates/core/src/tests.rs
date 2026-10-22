@@ -1479,3 +1479,67 @@ async fn in_conversation_mode_a_plain_reply_ends_the_turn() {
     .await;
     assert_eq!(r.report.outcome, Outcome::NoToolCalls);
 }
+
+/// A model that takes a long time to answer.
+struct SlowProvider;
+
+#[async_trait::async_trait]
+impl gitagent_provider::Provider for SlowProvider {
+    async fn complete(
+        &self,
+        _req: &gitagent_provider::ChatRequest,
+    ) -> std::result::Result<gitagent_provider::ChatResponse, gitagent_provider::ProviderError>
+    {
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        Err(gitagent_provider::ProviderError::Fatal("too slow".into()))
+    }
+
+    fn family(&self) -> gitagent_loader::Family {
+        gitagent_loader::Family::Compat
+    }
+}
+
+#[tokio::test]
+async fn the_kill_switch_cancels_a_model_call_in_progress() {
+    let spec = spec();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("work")).unwrap();
+    let kill = KillSwitch::default();
+    let k = kill.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        k.stop("aborted by the test");
+    });
+    let started = Instant::now();
+    let finished = run(
+        &spec,
+        &SlowProvider,
+        RunOptions {
+            instruction: "x".into(),
+            work_dir: dir.path().join("work"),
+            out_dir: dir.path().join("out"),
+            timeout: Some(Duration::from_secs(60)),
+            session_id: None,
+            events: gitagent_record::Events::disabled(),
+            resume: None,
+            sandbox: None,
+            tool_allowlist: None,
+            tool_denylist: Vec::new(),
+            hook_callbacks: None,
+            mcp: None,
+            approver: None,
+            kill: Some(kill),
+            steer: None,
+            external_tools: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        finished.report.outcome,
+        Outcome::Killed("aborted by the test".into())
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+    // The conversation and shell survive for the next turn.
+    assert_eq!(finished.messages.len(), 1);
+}

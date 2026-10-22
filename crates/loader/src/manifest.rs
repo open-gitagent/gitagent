@@ -130,8 +130,27 @@ impl AgentDir {
             bail!("{}: expected a mapping at the top level", path.display());
         };
         let mut warnings = check(map);
-        let manifest: Manifest = serde_json::from_value(raw.clone())
-            .with_context(|| format!("reading {}", path.display()))?;
+        let manifest = match serde_json::from_value::<Manifest>(lenient(map)) {
+            Ok(m) => m,
+            Err(e) => {
+                // The agent still runs on its identity files; the other
+                // settings wait until the file is fixed.
+                warnings.push(format!(
+                    "agent.yaml: {e}; only name, version and description are used until this is fixed"
+                ));
+                let text = |key: &str| match map.get(key) {
+                    Some(Value::String(s)) => s.clone(),
+                    Some(Value::Null) | None => String::new(),
+                    Some(other) => other.to_string(),
+                };
+                Manifest {
+                    name: text("name"),
+                    version: text("version"),
+                    description: text("description"),
+                    ..Manifest::default()
+                }
+            }
+        };
 
         let file = |name: &str| -> Option<String> {
             std::fs::read_to_string(root.join(name))
@@ -275,6 +294,23 @@ fn check(map: &serde_json::Map<String, Value>) -> Vec<String> {
     out
 }
 
+/// The manifest with the slips YAML invites put right: `version: 1.0`
+/// read as a number, and `skills: refunds` where a list was meant.
+fn lenient(map: &serde_json::Map<String, Value>) -> Value {
+    let mut map = map.clone();
+    for key in ["version", "spec_version"] {
+        if let Some(Value::Number(n)) = map.get(key) {
+            map.insert(key.into(), Value::String(n.to_string()));
+        }
+    }
+    for key in ["skills", "tools", "tags"] {
+        if let Some(Value::String(s)) = map.get(key) {
+            map.insert(key.into(), Value::Array(vec![Value::String(s.clone())]));
+        }
+    }
+    Value::Object(map)
+}
+
 /// `^[a-z][a-z0-9-]*$`
 fn is_kebab(s: &str) -> bool {
     let mut chars = s.chars();
@@ -379,6 +415,43 @@ mod tests {
             assert!(w.contains(expected), "missing {expected:?} in:\n{w}");
         }
         assert!(!w.contains("`plugins`"), "{w}");
+    }
+
+    #[test]
+    fn yaml_slips_are_put_right_and_type_errors_keep_the_identity() {
+        // `version: 1.0` is a number to YAML; `skills: refunds` is one name.
+        let dir = agent(&[
+            (
+                "agent.yaml",
+                "name: bot\nversion: 1.0\ndescription: d\nskills: refunds\nruntime: {timeout: 120}\n",
+            ),
+            ("SOUL.md", "I help.\n"),
+        ]);
+        let a = AgentDir::load(dir.path()).unwrap().unwrap();
+        assert_eq!(a.manifest.version, "1.0");
+        assert_eq!(a.manifest.skills, vec!["refunds"]);
+        assert_eq!(a.manifest.runtime.as_ref().unwrap().timeout, Some(120));
+
+        // A setting of the wrong shape: a warning, and the agent still has
+        // its name and identity.
+        let dir = agent(&[
+            (
+                "agent.yaml",
+                "name: bot\nversion: 1.0.0\ndescription: d\nmodel: claude-opus-5-5\n",
+            ),
+            ("SOUL.md", "I help.\n"),
+        ]);
+        let a = AgentDir::load(dir.path()).unwrap().unwrap();
+        assert_eq!(a.manifest.name, "bot");
+        assert!(a.manifest.model.is_none());
+        assert!(
+            a.warnings
+                .iter()
+                .any(|w| w.contains("only name, version and description are used")),
+            "{:?}",
+            a.warnings
+        );
+        assert!(a.identity_prompt().contains("I help."));
     }
 
     #[test]

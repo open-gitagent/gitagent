@@ -4,7 +4,6 @@
 //! git when the project is a repository.
 
 use std::path::Path;
-use std::process::Command;
 
 use anyhow::Result;
 use gitagent_loader::memory::Layer;
@@ -44,7 +43,11 @@ pub fn spec(cfg: &MemoryCfg) -> ToolSpec {
     }
 }
 
-pub(crate) fn run(call: &ToolCall, cfg: &MemoryCfg, counters: &mut Counters) -> Result<ToolOutput> {
+pub(crate) async fn run(
+    call: &ToolCall,
+    cfg: &MemoryCfg,
+    counters: &mut Counters,
+) -> Result<ToolOutput> {
     let layer = match call.arguments.get("layer") {
         None | Some(Value::Null) => &cfg.working,
         Some(Value::String(name)) => match cfg.layer(name) {
@@ -75,13 +78,13 @@ pub(crate) fn run(call: &ToolCall, cfg: &MemoryCfg, counters: &mut Counters) -> 
                 Some(m) if !m.trim().is_empty() => m.trim(),
                 _ => "Update memory",
             };
-            save(cfg, layer, content, message, counters)
+            save(cfg, layer, content, message, counters).await
         }
         other => Err(ArgError(format!("`action` must be load or save, not {other:?}")).into()),
     }
 }
 
-fn save(
+async fn save(
     cfg: &MemoryCfg,
     layer: &Layer,
     content: &str,
@@ -136,7 +139,7 @@ fn save(
         ));
     }
     if cfg.commit {
-        match commit(&cfg.dir, &changed, message) {
+        match commit(&cfg.dir, &changed, message).await {
             Commit::Done => {
                 counters.inc("memory_commits");
                 note.push_str(&format!(" Committed: {message:?}."));
@@ -188,18 +191,30 @@ enum Commit {
 
 /// Commits just the memory files that changed, leaving anything else that
 /// is staged alone.
-fn commit(dir: &Path, files: &[String], message: &str) -> Commit {
-    let git = |args: &[&str]| Command::new("git").current_dir(dir).args(args).output();
-    match git(&["rev-parse", "--is-inside-work-tree"]) {
+async fn commit(dir: &Path, files: &[String], message: &str) -> Commit {
+    let git = |args: Vec<String>| async move {
+        tokio::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .await
+    };
+    match git(vec!["rev-parse".into(), "--is-inside-work-tree".into()]).await {
         Ok(o) if o.status.success() => {}
         _ => return Commit::NotARepository,
     }
-    let mut add = vec!["add", "--"];
-    add.extend(files.iter().map(String::as_str));
-    let mut commit = vec!["commit", "--quiet", "-m", message, "--"];
-    commit.extend(files.iter().map(String::as_str));
+    let mut add = vec!["add".to_string(), "--".to_string()];
+    add.extend(files.iter().cloned());
+    let mut commit = vec![
+        "commit".to_string(),
+        "--quiet".to_string(),
+        "-m".to_string(),
+        message.to_string(),
+        "--".to_string(),
+    ];
+    commit.extend(files.iter().cloned());
     for args in [add, commit] {
-        match git(&args) {
+        match git(args).await {
             Ok(o) if o.status.success() => {}
             Ok(o) => {
                 let err = String::from_utf8_lossy(&o.stderr);
@@ -215,7 +230,16 @@ fn commit(dir: &Path, files: &[String], message: &str) -> Commit {
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use super::*;
+
+    /// The tool, run to completion.
+    fn run(call: &ToolCall, cfg: &MemoryCfg, counters: &mut Counters) -> Result<ToolOutput> {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(super::run(call, cfg, counters))
+    }
 
     fn call(args: Value) -> ToolCall {
         ToolCall {
