@@ -1,0 +1,14 @@
+[project]
+name = "gitagent"
+version = "3.0.0"
+description = "Drives the gitagent binary from Python over its IPC protocol."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["gitagent"]

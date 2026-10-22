@@ -39,3 +39,24 @@ jobs:
         with:
           name: gitagent-linux
           path: target/*-unknown-linux-musl/release/gitagent
+
+  clients:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked -p gitagent-cli
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python client
+        run: GITAGENT_BIN=target/debug/gitagent python3 -m unittest discover -s clients/python/tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: TypeScript client
+        working-directory: clients/typescript
+        run: npm install --no-audit --no-fund && npm run check
