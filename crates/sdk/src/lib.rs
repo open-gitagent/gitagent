@@ -1012,11 +1012,39 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
     };
     let spec = p.spec;
     let (work_dir, session_id) = (p.work_dir.clone(), p.session_id.clone());
+    let teardown_opts = RunOptions {
+        instruction: String::new(),
+        work_dir: p.work_dir.clone(),
+        out_dir: p.out_dir.join("teardown"),
+        timeout: Some(p.timeout),
+        session_id: Some(p.session_id.clone()),
+        events: run_opts.events.clone(),
+        resume: None,
+        sandbox: None,
+        tool_allowlist: p.tool_allowlist.clone(),
+        tool_denylist: p.tool_denylist.clone(),
+        hook_callbacks: p.hook_callbacks.clone(),
+        mcp: run_opts.mcp.clone(),
+        approver: options.approver.clone(),
+        kill: None,
+        steer: None,
+        external_tools: None,
+    };
     let handle = tokio::spawn(async move {
         let finished = gitagent_core::run(&spec, provider.as_ref(), run_opts).await?;
+        let report = finished.report.clone();
+        if spec.teardown.is_some() {
+            let opts = RunOptions {
+                resume: Some(finished.into_resume()),
+                ..teardown_opts
+            };
+            if let Some(Err(e)) = gitagent_core::teardown(&spec, provider.as_ref(), opts).await {
+                eprintln!("gitagent: teardown failed: {e:#}");
+            }
+        }
         gitagent_core::end_session(&spec, &work_dir, &session_id).await;
         drop(tx);
-        Ok(finished.report)
+        Ok(report)
     });
     Ok(Query { rx, handle, kill })
 }

@@ -70,6 +70,34 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             }
         }
     }
+    if let Some(r) = resume.take() {
+        let opts = RunOptions {
+            instruction: String::new(),
+            work_dir: s.work_dir.clone(),
+            out_dir: out_dir.join("teardown"),
+            timeout: Some(s.timeout),
+            session_id: Some(session_id.clone()),
+            events: s.events.clone(),
+            resume: Some(r),
+            sandbox: s.sandbox.clone(),
+            tool_allowlist: None,
+            tool_denylist: Vec::new(),
+            hook_callbacks: None,
+            mcp: mcp.clone(),
+            approver: Some(crate::approver()),
+            kill: None,
+            steer: None,
+            external_tools: None,
+        };
+        match gitagent_core::teardown(&s.spec, s.provider.as_ref(), opts).await {
+            Some(Ok(done)) => eprintln!(
+                "gitagent: teardown: {}",
+                done.report.summary.as_deref().unwrap_or("(no reply)")
+            ),
+            Some(Err(e)) => eprintln!("gitagent: teardown failed: {e:#}"),
+            None => {}
+        }
+    }
     gitagent_core::end_session(&s.spec, &s.work_dir, &session_id).await;
     Ok(())
 }

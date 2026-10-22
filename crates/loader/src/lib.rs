@@ -202,6 +202,12 @@ pub struct AgentSpec {
     pub audit_logging: bool,
     /// The agent's `knowledge/` documents. Never read in benchmark runs.
     pub knowledge: Knowledge,
+    /// `hooks/bootstrap.md`: what the agent does at the start of a session
+    /// (the last section of the system prompt).
+    pub bootstrap: Option<String>,
+    /// `hooks/teardown.md`: what the agent does as a session ends, run as
+    /// one final turn (see `gitagent_core::teardown`).
+    pub teardown: Option<String>,
 }
 
 impl AgentSpec {
@@ -540,6 +546,23 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
             system_prompt.push_str(&section);
         }
     }
+    // Lifecycle instructions in Markdown: bootstrap.md ends the prompt,
+    // teardown.md is kept for the session's last turn.
+    let lifecycle = |name: &str| -> Option<String> {
+        let a = agent.as_ref()?;
+        let root = a.file_root(&format!("hooks/{name}"))?;
+        std::fs::read_to_string(root.join("hooks").join(name))
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+    };
+    let bootstrap = lifecycle("bootstrap.md");
+    let teardown = lifecycle("teardown.md");
+    if let Some(text) = &bootstrap {
+        system_prompt.push_str(&format!(
+            "\n# Session start\n\nAt the start of a session, before the first request, do the following (once; the conversation shows whether it is done):\n\n{text}\n"
+        ));
+    }
 
     Ok(AgentSpec {
         config,
@@ -563,6 +586,8 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         env_config,
         audit_logging,
         knowledge,
+        bootstrap,
+        teardown,
     })
 }
 

@@ -76,6 +76,7 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
         .clone()
         .unwrap_or_else(|| format!("gitagent-{}", std::process::id()));
     let mcp = crate::connect_mcp(&s.spec).await;
+    let mcp_for_teardown = mcp.clone();
     let finished = gitagent_core::run(
         &s.spec,
         s.provider.as_ref(),
@@ -99,6 +100,8 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
         },
     )
     .await?;
+    let finished =
+        crate::teardown(&s, finished, &cli.out_dir, &session_id, mcp_for_teardown).await?;
     gitagent_core::end_session(&s.spec, &repo.dir, &session_id).await;
     report(&finished, !events.enabled());
     crate::export_telemetry(&finished, &s.spec).await;

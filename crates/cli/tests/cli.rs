@@ -1479,3 +1479,49 @@ fn install_fetches_the_parent_and_dependencies() {
     );
     assert!(agent.join(".gitagent/parent/agent.yaml").is_file());
 }
+
+/// `hooks/teardown.md` runs as a last turn after the task; the task's own
+/// result is what is printed.
+#[test]
+fn teardown_runs_after_the_task() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("hooks")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: a\nversion: 1.0.0\ndescription: A.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am A.\n").unwrap();
+    std::fs::write(agent.join("hooks/teardown.md"), "Say goodbye in bye.txt.\n").unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(
+        &script,
+        "- text: \"The answer.\"\n\
+         - tool_calls: [{name: exec, arguments: {cmd: \"echo bye > bye.txt\"}}]\n\
+         - text: \"Said goodbye.\"\n",
+    )
+    .unwrap();
+    let out = gitagent()
+        .args(["-p", "x", "--conversation", "--model"])
+        .arg(format!("scripted:{}", script.display()))
+        .arg("--dir")
+        .arg(&agent)
+        .arg("--out-dir")
+        .arg(dir.path().join("out"))
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "The answer.");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("gitagent: teardown: Said goodbye."));
+    assert_eq!(
+        std::fs::read_to_string(agent.join("bye.txt")).unwrap(),
+        "bye\n"
+    );
+    assert!(dir.path().join("out/teardown/trajectory.json").is_file());
+}

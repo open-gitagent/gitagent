@@ -1190,6 +1190,26 @@ pub fn offered_tools(
     tools
 }
 
+/// Runs the agent's `hooks/teardown.md` as the last turn of a session, so
+/// it can save memory and tidy up: a plain reply ends it, and `opts.resume`
+/// carries the session's conversation and shell. `None` when the agent has
+/// no teardown.
+pub async fn teardown(
+    spec: &AgentSpec,
+    provider: &dyn Provider,
+    mut opts: RunOptions,
+) -> Option<Result<Finished>> {
+    let text = spec.teardown.as_ref()?;
+    let mut spec = spec.clone();
+    spec.conversation = true;
+    // The session's hooks have had their say; only the tool hooks apply.
+    spec.agent_hooks.retain(|h| h.event.is_tool_event());
+    opts.instruction = format!(
+        "# Session end\n\nThe session is ending. Do the following now, then reply with one line on what you did:\n\n{text}\n"
+    );
+    Some(run(&spec, provider, opts).await)
+}
+
 /// Connects the spec's MCP servers for a session; `None` when it has none.
 /// Servers that cannot be used come back as warnings.
 pub async fn connect_mcp(

@@ -394,9 +394,13 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
             },
         )
         .await?;
-        if !cli.bench {
+        let finished = if cli.bench {
+            finished
+        } else {
+            let finished = teardown(&s, finished, &out_dir, &session_id, mcp.clone()).await?;
             gitagent_core::end_session(&s.spec, &s.work_dir, &session_id).await;
-        }
+            finished
+        };
         report(&finished, !s.events.enabled() && !stream_json);
         if !cli.bench {
             export_telemetry(&finished, &s.spec).await;
@@ -434,6 +438,64 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
         f.terminal.linger().await;
     }
     ExitCode::from(code)
+}
+
+/// Runs the agent's teardown turn, when it has one, on the finished run's
+/// conversation and shell; the run's own result is kept.
+pub(crate) async fn teardown(
+    s: &Setup,
+    finished: gitagent_core::Finished,
+    out_dir: &std::path::Path,
+    session_id: &str,
+    mcp: Option<std::sync::Arc<gitagent_mcp::Servers>>,
+) -> Result<gitagent_core::Finished> {
+    if s.spec.teardown.is_none() {
+        return Ok(finished);
+    }
+    let report = finished.report.clone();
+    let opts = RunOptions {
+        instruction: String::new(),
+        work_dir: s.work_dir.clone(),
+        out_dir: out_dir.join("teardown"),
+        timeout: Some(s.timeout),
+        session_id: Some(session_id.to_string()),
+        events: s.events.clone(),
+        resume: Some(finished.into_resume()),
+        sandbox: s.sandbox.clone(),
+        tool_allowlist: None,
+        tool_denylist: Vec::new(),
+        hook_callbacks: None,
+        mcp,
+        approver: Some(approver()),
+        kill: None,
+        steer: None,
+        external_tools: None,
+    };
+    match gitagent_core::teardown(&s.spec, s.provider.as_ref(), opts).await {
+        Some(Ok(mut done)) => {
+            eprintln!(
+                "gitagent: teardown: {}",
+                done.report.summary.as_deref().unwrap_or("(no reply)")
+            );
+            done.report = report;
+            Ok(done)
+        }
+        Some(Err(e)) => {
+            // The shell went with the failed turn; the run's result stands.
+            eprintln!("gitagent: teardown failed: {e:#}");
+            let terminal = gitagent_terminal::Terminal::start(gitagent_terminal::ShellConfig::new(
+                &s.work_dir,
+                out_dir.join("teardown/commands"),
+            ))
+            .await?;
+            Ok(gitagent_core::Finished {
+                report,
+                terminal,
+                messages: Vec::new(),
+            })
+        }
+        None => unreachable!("the agent has a teardown"),
+    }
 }
 
 /// Asks the person at the terminal when a call needs approval.

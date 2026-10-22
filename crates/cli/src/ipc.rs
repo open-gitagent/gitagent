@@ -1072,6 +1072,39 @@ async fn session(cli: Cli, out: Out) -> i32 {
         }
     }
 
+    if let (Some(r), true) = (resume.take(), s.spec.teardown.is_some()) {
+        let events = {
+            let stream = stream.clone();
+            Events::to_callback(move |e| stream.feed(&e))
+        };
+        let opts = RunOptions {
+            instruction: String::new(),
+            work_dir: s.work_dir.clone(),
+            out_dir: cfg.out_dir.join(&session_id).join("teardown"),
+            timeout: Some(s.timeout),
+            session_id: Some(session_id.clone()),
+            events,
+            resume: Some(r),
+            sandbox: s.sandbox.clone(),
+            tool_allowlist: tool_allowlist.clone(),
+            tool_denylist: tool_denylist.clone(),
+            hook_callbacks: hooks.clone(),
+            mcp: mcp.clone(),
+            approver: approver.clone(),
+            kill: None,
+            steer: None,
+            external_tools: external.clone(),
+        };
+        match gitagent_core::teardown(&s.spec, s.provider.as_ref(), opts).await {
+            Some(Ok(done)) => out.system(
+                "teardown",
+                done.report.summary.clone().unwrap_or_default(),
+                Some(json!({"outcome": done.report.outcome.to_string()})),
+            ),
+            Some(Err(e)) => out.system("error", format!("teardown failed: {e:#}"), None),
+            None => {}
+        }
+    }
     gitagent_core::end_session(&s.spec, &s.work_dir, &session_id).await;
     let totals = *stream.totals.lock().unwrap_or_else(|e| e.into_inner());
     out.system(

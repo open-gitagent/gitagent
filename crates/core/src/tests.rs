@@ -1611,3 +1611,96 @@ async fn a_sub_agent_directory_runs_as_its_own_agent() {
     assert!(prompt.contains("# Sub-agent\n"));
     assert_eq!(child["extra"]["counters"]["turns"], 1);
 }
+
+#[tokio::test]
+async fn teardown_runs_one_last_turn_on_the_sessions_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("hooks")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: a\nversion: 1.0.0\ndescription: A.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am A.\n").unwrap();
+    std::fs::write(agent.join("hooks/bootstrap.md"), "Check the clock.\n").unwrap();
+    std::fs::write(
+        agent.join("hooks/teardown.md"),
+        "Write a note to notes.txt.\n",
+    )
+    .unwrap();
+    let spec = load(&LoadOptions {
+        project_dir: Some(agent.clone()),
+        model: Some("scripted:test".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(spec.system_prompt.ends_with("# Session start\n\nAt the start of a session, before the first request, do the following (once; the conversation shows whether it is done):\n\nCheck the clock.\n"));
+    assert_eq!(spec.teardown.as_deref(), Some("Write a note to notes.txt."));
+
+    let work = dir.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let provider = ScriptedProvider::from_yaml(
+        "- tool_calls: [{name: task_complete, arguments: {summary: done}}]\n\
+         - tool_calls: [{name: exec, arguments: {cmd: \"echo bye > notes.txt\"}}]\n\
+         - text: \"Wrote the note.\"\n",
+    )
+    .unwrap();
+    let opts = |out: &str, resume| RunOptions {
+        instruction: "x".into(),
+        work_dir: work.clone(),
+        out_dir: dir.path().join(out),
+        timeout: Some(Duration::from_secs(60)),
+        session_id: None,
+        events: gitagent_record::Events::disabled(),
+        resume,
+        sandbox: None,
+        tool_allowlist: None,
+        tool_denylist: Vec::new(),
+        hook_callbacks: None,
+        mcp: None,
+        approver: None,
+        kill: None,
+        steer: None,
+        external_tools: None,
+    };
+    let finished = run(&spec, &provider, opts("out", None)).await.unwrap();
+    assert_eq!(finished.report.outcome, Outcome::Completed);
+    let done = teardown(
+        &spec,
+        &provider,
+        opts("teardown", Some(finished.into_resume())),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(done.report.outcome, Outcome::Completed);
+    assert_eq!(done.report.summary.as_deref(), Some("Wrote the note."));
+    assert_eq!(
+        std::fs::read_to_string(work.join("notes.txt")).unwrap(),
+        "bye\n"
+    );
+    let t: Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("teardown/trajectory.json")).unwrap(),
+    )
+    .unwrap();
+    let last_user = t["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .rfind(|s| s["source"] == "user")
+        .unwrap();
+    assert!(last_user["message"].as_str().unwrap().contains("# Session end\n\nThe session is ending. Do the following now, then reply with one line on what you did:\n\nWrite a note to notes.txt."));
+    // Without a teardown there is nothing to run.
+    let plain = load(&LoadOptions {
+        model: Some("scripted:test".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let finished = run(&plain, &provider, opts("out2", None)).await.unwrap();
+    assert!(
+        teardown(&plain, &provider, opts("t2", Some(finished.into_resume())))
+            .await
+            .is_none()
+    );
+}
