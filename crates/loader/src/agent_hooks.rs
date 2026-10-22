@@ -72,7 +72,9 @@ impl HookEvent {
         }
     }
 
-    fn parse(name: &str) -> Option<HookEvent> {
+    /// The event with this name (`user_prompt_submit` counts as
+    /// `pre_query`).
+    pub fn parse(name: &str) -> Option<HookEvent> {
         if name == "user_prompt_submit" {
             return Some(HookEvent::PreQuery);
         }
@@ -145,6 +147,45 @@ pub fn load(agent: &AgentDir) -> (Vec<HookEntry>, Vec<String>) {
         }
     }
     (entries, warnings)
+}
+
+/// The event named `name`, if there is one.
+pub fn parse_event(name: &str) -> Option<HookEvent> {
+    HookEvent::parse(name)
+}
+
+/// A hook from a script at `base/<script>` (a plugin's), with the default
+/// settings.
+pub fn entry_in(
+    event: HookEvent,
+    script: &str,
+    description: &str,
+    base: &Path,
+) -> Result<HookEntry, String> {
+    let script = script.trim();
+    let path = base.join(script);
+    if !path.is_file() {
+        return Err(format!("the hook script {script} does not exist"));
+    }
+    let inside = match (path.canonicalize(), base.canonicalize()) {
+        (Ok(p), Ok(r)) => p.starts_with(r),
+        _ => false,
+    };
+    if !inside {
+        return Err(format!("the hook script {script} is outside its directory"));
+    }
+    let mut command = crate::declared::interpreter(None, &path);
+    command.push(path.display().to_string());
+    Ok(HookEntry {
+        event,
+        script: script.to_string(),
+        command,
+        description: description.to_string(),
+        timeout: DEFAULT_TIMEOUT,
+        compliance: false,
+        fail_open: false,
+        applies_to: Vec::new(),
+    })
 }
 
 fn entry(event: HookEvent, v: &Value, root: &Path) -> Result<HookEntry, String> {

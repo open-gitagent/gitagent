@@ -654,6 +654,34 @@ fn manifest_extras(doc: &mut Doc, m: &Value, root: &Path) {
             doc.error("tools", format!("tools/{name}.yaml does not exist"));
         }
     }
+    for (name, settings) in m["plugins"].as_object().into_iter().flatten() {
+        if settings["enabled"] == Value::Bool(false) {
+            continue;
+        }
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        match crate::plugins::find(root, home.as_deref(), name) {
+            Some(dir) => {
+                let ok = std::fs::read_to_string(dir.join("plugin.yaml"))
+                    .ok()
+                    .and_then(|t| serde_saphyr::from_str::<Value>(&t).ok())
+                    .is_some_and(|v| v["id"].is_string());
+                if !ok {
+                    doc.warn(
+                        &format!("plugins.{name}"),
+                        "its plugin.yaml is not valid or has no `id`",
+                    );
+                }
+            }
+            None if settings["source"].is_string() => doc.warn(
+                &format!("plugins.{name}"),
+                "is not installed yet; it is fetched on the first run or with `gitagent plugin install`",
+            ),
+            None => doc.warn(
+                &format!("plugins.{name}"),
+                "is not in plugins/, ~/.gitagent/plugins/ or .gitagent/plugins/",
+            ),
+        }
+    }
     if let Some(src) = m["extends"]
         .as_str()
         .map(str::trim)

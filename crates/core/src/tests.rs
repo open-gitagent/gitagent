@@ -1792,7 +1792,10 @@ async fn workflows_run_their_steps_in_order() {
             ("judge", "Done".to_string()),
             ("deep", "Skipped".to_string()),
             ("sign", "Failed(\"not approved: not this one\")".to_string()),
-            ("broken", "Failed(\"Tool fail failed: exited with code 1: nope\")".to_string()),
+            (
+                "broken",
+                "Failed(\"Tool fail failed: exited with code 1: nope\")".to_string()
+            ),
         ]
     );
     assert_eq!(report.steps[0].outputs["count"], 3);

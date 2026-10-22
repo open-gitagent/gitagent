@@ -1761,3 +1761,140 @@ fn workflows_run_from_the_command_line() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("missing inputs: text"));
 }
+
+/// `gitagent plugin`: init, list, enable/disable, install from a path and
+/// remove, with agent.yaml edited in place; a run uses a plugin's tool.
+#[test]
+fn plugins_are_managed_and_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: lyra\nversion: 1.0.0\ndescription: A test agent.  # keep this comment\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    let plugin = |args: &[&str]| {
+        let out = gitagent()
+            .arg("plugin")
+            .args(args)
+            .arg("-d")
+            .arg(&agent)
+            .env("HOME", dir.path())
+            .output()
+            .unwrap();
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        )
+    };
+    let (code, out, _) = plugin(&["init", "greeter"]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(agent.join("plugins/greeter/plugin.yaml").is_file());
+    let manifest = std::fs::read_to_string(agent.join("agent.yaml")).unwrap();
+    assert!(
+        manifest.contains("# keep this comment\nplugins:\n  greeter:\n    enabled: true\n"),
+        "{manifest}"
+    );
+
+    // Give the plugin a tool and a prompt.
+    std::fs::write(
+        agent.join("plugins/greeter/plugin.yaml"),
+        "id: greeter\nname: Greeter\nversion: 0.1.0\ndescription: Greets people.\nprovides:\n  tools: true\n  prompt: PROMPT.md\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join("plugins/greeter/PROMPT.md"),
+        "Always greet warmly.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join("plugins/greeter/tools/greet.sh"),
+        "cat >/dev/null; echo '{\"text\": \"hello from the plugin\"}'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join("plugins/greeter/tools/greet.yaml"),
+        "name: greet\ndescription: Greets.\nimplementation: {script: greet.sh}\n",
+    )
+    .unwrap();
+    let (_, listed, _) = plugin(&["list"]);
+    assert!(
+        listed.contains("greeter v0.1.0 (local) enabled — Greets people."),
+        "{listed}"
+    );
+
+    let script = dir.path().join("s.yaml");
+    std::fs::write(
+        &script,
+        "- tool_calls: [{name: greet, arguments: {}}]\n- text: greeted\n",
+    )
+    .unwrap();
+    let run = || {
+        gitagent()
+            .args(["-p", "x", "--conversation", "-d"])
+            .arg(&agent)
+            .args(["-m", &format!("scripted:{}", script.display())])
+            .arg("--out-dir")
+            .arg(dir.path().join("out"))
+            .env("HOME", dir.path())
+            .output()
+            .unwrap()
+    };
+    let out = run();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let t = std::fs::read_to_string(dir.path().join("out/trajectory.json")).unwrap();
+    assert!(
+        t.contains("hello from the plugin") && t.contains("# Plugin: Greeter"),
+        "{t}"
+    );
+
+    let (code, _, _) = plugin(&["disable", "greeter"]);
+    assert_eq!(code, Some(0));
+    assert!(std::fs::read_to_string(agent.join("agent.yaml"))
+        .unwrap()
+        .contains("  greeter:\n    enabled: false\n"));
+    let out = run();
+    let t = std::fs::read_to_string(dir.path().join("out/trajectory.json")).unwrap();
+    assert!(
+        out.status.success() && !t.contains("# Plugin: Greeter"),
+        "{t}"
+    );
+    let (_, listed, _) = plugin(&["list"]);
+    assert!(listed.contains("(local) disabled"), "{listed}");
+    plugin(&["enable", "greeter"]);
+
+    // Installing from a local path copies it in and names it.
+    let src = dir.path().join("counter-src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        src.join("plugin.yaml"),
+        "id: counter\nname: Counter\nversion: 1.0.0\ndescription: Counts.\n",
+    )
+    .unwrap();
+    let (code, out, err) = plugin(&["install", src.to_str().unwrap(), "--name", "counter"]);
+    assert_eq!(code, Some(0), "{out}{err}");
+    assert!(agent.join("plugins/counter/plugin.yaml").is_file());
+    let manifest = std::fs::read_to_string(agent.join("agent.yaml")).unwrap();
+    assert!(
+        manifest.contains("  counter:\n    enabled: true\n"),
+        "{manifest}"
+    );
+    let (code, out, _) = plugin(&["remove", "counter"]);
+    assert_eq!(code, Some(0), "{out}");
+    assert!(!agent.join("plugins/counter").exists());
+    let manifest = std::fs::read_to_string(agent.join("agent.yaml")).unwrap();
+    assert!(
+        !manifest.contains("counter") && manifest.contains("# keep this comment"),
+        "{manifest}"
+    );
+    let (code, _, err) = plugin(&["remove", "nope"]);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("no plugin named \"nope\""));
+}

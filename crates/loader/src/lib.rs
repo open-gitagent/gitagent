@@ -14,6 +14,7 @@ pub mod knowledge;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;
+pub mod plugins;
 mod profile;
 pub mod sdk;
 mod skills;
@@ -32,6 +33,7 @@ pub use knowledge::Knowledge;
 pub use manifest::AgentDir;
 pub use mcp::McpServerCfg;
 pub use memory::MemoryCfg;
+pub use plugins::Plugin;
 pub use profile::{
     AnthropicCfg, CacheCfg, ContextCfg, EditTool, Effort, GuardsCfg, Masking, OpenAiCfg, Profile,
     ShapeCfg, StopCfg, ThinkingBinding, ThinkingDisplay, ToolCalling, ToolNaming, ToolsCfg,
@@ -212,6 +214,8 @@ pub struct AgentSpec {
     pub teardown: Option<String>,
     /// The agent's `workflows/`. Never read in benchmark runs.
     pub workflows: Vec<Workflow>,
+    /// The plugins agent.yaml names, as loaded. Never read in benchmark runs.
+    pub plugins: Vec<Plugin>,
 }
 
 impl AgentSpec {
@@ -293,15 +297,21 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         Some(dir) => AgentDir::load(dir)?,
         None => None,
     };
-    let (declared_tools, agent_hooks) = match agent.as_mut() {
+    let (declared_tools, agent_hooks, plugins) = match agent.as_mut() {
         Some(a) => {
-            let (tools, warnings) = declared::discover(a);
+            let (mut tools, warnings) = declared::discover(a);
             a.warnings.extend(warnings);
-            let (hooks, warnings) = agent_hooks::load(a);
+            let (mut hooks, warnings) = agent_hooks::load(a);
             a.warnings.extend(warnings);
-            (tools, hooks)
+            // Plugins add their tools and hooks after the agent's own.
+            let taken: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+            let loaded = plugins::load(a, opts.home_dir.as_deref(), &taken);
+            a.warnings.extend(loaded.warnings.iter().cloned());
+            tools.extend(loaded.tools.iter().cloned());
+            hooks.extend(loaded.hooks.iter().cloned());
+            (tools, hooks, loaded)
         }
-        None => (Vec::new(), Vec::new()),
+        None => (Vec::new(), Vec::new(), plugins::Loaded::default()),
     };
 
     // The environment's settings (`config/`), only outside benchmark runs.
@@ -402,6 +412,13 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
                 found.retain(|s| enabled.contains(&s.name));
             }
         }
+        // Plugin skills come after the agent's own, which win by name.
+        for s in &plugins.skills {
+            if !found.iter().any(|f| f.name == s.name) {
+                found.push(s.clone());
+            }
+        }
+        found.sort_by(|a, b| a.name.cmp(&b.name));
         found
     } else {
         Vec::new()
@@ -513,6 +530,10 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         }
         None => Knowledge::default(),
     };
+    for section in &plugins.prompts {
+        system_prompt.push('\n');
+        system_prompt.push_str(section);
+    }
     // MCP servers: `.mcp.json`, then agent.yaml, then gitagent.yaml.
     let mcp_servers = match &opts.project_dir {
         Some(project) if outside_bench => {
@@ -611,6 +632,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         bootstrap,
         teardown,
         workflows,
+        plugins: plugins.plugins,
     })
 }
 

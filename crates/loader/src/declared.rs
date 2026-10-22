@@ -76,30 +76,18 @@ pub fn discover(agent: &AgentDir) -> (Vec<DeclaredTool>, Vec<String>) {
     // The agent's own tools, then its parents'; a name already taken by a
     // nearer agent shadows the rest.
     for (depth, root) in agent.roots().iter().enumerate() {
-        let mut files: Vec<PathBuf> = std::fs::read_dir(root.join("tools"))
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| matches!(p.extension().and_then(|e| e.to_str()), Some("yaml" | "yml")))
-            .collect();
-        files.sort();
-        let mut own: Vec<String> = Vec::new();
-        for file in files {
-            match read(&file, root) {
-                Ok(t) if own.contains(&t.name) => warnings.push(format!(
-                    "{}: a tool named {:?} is already declared",
-                    shown(&file, root),
-                    t.name
-                )),
-                Ok(t) if tools.iter().any(|o| o.name == t.name) => {}
-                Ok(t) => {
-                    own.push(t.name.clone());
-                    tools.push(t);
-                }
-                Err(why) if depth == 0 => warnings.push(format!("{}: {why}", shown(&file, root))),
-                Err(why) => warnings.push(format!("parent {}: {why}", shown(&file, root))),
+        let (own, problems) = read_dir(root);
+        for t in own {
+            if !tools.iter().any(|o| o.name == t.name) {
+                tools.push(t);
             }
+        }
+        for why in problems {
+            warnings.push(if depth == 0 {
+                why
+            } else {
+                format!("parent {why}")
+            });
         }
     }
     let enabled = &agent.manifest.tools;
@@ -112,6 +100,32 @@ pub fn discover(agent: &AgentDir) -> (Vec<DeclaredTool>, Vec<String>) {
             }
         }
         tools.retain(|t| enabled.contains(&t.name));
+    }
+    (tools, warnings)
+}
+
+/// The tools declared in `root/tools/*.yaml`, and what was wrong.
+pub fn read_dir(root: &Path) -> (Vec<DeclaredTool>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let mut tools: Vec<DeclaredTool> = Vec::new();
+    let mut files: Vec<PathBuf> = std::fs::read_dir(root.join("tools"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| matches!(p.extension().and_then(|e| e.to_str()), Some("yaml" | "yml")))
+        .collect();
+    files.sort();
+    for file in files {
+        match read(&file, root) {
+            Ok(t) if tools.iter().any(|o| o.name == t.name) => warnings.push(format!(
+                "{}: a tool named {:?} is already declared",
+                shown(&file, root),
+                t.name
+            )),
+            Ok(t) => tools.push(t),
+            Err(why) => warnings.push(format!("{}: {why}", shown(&file, root))),
+        }
     }
     (tools, warnings)
 }

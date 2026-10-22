@@ -4,6 +4,7 @@ mod install_cmd;
 mod ipc;
 mod learn_cmd;
 mod otel;
+mod plugin_cmd;
 mod repl;
 mod repo_mode;
 mod sandbox_exec;
@@ -201,6 +202,9 @@ fn main() -> ExitCode {
     }
     if args.get(1).and_then(|a| a.to_str()) == Some("init") {
         return init_cmd::run(&args[2..]);
+    }
+    if args.get(1).and_then(|a| a.to_str()) == Some("plugin") {
+        return plugin_cmd::run(&args[2..]);
     }
     let learn = args.get(1).and_then(|a| a.to_str()) == Some("learn");
     let cli = (!learn).then(Cli::parse);
