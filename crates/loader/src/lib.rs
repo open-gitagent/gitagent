@@ -300,7 +300,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         (Some(a), true) => {
             let from_var = std::env::var("GITAGENT_ENV").ok();
             let env = opts.env.as_deref().or(from_var.as_deref());
-            let (cfg, problems) = env_config::load(&a.root, env);
+            let (cfg, problems) = env_config::load(&a.roots(), env);
             warnings.extend(problems);
             if cfg.compliance_mode {
                 let report = validate::validate(&a.root, true);
@@ -383,7 +383,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
     let skills = if config.skills {
         // The agent's own `skills/` first; its `skills:` list, when given,
         // names the ones enabled.
-        let mut dirs: Vec<PathBuf> = agent.iter().map(|a| a.root.clone()).collect();
+        let mut dirs: Vec<PathBuf> = agent.iter().flat_map(AgentDir::roots).collect();
         dirs.extend(config_dirs.iter().cloned());
         let mut found = skills::discover(&dirs);
         if let Some(enabled) = agent.as_ref().map(|a| &a.manifest.skills) {
@@ -438,9 +438,16 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
     // Knowledge and examples from the agent directory.
     let knowledge = match &agent {
         Some(a) => {
-            let (k, problems) = knowledge::load(&a.root);
+            let knowledge_root = a
+                .file_root("knowledge/index.yaml")
+                .unwrap_or_else(|| a.root.clone());
+            let examples_root = a.file_root("examples").unwrap_or_else(|| a.root.clone());
+            let (k, problems) = knowledge::load(&knowledge_root);
             warnings.extend(problems);
-            for section in [k.prompt_section(), knowledge::examples_section(&a.root)] {
+            for section in [
+                k.prompt_section(),
+                knowledge::examples_section(&examples_root),
+            ] {
                 if !section.is_empty() {
                     system_prompt.push('\n');
                     system_prompt.push_str(&section);
@@ -1010,6 +1017,92 @@ profile: quiet
             .unwrap();
         }
         dir
+    }
+
+    #[test]
+    fn a_parents_skills_tools_hooks_and_knowledge_are_inherited_and_shadowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("parent");
+        let child = dir.path().join("child");
+        let write = |p: PathBuf, t: &str| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, t).unwrap();
+        };
+        write(
+            parent.join("agent.yaml"),
+            "name: base\nversion: 1.0.0\ndescription: Base.\n",
+        );
+        write(parent.join("SOUL.md"), "Base soul.\n");
+        write(
+            parent.join("skills/shared/SKILL.md"),
+            "---\nname: shared\ndescription: From the parent.\n---\nParent steps.\n",
+        );
+        write(
+            parent.join("skills/only-parent/SKILL.md"),
+            "---\nname: only-parent\ndescription: Only the parent has it.\n---\nx\n",
+        );
+        write(parent.join("tools/count.sh"), "echo 1\n");
+        write(
+            parent.join("tools/count.yaml"),
+            "name: count\ndescription: Parent counts.\nimplementation: {script: count.sh}\n",
+        );
+        write(
+            parent.join("tools/ping.yaml"),
+            "name: ping\ndescription: Parent pings.\nimplementation: {script: count.sh}\n",
+        );
+        write(parent.join("hooks/log.sh"), "true\n");
+        write(
+            parent.join("hooks/hooks.yaml"),
+            "hooks:\n  pre_tool_use: [{script: log.sh, description: Parent log}]\n",
+        );
+        write(parent.join("knowledge/policy.md"), "Parent policy.\n");
+        write(
+            parent.join("knowledge/index.yaml"),
+            "documents: [{path: policy.md, always_load: true}]\n",
+        );
+        write(
+            parent.join("config/default.yaml"),
+            "env_vars: {REGION: eu}\n",
+        );
+        write(
+            child.join("agent.yaml"),
+            "name: kid\nversion: 1.0.0\ndescription: Kid.\nextends: ../parent\n",
+        );
+        write(
+            child.join("skills/shared/SKILL.md"),
+            "---\nname: shared\ndescription: From the child.\n---\nChild steps.\n",
+        );
+        write(child.join("tools/count.sh"), "echo 2\n");
+        write(
+            child.join("tools/count.yaml"),
+            "name: count\ndescription: Child counts.\nimplementation: {script: count.sh}\n",
+        );
+        write(child.join("config/prod.yaml"), "env_vars: {STAGE: prod}\n");
+        let spec = load(&LoadOptions {
+            project_dir: Some(child.clone()),
+            model: Some("scripted:s.yaml".into()),
+            env: Some("prod".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let shared = spec.skills.iter().find(|s| s.name == "shared").unwrap();
+        assert_eq!(shared.description, "From the child.");
+        assert!(spec.skills.iter().any(|s| s.name == "only-parent"));
+        let tools: Vec<(&str, &str)> = spec
+            .declared_tools
+            .iter()
+            .map(|t| (t.name.as_str(), t.description.as_str()))
+            .collect();
+        assert_eq!(
+            tools,
+            vec![("count", "Child counts."), ("ping", "Parent pings.")]
+        );
+        assert_eq!(spec.agent_hooks[0].description, "Parent log");
+        assert!(spec.system_prompt.contains("Parent policy."));
+        assert_eq!(spec.env_config.env_vars["REGION"], "eu");
+        assert_eq!(spec.env_config.env_vars["STAGE"], "prod");
+        // Memory stays the child's own.
+        assert_eq!(spec.memory.as_ref().unwrap().dir, child.join("memory"));
     }
 
     #[test]

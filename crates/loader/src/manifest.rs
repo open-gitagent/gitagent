@@ -7,6 +7,16 @@
 //! problems become warnings here and errors only in `validate`. The identity
 //! files are placed ahead of gitagent's own working instructions in the system
 //! prompt, in the order header, SOUL, RULES, DUTIES.
+//!
+//! `extends: <path or git URL>` names a parent agent. The child's manifest
+//! is merged over the parent's (mappings key by key, lists replaced, except
+//! `skills` and `tools`, which are joined); SOUL.md is the child's unless it
+//! has none; RULES.md is the parent's followed by the child's; DUTIES.md and
+//! the other folders (hooks, knowledge, examples, config files) are the
+//! child's when it has them, else the parent's; skills and tools are joined
+//! with the child's shadowing the parent's by name; memory is never shared.
+//! A git parent is cloned into `.gitagent/parent/` on first use. Parents can
+//! have parents of their own.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -102,10 +112,15 @@ pub struct Runtime {
     pub timeout: Option<u64>,
 }
 
+/// Most generations of `extends` followed.
+const MAX_PARENTS: usize = 8;
+
 /// An agent directory: the manifest and its identity files.
 #[derive(Debug, Clone)]
 pub struct AgentDir {
     pub root: PathBuf,
+    /// The roots of the agents this one extends, nearest first.
+    pub parents: Vec<PathBuf>,
     pub manifest: Manifest,
     pub soul: Option<String>,
     pub rules: Option<String>,
@@ -118,6 +133,97 @@ pub struct AgentDir {
 impl AgentDir {
     /// The directory's agent, if it has an `agent.yaml`.
     pub fn load(root: &Path) -> Result<Option<AgentDir>> {
+        let Some((mut agent, mut raw)) = Self::load_own(root)? else {
+            return Ok(None);
+        };
+        // Parents, nearest first, each merged under what is already there.
+        let mut seen: Vec<PathBuf> = vec![agent.root.clone()];
+        let mut extends = agent.manifest.extends.clone();
+        let mut from = agent.root.clone();
+        while let Some(source) = extends.take() {
+            if seen.len() > MAX_PARENTS {
+                agent.warnings.push(format!(
+                    "extends: more than {MAX_PARENTS} generations of parents; the rest are ignored"
+                ));
+                break;
+            }
+            let parent_root = match resolve_parent(&from, &source) {
+                Ok(p) => p,
+                Err(why) => {
+                    agent
+                        .warnings
+                        .push(format!("extends: {why}; running without the parent"));
+                    break;
+                }
+            };
+            let canonical = parent_root.canonicalize().unwrap_or(parent_root.clone());
+            if seen.contains(&canonical) {
+                agent.warnings.push(format!(
+                    "extends: {} is already in the chain of parents; stopping there",
+                    parent_root.display()
+                ));
+                break;
+            }
+            seen.push(canonical);
+            let Some((parent, parent_raw)) = Self::load_own(&parent_root)? else {
+                agent.warnings.push(format!(
+                    "extends: {} has no agent.yaml; running without it",
+                    parent_root.display()
+                ));
+                break;
+            };
+            for w in &parent.warnings {
+                agent
+                    .warnings
+                    .push(format!("parent {}: {w}", parent.root.display()));
+            }
+            // The child wins; the parent fills in what the child left out.
+            let mut merged = parent_raw;
+            merge_manifests(&mut merged, raw);
+            raw = merged;
+            agent.manifest = match serde_json::from_value::<Manifest>(lenient(&raw)) {
+                Ok(m) => m,
+                Err(e) => {
+                    agent.warnings.push(format!(
+                        "extends: the merged agent.yaml cannot be read ({e}); the parent's settings are ignored"
+                    ));
+                    agent.manifest
+                }
+            };
+            if agent.soul.is_none() {
+                agent.soul = parent.soul;
+            }
+            if agent.agents_md.is_none() {
+                agent.agents_md = parent.agents_md;
+            }
+            agent.rules = match (parent.rules, agent.rules.take()) {
+                (Some(p), Some(c)) => Some(format!("{}\n\n{}", p.trim_end(), c.trim_start())),
+                (p, c) => c.or(p),
+            };
+            if agent.duties.is_none() {
+                agent.duties = parent.duties;
+            }
+            extends = parent.manifest.extends.clone();
+            from = parent.root.clone();
+            agent.parents.push(parent.root);
+        }
+        // SOUL.md is required somewhere in the chain.
+        if agent.soul.is_none() && agent.parents.is_empty() {
+            agent
+                .warnings
+                .push("SOUL.md is missing (it is required)".into());
+        } else if agent.soul.is_none() {
+            agent
+                .warnings
+                .push("SOUL.md is missing here and in the parents (it is required)".into());
+        }
+        dependencies_present(&agent.root, &agent.manifest, &mut agent.warnings);
+        Ok(Some(agent))
+    }
+
+    /// This directory's own files, without its parents; the raw manifest
+    /// comes back for merging.
+    fn load_own(root: &Path) -> Result<Option<(AgentDir, serde_json::Map<String, Value>)>> {
         let path = root.join("agent.yaml");
         if !path.is_file() {
             return Ok(None);
@@ -158,24 +264,36 @@ impl AgentDir {
                 .filter(|t| !t.trim().is_empty())
         };
         let soul = file("SOUL.md");
-        match &soul {
-            None => warnings.push("SOUL.md is missing (it is required)".into()),
-            Some(text) if !has_paragraph(text) => {
-                warnings.push("SOUL.md has headings but no text".into())
+        if let Some(text) = &soul {
+            if !has_paragraph(text) {
+                warnings.push("SOUL.md has headings but no text".into());
             }
-            Some(_) => {}
         }
-        Ok(Some(AgentDir {
+        let agent = AgentDir {
             // Scripts of hooks and tools run in other directories, so their
             // paths are built from an absolute root.
             root: std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf()),
+            parents: Vec::new(),
             manifest,
             soul,
             rules: file("RULES.md"),
             duties: file("DUTIES.md"),
             agents_md: file("AGENTS.md"),
             warnings,
-        }))
+        };
+        Ok(Some((agent, map.clone())))
+    }
+
+    /// This root and its parents', nearest first.
+    pub fn roots(&self) -> Vec<PathBuf> {
+        std::iter::once(self.root.clone())
+            .chain(self.parents.iter().cloned())
+            .collect()
+    }
+
+    /// The nearest root (this one, then the parents) that has `relative`.
+    pub fn file_root(&self, relative: &str) -> Option<PathBuf> {
+        self.roots().into_iter().find(|r| r.join(relative).exists())
     }
 
     /// The identity part of the system prompt: a `# name vX` header with the
@@ -292,6 +410,124 @@ fn check(map: &serde_json::Map<String, Value>) -> Vec<String> {
         }
     }
     out
+}
+
+/// `child` merged over `base`: mappings key by key, other values replaced,
+/// except `skills` and `tools`, which are joined (the parent's first).
+fn merge_manifests(
+    base: &mut serde_json::Map<String, Value>,
+    child: serde_json::Map<String, Value>,
+) {
+    let names = |v: Option<&Value>| -> Vec<Value> {
+        match v {
+            Some(Value::Array(a)) => a.clone(),
+            Some(Value::String(s)) => vec![Value::String(s.clone())],
+            _ => Vec::new(),
+        }
+    };
+    let mut joined = serde_json::Map::new();
+    for key in ["skills", "tools"] {
+        let mut all = names(base.get(key));
+        for n in names(child.get(key)) {
+            if !all.contains(&n) {
+                all.push(n);
+            }
+        }
+        if !all.is_empty() {
+            joined.insert(key.to_string(), Value::Array(all));
+        }
+    }
+    // The child's `extends` names the parent being merged, not a parent of
+    // the result; the parent's own `extends` is followed next.
+    let mut child = child;
+    child.remove("extends");
+    crate::env_config::merge(base, child);
+    for (k, v) in joined {
+        base.insert(k, v);
+    }
+}
+
+/// Where the parent named by `extends` is: a path relative to `root`, an
+/// absolute path, or a git URL cloned into `root/.gitagent/parent/`.
+fn resolve_parent(root: &Path, source: &str) -> Result<PathBuf, String> {
+    let source = source.trim();
+    if source.is_empty() {
+        return Err("`extends` is empty".into());
+    }
+    if is_git_source(source) {
+        let dest = root.join(".gitagent/parent");
+        if !dest.join("agent.yaml").is_file() {
+            if dest.exists() {
+                return Err(format!(
+                    "{} exists but has no agent.yaml; remove it and run `gitagent install`",
+                    dest.display()
+                ));
+            }
+            git_clone(source, &dest, None)
+                .map_err(|e| format!("cloning the parent {source}: {e}"))?;
+        }
+        return Ok(dest);
+    }
+    let path = if Path::new(source).is_absolute() {
+        PathBuf::from(source)
+    } else {
+        root.join(source)
+    };
+    if path.join("agent.yaml").is_file() {
+        Ok(path)
+    } else {
+        Err(format!("the parent {} has no agent.yaml", path.display()))
+    }
+}
+
+/// A git URL or SSH address, as opposed to a path.
+pub fn is_git_source(s: &str) -> bool {
+    s.contains("://") || s.starts_with("git@") || (s.ends_with(".git") && !Path::new(s).exists())
+}
+
+/// A shallow clone of `url` (at `branch`, a branch or tag, when given).
+pub fn git_clone(url: &str, dest: &Path, branch: Option<&str>) -> Result<(), String> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["clone", "--quiet", "--depth", "1"]);
+    if let Some(b) = branch {
+        cmd.args(["--branch", b]);
+    }
+    cmd.arg(url).arg(dest);
+    let out = cmd.output().map_err(|e| format!("cannot run git: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let _ = std::fs::remove_dir_all(dest);
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// A dependency's mount point: `mount`, else `.gitagent/deps/<name>`.
+pub fn dependency_mount(root: &Path, dep: &Value) -> Option<(String, PathBuf)> {
+    let name = dep["name"].as_str()?.trim().to_string();
+    let mount = dep["mount"]
+        .as_str()
+        .map(|m| root.join(m.trim()))
+        .unwrap_or_else(|| root.join(".gitagent/deps").join(&name));
+    Some((name, mount))
+}
+
+/// Warns about dependencies that are not installed.
+fn dependencies_present(root: &Path, manifest: &Manifest, warnings: &mut Vec<String>) {
+    for dep in &manifest.dependencies {
+        let Some((name, mount)) = dependency_mount(root, dep) else {
+            continue;
+        };
+        if !mount.join("agent.yaml").is_file() {
+            warnings.push(format!(
+                "the dependency {name:?} is not installed at {}; run `gitagent install`",
+                mount.display()
+            ));
+        }
+    }
 }
 
 /// The manifest with the slips YAML invites put right: `version: 1.0`
@@ -415,6 +651,104 @@ mod tests {
             assert!(w.contains(expected), "missing {expected:?} in:\n{w}");
         }
         assert!(!w.contains("`plugins`"), "{w}");
+    }
+
+    #[test]
+    fn a_child_inherits_from_its_parents() {
+        let dir = tempfile::tempdir().unwrap();
+        let mk = |name: &str, files: &[(&str, &str)]| {
+            let d = dir.path().join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            for (f, t) in files {
+                std::fs::write(d.join(f), t).unwrap();
+            }
+            d
+        };
+        mk(
+            "grand",
+            &[
+                (
+                    "agent.yaml",
+                    "name: grand\nversion: 1.0.0\ndescription: Grand.\nskills: [g]\n",
+                ),
+                ("SOUL.md", "Grand soul.\n"),
+                ("RULES.md", "- grand rule\n"),
+            ],
+        );
+        mk(
+            "parent",
+            &[
+                (
+                    "agent.yaml",
+                    "name: base\nversion: 1.0.0\ndescription: Base.\nextends: ../grand\nmodel: {preferred: claude-sonnet-5-5, constraints: {max_tokens: 500}}\nskills: [a]\ntools: [t1]\ncompliance: {risk_tier: low}\n",
+                ),
+                ("SOUL.md", "Base soul.\n"),
+                ("RULES.md", "- parent rule\n"),
+                ("DUTIES.md", "Parent duties.\n"),
+            ],
+        );
+        let child = mk(
+            "child",
+            &[
+                (
+                    "agent.yaml",
+                    "name: kid\nversion: 2.0.0\ndescription: Kid.\nextends: ../parent\nmodel: {constraints: {max_tokens: 900}}\nskills: [b, a]\ntools: [t2]\ncompliance: {supervision: {kill_switch: true}}\n",
+                ),
+                ("RULES.md", "- child rule\n"),
+            ],
+        );
+        let a = AgentDir::load(&child).unwrap().unwrap();
+        assert!(a.warnings.is_empty(), "{:?}", a.warnings);
+        let m = &a.manifest;
+        assert_eq!((m.name.as_str(), m.version.as_str()), ("kid", "2.0.0"));
+        // Mappings merge; the child's values win.
+        let model = m.model.as_ref().unwrap();
+        assert_eq!(model.preferred.as_deref(), Some("claude-sonnet-5-5"));
+        assert_eq!(model.constraints.as_ref().unwrap().max_tokens, Some(900));
+        assert_eq!(m.compliance.as_ref().unwrap()["risk_tier"], "low");
+        assert_eq!(
+            m.compliance.as_ref().unwrap()["supervision"]["kill_switch"],
+            true
+        );
+        // Lists of skills and tools join, parents first.
+        assert_eq!(m.skills, vec!["g", "a", "b"]);
+        assert_eq!(m.tools, vec!["t1", "t2"]);
+        // The identity: nearest SOUL, rules from the oldest down, nearest duties.
+        assert_eq!(a.soul.as_deref(), Some("Base soul.\n"));
+        assert_eq!(
+            a.rules.as_deref(),
+            Some("- grand rule\n\n- parent rule\n\n- child rule\n")
+        );
+        assert_eq!(a.duties.as_deref(), Some("Parent duties.\n"));
+        assert_eq!(a.parents.len(), 2);
+        assert!(a.parents[0].ends_with("parent") && a.parents[1].ends_with("grand"));
+        assert_eq!(a.file_root("DUTIES.md").unwrap(), a.parents[0]);
+
+        // A cycle stops with a warning; a missing parent too.
+        std::fs::write(
+            dir.path().join("grand/agent.yaml"),
+            "name: grand\nversion: 1.0.0\ndescription: Grand.\nextends: ../child\n",
+        )
+        .unwrap();
+        let a = AgentDir::load(&child).unwrap().unwrap();
+        assert!(
+            a.warnings
+                .iter()
+                .any(|w| w.contains("already in the chain")),
+            "{:?}",
+            a.warnings
+        );
+        std::fs::write(
+            dir.path().join("child/agent.yaml"),
+            "name: kid\nversion: 2.0.0\ndescription: Kid.\nextends: ../nope\n",
+        )
+        .unwrap();
+        let a = AgentDir::load(&child).unwrap().unwrap();
+        assert!(a
+            .warnings
+            .iter()
+            .any(|w| w.contains("has no agent.yaml; running without the parent")));
+        assert!(a.warnings.iter().any(|w| w.contains("SOUL.md is missing")));
     }
 
     #[test]

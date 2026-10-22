@@ -17,7 +17,7 @@
 //! and never cause an error.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::PathBuf;
 
 use serde_json::{Map, Value};
 
@@ -38,12 +38,20 @@ pub struct EnvConfig {
     pub settings: Map<String, Value>,
 }
 
-/// The settings for `env` (or none) in `root/config/`, and what was wrong.
-pub fn load(root: &Path, env: Option<&str>) -> (EnvConfig, Vec<String>) {
+/// The settings for `env` (or none), each file taken from the first of
+/// `roots` (the agent, then its parents) that has it, and what was wrong.
+pub fn load(roots: &[PathBuf], env: Option<&str>) -> (EnvConfig, Vec<String>) {
     let mut warnings = Vec::new();
-    let dir = root.join("config");
+    let find = |name: &str| -> Option<PathBuf> {
+        roots
+            .iter()
+            .map(|r| r.join("config").join(format!("{name}.yaml")))
+            .find(|p| p.is_file())
+    };
     let mut read = |name: &str| -> Map<String, Value> {
-        let path = dir.join(format!("{name}.yaml"));
+        let Some(path) = find(name) else {
+            return Map::new();
+        };
         let Ok(text) = std::fs::read_to_string(&path) else {
             return Map::new();
         };
@@ -62,7 +70,6 @@ pub fn load(root: &Path, env: Option<&str>) -> (EnvConfig, Vec<String>) {
     };
     let mut settings = read("default");
     if let Some(env) = env.map(str::trim).filter(|e| !e.is_empty()) {
-        let path = dir.join(format!("{env}.yaml"));
         if !env
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -70,7 +77,7 @@ pub fn load(root: &Path, env: Option<&str>) -> (EnvConfig, Vec<String>) {
             warnings.push(format!(
                 "the environment name {env:?} may only use letters, digits, `-` and `_`; ignored"
             ));
-        } else if !path.is_file() {
+        } else if find(env).is_none() {
             warnings.push(format!(
                 "config/{env}.yaml does not exist; using the defaults"
             ));
@@ -150,6 +157,8 @@ fn parse(settings: Map<String, Value>, env: Option<&str>) -> (EnvConfig, Vec<Str
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
     use serde_json::json;
 
@@ -162,7 +171,8 @@ mod tests {
     fn environments_merge_onto_the_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let (cfg, warnings) = load(root, None);
+        let roots = [root.to_path_buf()];
+        let (cfg, warnings) = load(&roots, None);
         assert_eq!(cfg, EnvConfig::default());
         assert!(warnings.is_empty());
 
@@ -176,7 +186,7 @@ mod tests {
             "prod.yaml",
             "model_override: claude-opus-5-5\ntimeout_override: 600\nenv_vars: {API_BASE: prod}\nsearch: {engines: [c]}\ncompliance_mode: true\n",
         );
-        let (cfg, warnings) = load(root, Some("prod"));
+        let (cfg, warnings) = load(&roots, Some("prod"));
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(cfg.name.as_deref(), Some("prod"));
         assert_eq!(cfg.model_override.as_deref(), Some("claude-opus-5-5"));
@@ -196,7 +206,7 @@ mod tests {
             json!({"depth": 2, "engines": ["c"]})
         );
 
-        let (cfg, warnings) = load(root, Some("staging"));
+        let (cfg, warnings) = load(&roots, Some("staging"));
         assert_eq!(cfg.model_override.as_deref(), Some("claude-sonnet-5-5"));
         assert_eq!(
             warnings,
@@ -212,7 +222,8 @@ mod tests {
             "default.yaml",
             "log_level: loud\ntemperature_override: 5\ntimeout_override: 0\nenv_vars: [a]\ncompliance_mode: yes\nmodel_override: null\n",
         );
-        let (cfg, warnings) = load(dir.path(), None);
+        let roots = [dir.path().to_path_buf()];
+        let (cfg, warnings) = load(&roots, None);
         assert_eq!(cfg.log_level, None);
         assert_eq!(cfg.temperature_override, None);
         assert_eq!(cfg.timeout_override, None);
@@ -220,7 +231,7 @@ mod tests {
         assert!(cfg.compliance_mode, "YAML reads `yes` as true");
         assert_eq!(warnings.len(), 4, "{warnings:?}");
         write(dir.path(), "default.yaml", "- not a mapping\n");
-        let (_, warnings) = load(dir.path(), None);
+        let (_, warnings) = load(&roots, None);
         assert_eq!(
             warnings,
             vec!["config/default.yaml: expected a mapping; ignored"]

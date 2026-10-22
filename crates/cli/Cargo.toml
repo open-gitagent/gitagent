@@ -16,6 +16,7 @@ workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true
+serde-saphyr = { version = "1.3.0", default-features = false, features = ["deserialize"] }
 gitagent-core.workspace = true
 gitagent-hooks.workspace = true
 gitagent-mcp.workspace = true

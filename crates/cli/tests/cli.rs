@@ -1364,3 +1364,118 @@ fn environments_pick_their_settings() {
         "{warnings}"
     );
 }
+
+/// `gitagent install` clones a git parent into `.gitagent/parent/` and
+/// copies a local dependency into its mount; a run clones a missing git
+/// parent itself.
+#[test]
+fn install_fetches_the_parent_and_dependencies() {
+    let dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str], cwd: &std::path::Path| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let src = dir.path().join("base-src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        src.join("agent.yaml"),
+        "name: base\nversion: 1.0.0\ndescription: Base.\n",
+    )
+    .unwrap();
+    std::fs::write(src.join("SOUL.md"), "Base soul.\n").unwrap();
+    std::fs::write(src.join("RULES.md"), "- Rule from the parent.\n").unwrap();
+    git(&["init", "-q"], &src);
+    git(
+        &[
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=T",
+            "add",
+            "-A",
+        ],
+        &src,
+    );
+    git(
+        &[
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=T",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+        &src,
+    );
+    git(
+        &["clone", "-q", "--bare", "base-src", "base.git"],
+        dir.path(),
+    );
+    let url = format!("file://{}", dir.path().join("base.git").display());
+    let helper = dir.path().join("helper");
+    std::fs::create_dir_all(&helper).unwrap();
+    std::fs::write(
+        helper.join("agent.yaml"),
+        "name: helper\nversion: 1.0.0\ndescription: Helper.\n",
+    )
+    .unwrap();
+    std::fs::write(helper.join("SOUL.md"), "Helps.\n").unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        format!("name: kid\nversion: 1.0.0\ndescription: Kid.\nextends: {url}\ndependencies:\n  - {{name: helper, source: ../helper, mount: agents/helper}}\n"),
+    )
+    .unwrap();
+
+    let out = gitagent().arg("install").arg(&agent).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(stdout.contains("parent: cloned"), "{stdout}");
+    assert!(stdout.contains("dependency helper: copied"), "{stdout}");
+    assert!(agent.join(".gitagent/parent/SOUL.md").is_file());
+    assert!(agent.join("agents/helper/agent.yaml").is_file());
+    let again = gitagent().arg("install").arg(&agent).output().unwrap();
+    assert!(String::from_utf8_lossy(&again.stdout).contains("already at"));
+
+    // A run uses the parent's identity, and fetches the parent itself
+    // when it is missing.
+    std::fs::remove_dir_all(agent.join(".gitagent")).unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(&script, "- text: hi\n").unwrap();
+    let out = gitagent()
+        .args(["-p", "x", "--conversation", "--model"])
+        .arg(format!("scripted:{}", script.display()))
+        .arg("--dir")
+        .arg(&agent)
+        .arg("--out-dir")
+        .arg(dir.path().join("out"))
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let t = std::fs::read_to_string(dir.path().join("out/trajectory.json")).unwrap();
+    assert!(
+        t.contains("Base soul.") && t.contains("Rule from the parent."),
+        "{t}"
+    );
+    assert!(agent.join(".gitagent/parent/agent.yaml").is_file());
+}

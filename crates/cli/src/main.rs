@@ -1,4 +1,5 @@
 mod approval;
+mod install_cmd;
 mod ipc;
 mod learn_cmd;
 mod otel;
@@ -163,6 +164,9 @@ fn main() -> ExitCode {
     }
     if args.get(1).and_then(|a| a.to_str()) == Some("validate") {
         return validate_cmd::run(&args[2..]);
+    }
+    if args.get(1).and_then(|a| a.to_str()) == Some("install") {
+        return install_cmd::run(&args[2..]);
     }
     let learn = args.get(1).and_then(|a| a.to_str()) == Some("learn");
     match tokio::runtime::Builder::new_multi_thread()

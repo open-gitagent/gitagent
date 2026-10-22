@@ -71,27 +71,35 @@ pub enum Runner {
 
 /// The enabled tools of an agent directory, and what was wrong with the rest.
 pub fn discover(agent: &AgentDir) -> (Vec<DeclaredTool>, Vec<String>) {
-    let dir = agent.root.join("tools");
     let mut warnings = Vec::new();
-    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| matches!(p.extension().and_then(|e| e.to_str()), Some("yaml" | "yml")))
-        .collect();
-    files.sort();
-
     let mut tools: Vec<DeclaredTool> = Vec::new();
-    for file in files {
-        match read(&file, &agent.root) {
-            Ok(t) if tools.iter().any(|o| o.name == t.name) => warnings.push(format!(
-                "{}: a tool named {:?} is already declared",
-                shown(&file, &agent.root),
-                t.name
-            )),
-            Ok(t) => tools.push(t),
-            Err(why) => warnings.push(format!("{}: {why}", shown(&file, &agent.root))),
+    // The agent's own tools, then its parents'; a name already taken by a
+    // nearer agent shadows the rest.
+    for (depth, root) in agent.roots().iter().enumerate() {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(root.join("tools"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| matches!(p.extension().and_then(|e| e.to_str()), Some("yaml" | "yml")))
+            .collect();
+        files.sort();
+        let mut own: Vec<String> = Vec::new();
+        for file in files {
+            match read(&file, root) {
+                Ok(t) if own.contains(&t.name) => warnings.push(format!(
+                    "{}: a tool named {:?} is already declared",
+                    shown(&file, root),
+                    t.name
+                )),
+                Ok(t) if tools.iter().any(|o| o.name == t.name) => {}
+                Ok(t) => {
+                    own.push(t.name.clone());
+                    tools.push(t);
+                }
+                Err(why) if depth == 0 => warnings.push(format!("{}: {why}", shown(&file, root))),
+                Err(why) => warnings.push(format!("parent {}: {why}", shown(&file, root))),
+            }
         }
     }
     let enabled = &agent.manifest.tools;

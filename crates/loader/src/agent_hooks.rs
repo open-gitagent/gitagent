@@ -111,7 +111,11 @@ pub struct HookEntry {
 /// The hooks in an agent directory's `hooks/hooks.yaml`, in file order, and
 /// what was wrong with the rest.
 pub fn load(agent: &AgentDir) -> (Vec<HookEntry>, Vec<String>) {
-    let path = agent.root.join("hooks/hooks.yaml");
+    // The child's hooks, else the nearest parent's.
+    let base = agent
+        .file_root("hooks/hooks.yaml")
+        .unwrap_or_else(|| agent.root.clone());
+    let path = base.join("hooks/hooks.yaml");
     let mut warnings = Vec::new();
     let Ok(text) = std::fs::read_to_string(&path) else {
         return (Vec::new(), warnings);
@@ -134,7 +138,7 @@ pub fn load(agent: &AgentDir) -> (Vec<HookEntry>, Vec<String>) {
             continue;
         };
         for (i, v) in list.as_array().into_iter().flatten().enumerate() {
-            match entry(event, v, &agent.root) {
+            match entry(event, v, &base) {
                 Ok(e) => entries.push(e),
                 Err(why) => warnings.push(format!("hooks/hooks.yaml: {name}[{i}]: {why}")),
             }

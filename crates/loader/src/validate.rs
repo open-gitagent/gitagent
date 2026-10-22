@@ -11,7 +11,7 @@
 //! `compliance` section are checked as well.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
 
@@ -629,6 +629,42 @@ fn manifest_extras(doc: &mut Doc, m: &Value, root: &Path) {
     {
         if !root.join("tools").join(format!("{name}.yaml")).is_file() {
             doc.error("tools", format!("tools/{name}.yaml does not exist"));
+        }
+    }
+    if let Some(src) = m["extends"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if crate::manifest::is_git_source(src) {
+            if !root.join(".gitagent/parent/agent.yaml").is_file() {
+                doc.warn(
+                    "extends",
+                    "the parent is not installed; run `gitagent install`",
+                );
+            }
+        } else {
+            let parent = if Path::new(src).is_absolute() {
+                PathBuf::from(src)
+            } else {
+                root.join(src)
+            };
+            if !parent.join("agent.yaml").is_file() {
+                doc.error("extends", format!("the parent {src} has no agent.yaml"));
+            }
+        }
+    }
+    for dep in m["dependencies"].as_array().into_iter().flatten() {
+        if let Some((name, mount)) = crate::manifest::dependency_mount(root, dep) {
+            if !mount.join("agent.yaml").is_file() {
+                doc.warn(
+                    "dependencies",
+                    format!(
+                        "{name:?} is not installed at {}; run `gitagent install`",
+                        mount.display()
+                    ),
+                );
+            }
         }
     }
     if let Some(agents) = m["agents"].as_object() {
