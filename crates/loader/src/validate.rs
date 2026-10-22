@@ -588,6 +588,7 @@ pub fn validate(root: &Path, compliance: bool) -> Report {
     tool_files(root, &mut out);
     skill_files(root, &mut out);
     config_files(root, &mut out);
+    knowledge_index(root, &mut out);
     out.sort_by(|a, b| (a.severity, &a.file, a.line).cmp(&(b.severity, &b.file, b.line)));
     Report { findings: out }
 }
@@ -889,6 +890,77 @@ fn tool_files(root: &Path, out: &mut Vec<Finding>) {
                 "implementation",
                 "the 1.x layout (`script:`); OpenGAP uses `type: script` and `path:`",
             );
+        }
+    }
+}
+
+/// `knowledge/index.yaml`; problems are warnings (the format leaves it
+/// unchecked).
+fn knowledge_index(root: &Path, out: &mut Vec<Finding>) {
+    let Ok(text) = std::fs::read_to_string(root.join("knowledge/index.yaml")) else {
+        return;
+    };
+    let mut doc = Doc {
+        file: "knowledge/index.yaml",
+        text: &text,
+        out,
+    };
+    let v: Value = match serde_saphyr::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => return doc.warn("", format!("not valid YAML: {e}")),
+    };
+    let list = match (v.get("documents"), v.get("entries")) {
+        (Some(Value::Array(l)), _) => l,
+        (None, Some(Value::Array(l))) => {
+            doc.warn(
+                "entries",
+                "is the gitagent 1.x key; OpenGAP calls the list `documents`",
+            );
+            l
+        }
+        _ => return doc.warn("", "`documents` (a list) is required"),
+    };
+    for (i, item) in list.iter().enumerate() {
+        let path = format!("documents.{i}");
+        let Some(map) = item.as_object() else {
+            doc.warn(&path, "must be a mapping");
+            continue;
+        };
+        for key in map.keys() {
+            if !matches!(
+                key.as_str(),
+                "path" | "tags" | "priority" | "always_load" | "description"
+            ) {
+                doc.warn(&format!("{path}.{key}"), "is not a known setting");
+            }
+        }
+        match map.get("path").and_then(Value::as_str) {
+            Some(p) if root.join("knowledge").join(p).is_file() => {}
+            Some(p) => doc.warn(
+                &format!("{path}.path"),
+                format!("knowledge/{p} does not exist"),
+            ),
+            None => doc.warn(&path, "`path` is required"),
+        }
+        if let Some(tags) = map.get("tags") {
+            let list: Vec<&str> = tags
+                .as_array()
+                .map(|t| t.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            let unique: BTreeSet<&str> = list.iter().copied().collect();
+            if !tags.is_array() || tags.as_array().is_some_and(|t| t.len() != list.len()) {
+                doc.warn(&format!("{path}.tags"), "must be a list of words");
+            } else if unique.len() != list.len() {
+                doc.warn(&format!("{path}.tags"), "lists a tag more than once");
+            }
+        }
+        if let Some(p) = map.get("priority") {
+            if !matches!(p.as_str(), Some("low" | "medium" | "high")) {
+                doc.warn(&format!("{path}.priority"), "must be low, medium or high");
+            }
+        }
+        if map.get("always_load").is_some_and(|a| !a.is_boolean()) {
+            doc.warn(&format!("{path}.always_load"), "must be true or false");
         }
     }
 }

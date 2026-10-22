@@ -738,6 +738,19 @@ fn bench_prompt_and_tools_match_the_published_run() {
     .unwrap();
     std::fs::create_dir_all(work.join("memory")).unwrap();
     std::fs::write(work.join("memory/MEMORY.md"), "- Should never be shown.\n").unwrap();
+    std::fs::create_dir_all(work.join("knowledge")).unwrap();
+    std::fs::write(work.join("knowledge/leak.md"), "Should never be shown.\n").unwrap();
+    std::fs::write(
+        work.join("knowledge/index.yaml"),
+        "documents: [{path: leak.md, always_load: true}]\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(work.join("examples")).unwrap();
+    std::fs::write(
+        work.join("examples/good-outputs.md"),
+        "Should never be shown.\n",
+    )
+    .unwrap();
     std::fs::create_dir_all(work.join("tools")).unwrap();
     std::fs::write(work.join("tools/leak.sh"), "echo leak\n").unwrap();
     std::fs::write(

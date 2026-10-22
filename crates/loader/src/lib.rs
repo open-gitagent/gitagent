@@ -10,6 +10,7 @@ pub mod compliance;
 mod config;
 pub mod declared;
 pub mod env_config;
+pub mod knowledge;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;
@@ -25,6 +26,7 @@ pub use compliance::Supervision;
 pub use config::{Config, RepoConfig};
 pub use declared::DeclaredTool;
 pub use env_config::EnvConfig;
+pub use knowledge::Knowledge;
 pub use manifest::AgentDir;
 pub use mcp::McpServerCfg;
 pub use memory::MemoryCfg;
@@ -197,6 +199,8 @@ pub struct AgentSpec {
     /// Keep an audit log (the agent's `compliance.recordkeeping` or the
     /// environment's `audit_logging`).
     pub audit_logging: bool,
+    /// The agent's `knowledge/` documents. Never read in benchmark runs.
+    pub knowledge: Knowledge,
 }
 
 impl AgentSpec {
@@ -431,6 +435,21 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         system_prompt.push('\n');
         system_prompt.push_str(&skills::index(&skills));
     }
+    // Knowledge and examples from the agent directory.
+    let knowledge = match &agent {
+        Some(a) => {
+            let (k, problems) = knowledge::load(&a.root);
+            warnings.extend(problems);
+            for section in [k.prompt_section(), knowledge::examples_section(&a.root)] {
+                if !section.is_empty() {
+                    system_prompt.push('\n');
+                    system_prompt.push_str(&section);
+                }
+            }
+            k
+        }
+        None => Knowledge::default(),
+    };
     // MCP servers: `.mcp.json`, then agent.yaml, then gitagent.yaml.
     let mcp_servers = match &opts.project_dir {
         Some(project) if outside_bench => {
@@ -513,6 +532,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         conversation: opts.conversation,
         env_config,
         audit_logging,
+        knowledge,
     })
 }
 
@@ -990,6 +1010,46 @@ profile: quiet
             .unwrap();
         }
         dir
+    }
+
+    #[test]
+    fn knowledge_and_examples_follow_the_skills_in_the_prompt() {
+        let dir = agent_project();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("knowledge")).unwrap();
+        std::fs::write(
+            root.join("knowledge/policy.md"),
+            "Refunds within 30 days.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("knowledge/index.yaml"),
+            "documents:\n  - {path: policy.md, always_load: true}\n  - {path: missing.md}\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("examples")).unwrap();
+        std::fs::write(root.join("examples/good-outputs.md"), "Short and exact.\n").unwrap();
+        let spec = load(&LoadOptions {
+            project_dir: Some(root.to_path_buf()),
+            model: Some("scripted:s.yaml".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let p = &spec.system_prompt;
+        let at = |s: &str| {
+            p.find(s)
+                .unwrap_or_else(|| panic!("{s:?} missing in:\n{p}"))
+        };
+        assert!(at("# Skills") < at("# Knowledge"));
+        assert!(at("# Knowledge") < at("# Examples"));
+        assert!(!p.contains("# Memory") || at("# Examples") < at("# Memory"));
+        assert!(p.contains("## policy.md\n\nRefunds within 30 days."));
+        assert!(p.contains("## good-outputs\n\nShort and exact."));
+        assert_eq!(spec.knowledge.documents.len(), 1);
+        assert!(spec
+            .warnings
+            .iter()
+            .any(|w| w.contains("knowledge/missing.md does not exist")));
     }
 
     #[test]
