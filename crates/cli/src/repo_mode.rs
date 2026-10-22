@@ -22,9 +22,11 @@ pub(crate) async fn run(mut cli: Cli, url: String, task: String) -> ExitCode {
 }
 
 async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode> {
-    let token = ["GITAGENT_GIT_TOKEN", "GITHUB_TOKEN"]
-        .iter()
-        .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()));
+    let token = cli.pat.clone().or_else(|| {
+        ["GITAGENT_GIT_TOKEN", "GITHUB_TOKEN", "GIT_TOKEN"]
+            .iter()
+            .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()))
+    });
     let dir = match &cli.dir {
         Some(d) => d.clone(),
         None => std::env::current_dir()?.join(repo_name(&url)),

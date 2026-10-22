@@ -1,4 +1,5 @@
 mod approval;
+mod init_cmd;
 mod install_cmd;
 mod ipc;
 mod learn_cmd;
@@ -39,8 +40,20 @@ pub(crate) struct Cli {
 
     /// The environment whose `config/<env>.yaml` in the agent directory
     /// applies (default: `GITAGENT_ENV`, else the defaults alone).
-    #[arg(long, conflicts_with = "bench")]
+    #[arg(short = 'e', long, conflicts_with = "bench")]
     env: Option<String>,
+
+    /// The task, given as plain words (the same as -p).
+    #[arg(value_name = "PROMPT", conflicts_with_all = ["prompt", "instruction_file"])]
+    text: Option<String>,
+
+    /// A remote sandbox is not available in this version.
+    #[arg(long = "sandbox", hide = true)]
+    remote_sandbox: bool,
+
+    /// Voice mode is not available in this version.
+    #[arg(long, hide = true, num_args = 0..=1, default_missing_value = "openai")]
+    voice: Option<String>,
 
     /// Serve the IPC protocol on stdin and stdout (JSON Lines) for a client
     /// library; the session's settings come in its `initialize` message.
@@ -56,7 +69,7 @@ pub(crate) struct Cli {
     prompt: Option<String>,
 
     /// Model as provider:model (overrides gitagent.yaml).
-    #[arg(long)]
+    #[arg(short = 'm', long)]
     model: Option<String>,
 
     /// Profile: auto, a built-in name, or a path to a profile YAML file.
@@ -68,7 +81,7 @@ pub(crate) struct Cli {
     config: Option<PathBuf>,
 
     /// Directory the agent works in (default: current directory).
-    #[arg(long)]
+    #[arg(short = 'd', long)]
     dir: Option<PathBuf>,
 
     /// Where the trajectory, counters and logs are written.
@@ -109,8 +122,17 @@ pub(crate) struct Cli {
     append_system_prompt: Option<String>,
 
     /// Clone this repository, work on a new branch and commit the result.
-    #[arg(long)]
+    #[arg(short = 'r', long)]
     repo: Option<String>,
+
+    /// Token for the repository (default: GITAGENT_GIT_TOKEN, GITHUB_TOKEN
+    /// or GIT_TOKEN).
+    #[arg(long, requires = "repo")]
+    pat: Option<String>,
+
+    /// The session branch to work on in repo mode (the same as --branch).
+    #[arg(long, requires = "repo", conflicts_with = "branch")]
+    session: Option<String>,
 
     /// Branch to start from in repo mode (default: the remote's default branch).
     #[arg(long, requires = "repo")]
@@ -168,19 +190,82 @@ fn main() -> ExitCode {
     if args.get(1).and_then(|a| a.to_str()) == Some("install") {
         return install_cmd::run(&args[2..]);
     }
+    if args.get(1).and_then(|a| a.to_str()) == Some("init") {
+        return init_cmd::run(&args[2..]);
+    }
     let learn = args.get(1).and_then(|a| a.to_str()) == Some("learn");
+    let cli = (!learn).then(Cli::parse);
+    // `.env` files go into the environment before any thread starts;
+    // never in benchmark runs.
+    if let Some(cli) = cli.as_ref().filter(|c| !c.bench) {
+        load_env_files(cli.dir.as_deref());
+    }
     match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
     {
         Ok(rt) if learn => rt.block_on(learn_cmd::run(&args[2..])),
-        Ok(rt) => rt.block_on(async_main()),
+        Ok(rt) => rt.block_on(async_main(cli.expect("parsed above"))),
         Err(e) => usage_error(e.into()),
     }
 }
 
-async fn async_main() -> ExitCode {
-    let cli = Cli::parse();
+/// Reads `~/.gitagent/.env`, then `<dir>/.env` (the working directory
+/// without `--dir`), into the environment: `KEY=VALUE` lines, `#` comments,
+/// quotes around a value removed, a later file winning. Values are never
+/// printed.
+fn load_env_files(dir: Option<&std::path::Path>) {
+    let mut files = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        files.push(PathBuf::from(home).join(".gitagent/.env"));
+    }
+    let dir = dir
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    files.push(dir.join(".env"));
+    for file in files {
+        let Ok(text) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let line = line.strip_prefix("export ").unwrap_or(line).trim();
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let key = key.trim();
+            if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                continue;
+            }
+            let value = value.trim();
+            let value = value
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+                .unwrap_or(value);
+            std::env::set_var(key, value);
+        }
+    }
+}
+
+async fn async_main(mut cli: Cli) -> ExitCode {
+    if cli.remote_sandbox {
+        return usage_error(anyhow::anyhow!(
+            "--sandbox (a remote sandbox) is not available in this version; local runs are sandboxed on Linux"
+        ));
+    }
+    if cli.voice.is_some() {
+        return usage_error(anyhow::anyhow!(
+            "--voice is not available in this version; use the interactive session or --ipc"
+        ));
+    }
+    if cli.session.is_some() {
+        cli.branch = cli.session.take();
+    }
     let task = match task_from(&cli) {
         Ok(t) => t,
         Err(e) => return usage_error(e),
@@ -219,7 +304,8 @@ pub(crate) fn usage_error(e: anyhow::Error) -> ExitCode {
 }
 
 fn task_from(cli: &Cli) -> Result<Option<String>> {
-    let task = match (&cli.instruction_file, &cli.prompt) {
+    let prompt = cli.prompt.clone().or_else(|| cli.text.clone());
+    let task = match (&cli.instruction_file, &prompt) {
         (Some(path), None) => Some(
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?,
         ),

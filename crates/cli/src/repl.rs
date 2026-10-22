@@ -1,7 +1,11 @@
 //! Interactive mode: messages are read from stdin one line at a time, in
 //! conversation mode (a plain reply ends each turn). Each message continues
 //! the same conversation and shell. Ctrl-C stops the current turn (and starts
-//! a fresh conversation); Ctrl-D or `exit` ends the session.
+//! a fresh conversation); Ctrl-D, `exit` or `/quit` ends the session.
+//!
+//! Commands: `/help`, `/memory`, `/skills`, `/agents`, `/tools`,
+//! `/skill:<name> [request]` (sends the skill's instructions with the
+//! request), `/quit`.
 
 use std::io::Write;
 use std::path::Path;
@@ -13,31 +17,36 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use crate::{report, Setup};
 
 pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
-    eprintln!(
-        "Type a message and press Enter. Ctrl-C stops the current turn; Ctrl-D or `exit` quits."
-    );
+    banner(&s);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut resume: Option<Resume> = None;
     let mut n = 0;
     let session_id = format!("gitagent-{}", std::process::id());
     let mcp = crate::connect_mcp(&s.spec).await;
     loop {
-        eprint!("> ");
+        eprint!("→ ");
         let _ = std::io::stderr().flush();
         let Some(line) = lines.next_line().await? else {
             eprintln!();
             break;
         };
-        let task = line.trim();
-        if task.is_empty() {
+        let line = line.trim();
+        if line.is_empty() {
             continue;
         }
-        if matches!(task, "exit" | "quit") {
+        if matches!(line, "exit" | "quit" | "/quit" | "/exit") {
             break;
         }
+        let task = match line.strip_prefix('/') {
+            Some(cmd) => match command(&s, cmd) {
+                Some(prompt) => prompt,
+                None => continue,
+            },
+            None => line.to_string(),
+        };
         n += 1;
         let opts = RunOptions {
-            instruction: task.to_string(),
+            instruction: task,
             work_dir: s.work_dir.clone(),
             out_dir: out_dir.join(format!("task-{n}")),
             timeout: Some(s.timeout),
@@ -100,4 +109,97 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
     }
     gitagent_core::end_session(&s.spec, &s.work_dir, &session_id).await;
     Ok(())
+}
+
+/// What the session is, on stderr.
+fn banner(s: &Setup) {
+    let spec = &s.spec;
+    match &spec.agent {
+        Some(a) => eprintln!("{} v{}", a.manifest.name, a.manifest.version),
+        None => eprintln!("gitagent {}", env!("CARGO_PKG_VERSION")),
+    }
+    eprintln!("Model: {}", spec.model);
+    eprintln!("Tools: {}", tool_names(s).join(", "));
+    if !spec.skills.is_empty() {
+        let names: Vec<&str> = spec.skills.iter().map(|k| k.name.as_str()).collect();
+        eprintln!("Skills: {}", names.join(", "));
+    }
+    if spec.profile.tools.subagents && !spec.agents.is_empty() {
+        let names: Vec<&str> = spec.agents.iter().map(|a| a.name.as_str()).collect();
+        eprintln!("Agents: {}", names.join(", "));
+    }
+    eprintln!("Type /help for commands, /quit to exit. Ctrl-C stops the current turn.");
+}
+
+fn tool_names(s: &Setup) -> Vec<String> {
+    gitagent_core::offered_tools(&s.spec, None, None, None, &[])
+        .into_iter()
+        .map(|t| t.name)
+        .collect()
+}
+
+/// A `/command`: prints its answer and gives back nothing, or gives the
+/// message to send (`/skill:<name> [request]`).
+fn command(s: &Setup, cmd: &str) -> Option<String> {
+    let spec = &s.spec;
+    let (name, rest) = cmd.split_once(' ').unwrap_or((cmd, ""));
+    match name {
+        "help" => println!(
+            "/memory           show the working memory\n\
+             /skills           list the skills\n\
+             /agents           list the sub-agents\n\
+             /tools            list the tools\n\
+             /skill:<name> …   send a skill's instructions with your request\n\
+             /quit             end the session"
+        ),
+        "memory" => match &spec.memory {
+            None => println!("(memory is off)"),
+            Some(m) => match std::fs::read_to_string(m.dir.join(&m.working.path)) {
+                Err(_) => println!("(no memory file)"),
+                Ok(t) if t.trim().is_empty() => println!("(empty)"),
+                Ok(t) => println!("--- memory ---\n{}\n--- end ---", t.trim_end()),
+            },
+        },
+        "skills" => {
+            if spec.skills.is_empty() {
+                println!("No skills.");
+            }
+            for k in &spec.skills {
+                println!("{} — {}", k.name, k.description);
+            }
+        }
+        "agents" => {
+            if !spec.profile.tools.subagents || spec.agents.is_empty() {
+                println!("No sub-agents.");
+            } else {
+                for a in &spec.agents {
+                    println!("{} — {}", a.name, a.description);
+                }
+            }
+        }
+        "tools" => println!("{}", tool_names(s).join(", ")),
+        _ => {
+            if let Some(skill_name) = name.strip_prefix("skill:") {
+                let Some(skill) = spec.skills.iter().find(|k| k.name == skill_name) else {
+                    eprintln!("Unknown skill: {skill_name}");
+                    return None;
+                };
+                let text = std::fs::read_to_string(&skill.path).unwrap_or_default();
+                let body = gitagent_loader::split_frontmatter(&text)
+                    .1
+                    .trim()
+                    .to_string();
+                return Some(if rest.trim().is_empty() {
+                    format!("Follow the skill `{skill_name}`:\n\n{body}")
+                } else {
+                    format!(
+                        "Use the skill `{skill_name}` for this request:\n\n{body}\n\n# Request\n\n{}",
+                        rest.trim()
+                    )
+                });
+            }
+            eprintln!("Unknown command /{name}; /help lists them");
+        }
+    }
+    None
 }

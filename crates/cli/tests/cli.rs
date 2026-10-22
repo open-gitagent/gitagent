@@ -1525,3 +1525,171 @@ fn teardown_runs_after_the_task() {
     );
     assert!(dir.path().join("out/teardown/trajectory.json").is_file());
 }
+
+/// gitagent 1.x's command line: a plain-words prompt, the short flags, and
+/// `.env` files in the home and agent directories.
+#[test]
+fn v1_style_invocation_and_env_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(dir.path().join(".gitagent")).unwrap();
+    std::fs::create_dir_all(&agent).unwrap();
+    std::fs::write(
+        dir.path().join(".gitagent/.env"),
+        "FROM_HOME_ENV=home\nSHARED=home\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join(".env"),
+        "# keys\nexport FROM_DOTENV=\"hello\"\nSHARED='agent'\n",
+    )
+    .unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(
+        &script,
+        "- tool_calls: [{name: exec, arguments: {cmd: \"echo $FROM_DOTENV-$FROM_HOME_ENV-$SHARED > env.txt\"}}]\n- text: done\n",
+    )
+    .unwrap();
+    let out = gitagent()
+        .arg("do it")
+        .args(["-d"])
+        .arg(&agent)
+        .args([
+            "-m",
+            &format!("scripted:{}", script.display()),
+            "--conversation",
+        ])
+        .arg("--out-dir")
+        .arg(dir.path().join("out"))
+        .env("HOME", dir.path())
+        .env_remove("FROM_DOTENV")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "done");
+    assert_eq!(
+        std::fs::read_to_string(agent.join("env.txt")).unwrap(),
+        "hello-home-agent\n"
+    );
+
+    for flag in ["--sandbox", "--voice"] {
+        let out = gitagent()
+            .args(["-p", "x", flag])
+            .env("HOME", dir.path())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{flag}");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("not available in this version"));
+    }
+}
+
+/// `gitagent init` starts an agent directory that validates and runs.
+#[test]
+fn init_starts_an_agent_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("My Agent");
+    let out = gitagent()
+        .arg("init")
+        .arg(&agent)
+        .args(["--model", "anthropic:claude-sonnet-5-5"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("created agent.yaml, SOUL.md, memory/MEMORY.md, .gitignore"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("git repository started; committed"),
+        "{stdout}"
+    );
+    let manifest = std::fs::read_to_string(agent.join("agent.yaml")).unwrap();
+    assert!(manifest.contains("name: my-agent\n"), "{manifest}");
+    assert!(manifest.contains("preferred: anthropic:claude-sonnet-5-5\n"));
+    assert!(agent.join(".git").is_dir());
+    let again = gitagent().arg("init").arg(&agent).output().unwrap();
+    assert!(String::from_utf8_lossy(&again.stdout).contains("already has its files"));
+    let valid = gitagent().arg("validate").arg(&agent).output().unwrap();
+    assert!(
+        valid.status.success(),
+        "{}",
+        String::from_utf8_lossy(&valid.stdout)
+    );
+}
+
+/// The interactive session's commands answer from the loaded agent, and
+/// `/skill:<name>` sends the skill's instructions as the message.
+#[test]
+fn interactive_commands() {
+    use std::io::Write as _;
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("skills/release-notes")).unwrap();
+    std::fs::create_dir_all(agent.join("memory")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: lyra\nversion: 1.0.0\ndescription: A test agent.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    std::fs::write(agent.join("memory/MEMORY.md"), "# Memory\n- Likes tabs.\n").unwrap();
+    std::fs::write(
+        agent.join("skills/release-notes/SKILL.md"),
+        "---\nname: release-notes\ndescription: Write release notes.\n---\nGroup the changes.\n",
+    )
+    .unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(&script, "- text: \"Here are the notes.\"\n").unwrap();
+    let mut child = gitagent()
+        .args(["-d"])
+        .arg(&agent)
+        .args(["-m", &format!("scripted:{}", script.display())])
+        .arg("--out-dir")
+        .arg(dir.path().join("out"))
+        .env("HOME", dir.path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"/skills\n/memory\n/tools\n/skill:release-notes added login\n/quit\n")
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("release-notes — Write release notes.\n"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("--- memory ---\n# Memory\n- Likes tabs.\n--- end ---\n"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("exec, write_stdin, read_file"), "{stdout}");
+    assert!(stdout.contains("Here are the notes."), "{stdout}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("lyra v1.0.0\n") && stderr.contains("Skills: release-notes\n"),
+        "{stderr}"
+    );
+    let t = std::fs::read_to_string(dir.path().join("out/task-1/trajectory.json")).unwrap();
+    assert!(
+        t.contains("Use the skill `release-notes` for this request")
+            && t.contains("Group the changes.")
+            && t.contains("added login"),
+        "{t}"
+    );
+}
