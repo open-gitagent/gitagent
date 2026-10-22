@@ -119,6 +119,8 @@ pub struct AgentOptions {
     /// Conversation mode: a plain reply ends the run (instead of
     /// `task_complete`), with working instructions for talking with a person.
     pub conversation: bool,
+    /// The environment whose `config/<env>.yaml` applies.
+    pub env: Option<String>,
 }
 
 // ---------------------------------------------------------------- hooks
@@ -854,6 +856,7 @@ pub fn prepare(options: &AgentOptions) -> Result<Prepared> {
         }),
         profile: options.profile.clone(),
         conversation: options.conversation,
+        env: options.env.clone(),
         project_dir: project.then(|| work_dir.clone()),
         home_dir: if user {
             std::env::var_os("HOME").map(PathBuf::from)

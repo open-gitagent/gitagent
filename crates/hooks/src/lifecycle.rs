@@ -34,6 +34,8 @@ use crate::Decision;
 pub struct AgentHooks {
     entries: Vec<HookEntry>,
     root: PathBuf,
+    /// Environment variables for the scripts (the environment's `env_vars`).
+    env: Vec<(String, String)>,
     session: Mutex<Session>,
 }
 
@@ -61,6 +63,7 @@ impl AgentHooks {
         agent: &str,
         model: &str,
         all: bool,
+        env: &std::collections::BTreeMap<String, String>,
     ) -> Option<AgentHooks> {
         let entries: Vec<HookEntry> = entries
             .iter()
@@ -70,6 +73,10 @@ impl AgentHooks {
         (!entries.is_empty()).then(|| AgentHooks {
             entries,
             root: root.to_path_buf(),
+            env: env
+                .iter()
+                .map(|(k, v)| (k.clone(), gitagent_loader::declared::expand_env(v)))
+                .collect(),
             session: Mutex::new(Session {
                 id: session_id.to_string(),
                 agent: agent.to_string(),
@@ -198,6 +205,7 @@ impl AgentHooks {
         let session_id = input["session_id"].as_str().unwrap_or_default();
         let mut cmd = Command::new(program);
         cmd.args(rest)
+            .envs(self.env.iter().map(|(k, v)| (k, v)))
             .current_dir(&self.root)
             .env("GITAGENT_AGENT_DIR", &self.root)
             .env("GITAGENT_SESSION_ID", session_id)
@@ -272,7 +280,7 @@ mod tests {
     }
 
     fn hooks(dir: &Path, entries: Vec<HookEntry>) -> AgentHooks {
-        AgentHooks::new(&entries, dir, "s1", "lyra", "m", true).unwrap()
+        AgentHooks::new(&entries, dir, "s1", "lyra", "m", true, &Default::default()).unwrap()
     }
 
     #[tokio::test]
@@ -389,15 +397,53 @@ esac"#,
         assert_eq!(seen["args"], json!({"command": "x"}));
     }
 
+    #[tokio::test]
+    async fn scripts_get_the_environments_variables() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let e = hook(
+            d,
+            HookEvent::PreQuery,
+            "cat >/dev/null; printf '{\"action\":\"block\",\"reason\":\"%s\"}' \"$REGION\"\n",
+            false,
+        );
+        let env = [("REGION".to_string(), "eu".to_string())].into();
+        let h = AgentHooks::new(&[e], d, "s1", "lyra", "m", true, &env).unwrap();
+        assert_eq!(
+            h.fire(HookEvent::PreQuery, None, Map::new()).await,
+            Decision::Block {
+                reason: "eu".into()
+            }
+        );
+    }
+
     #[test]
     fn only_compliance_hooks_survive_when_hooks_are_off() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path();
         let plain = hook(d, HookEvent::PreQuery, "true", false);
-        assert!(AgentHooks::new(std::slice::from_ref(&plain), d, "s", "a", "m", false).is_none());
+        assert!(AgentHooks::new(
+            std::slice::from_ref(&plain),
+            d,
+            "s",
+            "a",
+            "m",
+            false,
+            &Default::default()
+        )
+        .is_none());
         let mut required = plain.clone();
         required.compliance = true;
-        let h = AgentHooks::new(&[plain, required], d, "s", "a", "m", false).unwrap();
+        let h = AgentHooks::new(
+            &[plain, required],
+            d,
+            "s",
+            "a",
+            "m",
+            false,
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(h.entries.len(), 1);
         assert!(h.has(HookEvent::PreQuery) && !h.has(HookEvent::OnError));
     }

@@ -32,6 +32,7 @@ pub(crate) async fn run(
     call: &ToolCall,
     tool: &DeclaredTool,
     remaining: Option<Duration>,
+    env: &std::collections::BTreeMap<String, String>,
 ) -> Result<ToolOutput> {
     if let Some(problem) = check_arguments(&call.arguments, &tool.input_schema) {
         return Ok(ToolOutput::error(format!(
@@ -42,7 +43,9 @@ pub(crate) async fn run(
     }
     let timeout = remaining.map_or(tool.timeout, |r| r.min(tool.timeout));
     let out = match &tool.runner {
-        Runner::Script { command, dir } => run_script(command, dir, &call.arguments, timeout).await,
+        Runner::Script { command, dir } => {
+            run_script(command, dir, &call.arguments, timeout, env).await
+        }
         Runner::Http {
             url,
             method,
@@ -70,10 +73,12 @@ async fn run_script(
     dir: &std::path::Path,
     args: &Map<String, Value>,
     timeout: Duration,
+    env: &std::collections::BTreeMap<String, String>,
 ) -> Result<String, String> {
     let (program, rest) = command.split_first().ok_or("no command to run")?;
     let mut child = tokio::process::Command::new(program)
         .args(rest)
+        .envs(env.iter().map(|(k, v)| (k, expand_env(v))))
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -350,18 +355,45 @@ mod tests {
             "read input; printf '{\"result\": %s}' \"$input\"\n",
             Duration::from_secs(10),
         );
-        let out = run(&call(json!({"n": 3, "s": "x"})), &t, None)
-            .await
-            .unwrap();
+        let out = run(
+            &call(json!({"n": 3, "s": "x"})),
+            &t,
+            None,
+            &Default::default(),
+        )
+        .await
+        .unwrap();
         assert!(!out.is_error, "{}", out.content);
         assert_eq!(out.content, r#"{"n":3,"s":"x"}"#);
 
-        let bad = run(&call(json!({"s": 1})), &t, None).await.unwrap();
+        let bad = run(&call(json!({"s": 1})), &t, None, &Default::default())
+            .await
+            .unwrap();
         assert!(bad.is_error);
         assert!(bad.content.contains("missing required argument `n`"));
         assert!(bad.content.contains("n (integer, required), s (string)"));
-        let bad = run(&call(json!({"n": "3"})), &t, None).await.unwrap();
+        let bad = run(&call(json!({"n": "3"})), &t, None, &Default::default())
+            .await
+            .unwrap();
         assert!(bad.content.contains("`n` must be integer"));
+    }
+
+    #[tokio::test]
+    async fn scripts_get_the_environments_variables() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = script_tool(
+            dir.path(),
+            "cat >/dev/null; printf '%s/%s' \"$API_BASE\" \"$REGION\"\n",
+            Duration::from_secs(10),
+        );
+        std::env::set_var("GITAGENT_TEST_REGION", "eu");
+        let env = [
+            ("API_BASE".to_string(), "https://staging".to_string()),
+            ("REGION".to_string(), "${GITAGENT_TEST_REGION}".to_string()),
+        ]
+        .into();
+        let out = run(&call(json!({"n": 1})), &t, None, &env).await.unwrap();
+        assert_eq!(out.content, "https://staging/eu");
     }
 
     #[tokio::test]
@@ -372,7 +404,9 @@ mod tests {
             "echo 'bad input' >&2; exit 3\n",
             Duration::from_secs(10),
         );
-        let out = run(&call(json!({"n": 1})), &t, None).await.unwrap();
+        let out = run(&call(json!({"n": 1})), &t, None, &Default::default())
+            .await
+            .unwrap();
         assert!(out.is_error);
         assert_eq!(out.content, "Tool t failed: exited with code 3: bad input");
 
@@ -381,6 +415,7 @@ mod tests {
             &call(json!({"n": 1})),
             &slow,
             Some(Duration::from_millis(200)),
+            &Default::default(),
         )
         .await
         .unwrap();

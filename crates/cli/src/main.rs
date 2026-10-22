@@ -36,6 +36,11 @@ pub(crate) struct Cli {
     #[arg(long, conflicts_with = "bench")]
     conversation: bool,
 
+    /// The environment whose `config/<env>.yaml` in the agent directory
+    /// applies (default: `GITAGENT_ENV`, else the defaults alone).
+    #[arg(long, conflicts_with = "bench")]
+    env: Option<String>,
+
     /// Serve the IPC protocol on stdin and stdout (JSON Lines) for a client
     /// library; the session's settings come in its `initialize` message.
     #[arg(long, conflicts_with_all = ["bench", "prompt", "instruction_file", "repo"])]
@@ -249,6 +254,7 @@ pub(crate) fn setup(cli: &Cli, conversation: bool) -> Result<Setup> {
         project_dir,
         home_dir,
         conversation: conversation && !cli.bench,
+        env: cli.env.clone(),
     })?;
     if !matches!(spec.config.learning.as_str(), "off" | "online") {
         bail!(
@@ -277,13 +283,18 @@ pub(crate) fn setup(cli: &Cli, conversation: bool) -> Result<Setup> {
     };
     let sandbox = sandbox_dirs(&spec.config.sandbox, cli.bench, &work_dir, &cli.out_dir)?;
     eprintln!(
-        "gitagent {}: model {} · config {} · profile {} · {}{} · sandbox {}",
+        "gitagent {}: model {} · config {} · profile {} · {}{}{} · sandbox {}",
         env!("CARGO_PKG_VERSION"),
         spec.model,
         spec.config_source,
         spec.profile_source,
         work_dir.display(),
         if cli.bench { " · bench" } else { "" },
+        spec.env_config
+            .name
+            .as_ref()
+            .map(|e| format!(" · env {e}"))
+            .unwrap_or_default(),
         if sandbox.is_some() { "on" } else { "off" }
     );
     Ok(Setup {

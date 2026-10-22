@@ -646,6 +646,9 @@ async fn session(cli: Cli, out: Out) -> i32 {
     if let Some(n) = o["maxTurns"].as_u64() {
         cfg.max_turns = Some(n as u32);
     }
+    if let Some(e) = s_opt("env") {
+        cfg.env = Some(e);
+    }
     if let Some(ms) = o["timeoutMs"].as_u64() {
         cfg.timeout_s = Some(ms.div_ceil(1000));
     }
@@ -654,7 +657,7 @@ async fn session(cli: Cli, out: Out) -> i32 {
         Ok(s) => s,
         Err(e) => return fatal(&out, format!("{e:#}")),
     };
-    for key in ["env", "repo", "sandbox"] {
+    for key in ["repo", "sandbox"] {
         if !o[key].is_null() {
             out.system(
                 "warning",

@@ -290,6 +290,9 @@ pub struct ToolContext<'a> {
     pub declared: &'a [DeclaredTool],
     /// Connected MCP servers.
     pub mcp: Option<&'a gitagent_mcp::Servers>,
+    /// Environment variables for the agent's tool scripts (the
+    /// environment's `env_vars`).
+    pub tool_env: &'a std::collections::BTreeMap<String, String>,
     pub default_yield_ms: u64,
     /// Time left in the run, used to cap waits.
     pub remaining: Option<Duration>,
@@ -357,7 +360,13 @@ pub async fn dispatch(call: &ToolCall, ctx: &mut ToolContext<'_>) -> ToolOutput 
         name if ctx.declared.iter().any(|t| t.name == name) => {
             ctx.counters.inc_labelled("declared_tool_calls", name);
             let tool = ctx.declared.iter().find(|t| t.name == name);
-            declared::run(call, tool.expect("checked above"), ctx.remaining).await
+            declared::run(
+                call,
+                tool.expect("checked above"),
+                ctx.remaining,
+                ctx.tool_env,
+            )
+            .await
         }
         name if ctx.mcp.is_some_and(|m| m.has(name)) => {
             ctx.counters.inc_labelled("mcp_tool_calls", name);

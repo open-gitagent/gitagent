@@ -587,6 +587,7 @@ pub fn validate(root: &Path, compliance: bool) -> Report {
     hooks(root, &mut out);
     tool_files(root, &mut out);
     skill_files(root, &mut out);
+    config_files(root, &mut out);
     out.sort_by(|a, b| (a.severity, &a.file, a.line).cmp(&(b.severity, &b.file, b.line)));
     Report { findings: out }
 }
@@ -888,6 +889,90 @@ fn tool_files(root: &Path, out: &mut Vec<Finding>) {
                 "implementation",
                 "the 1.x layout (`script:`); OpenGAP uses `type: script` and `path:`",
             );
+        }
+    }
+}
+
+/// Every `config/*.yaml`; problems are warnings (the format leaves these
+/// files unchecked, and agents keep their own settings in them).
+fn config_files(root: &Path, out: &mut Vec<Finding>) {
+    let mut files: Vec<_> = std::fs::read_dir(root.join("config"))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("yaml"))
+        .collect();
+    files.sort();
+    for file in files {
+        let name = format!(
+            "config/{}",
+            file.file_name().unwrap_or_default().to_string_lossy()
+        );
+        let text = std::fs::read_to_string(&file).unwrap_or_default();
+        let mut doc = Doc {
+            file: &name,
+            text: &text,
+            out,
+        };
+        let v: Value = match serde_saphyr::from_str(&text) {
+            Ok(v) => v,
+            Err(e) => {
+                doc.warn("", format!("not valid YAML: {e}"));
+                continue;
+            }
+        };
+        let Some(map) = v.as_object() else {
+            if !v.is_null() {
+                doc.warn("", "must be a mapping of settings");
+            }
+            continue;
+        };
+        let known = Ty::Obj(&[
+            ("log_level", Ty::Enum(&["debug", "info", "warn", "error"])),
+            ("compliance_mode", Ty::Bool),
+            ("audit_logging", Ty::Bool),
+            ("model_override", Ty::Any),
+            ("temperature_override", Ty::Any),
+            ("timeout_override", Ty::Any),
+            ("env_vars", Ty::Any),
+        ]);
+        let Ty::Obj(fields) = known else { continue };
+        for (key, ty) in fields {
+            let Some(x) = map.get(*key).filter(|x| !x.is_null()) else {
+                continue;
+            };
+            let mut problems = Vec::new();
+            let mut inner = Doc {
+                file: &name,
+                text: &text,
+                out: &mut problems,
+            };
+            check(&mut inner, key, x, *ty);
+            for p in problems {
+                doc.out.push(Finding {
+                    severity: Severity::Warning,
+                    ..p
+                });
+            }
+        }
+        match map.get("model_override") {
+            None | Some(Value::Null) | Some(Value::String(_)) => {}
+            Some(_) => doc.warn("model_override", "must be a model name"),
+        }
+        match map.get("temperature_override") {
+            None | Some(Value::Null) => {}
+            Some(t) if t.as_f64().is_some_and(|t| (0.0..=2.0).contains(&t)) => {}
+            Some(_) => doc.warn("temperature_override", "must be a number between 0 and 2"),
+        }
+        match map.get("timeout_override") {
+            None | Some(Value::Null) => {}
+            Some(t) if t.as_u64().is_some_and(|t| t >= 1) => {}
+            Some(_) => doc.warn("timeout_override", "must be a whole number of seconds"),
+        }
+        match map.get("env_vars") {
+            None | Some(Value::Null) | Some(Value::Object(_)) => {}
+            Some(_) => doc.warn("env_vars", "must be a mapping of variable names to values"),
         }
     }
 }

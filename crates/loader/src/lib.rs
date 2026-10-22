@@ -9,6 +9,7 @@ mod agents;
 pub mod compliance;
 mod config;
 pub mod declared;
+pub mod env_config;
 pub mod manifest;
 pub mod mcp;
 pub mod memory;
@@ -23,6 +24,7 @@ pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
 pub use compliance::Supervision;
 pub use config::{Config, RepoConfig};
 pub use declared::DeclaredTool;
+pub use env_config::EnvConfig;
 pub use manifest::AgentDir;
 pub use mcp::McpServerCfg;
 pub use memory::MemoryCfg;
@@ -189,6 +191,12 @@ pub struct AgentSpec {
     pub warnings: Vec<String>,
     /// Conversation mode (see [`LoadOptions::conversation`]).
     pub conversation: bool,
+    /// The agent's `config/` settings for the environment. Never read in
+    /// benchmark runs.
+    pub env_config: EnvConfig,
+    /// Keep an audit log (the agent's `compliance.recordkeeping` or the
+    /// environment's `audit_logging`).
+    pub audit_logging: bool,
 }
 
 impl AgentSpec {
@@ -216,6 +224,9 @@ pub struct LoadOptions {
     /// Conversation mode: working instructions for talking with a person
     /// (`prompts/conversation.md`), and a plain reply ends each turn.
     pub conversation: bool,
+    /// The environment whose `config/<env>.yaml` applies (`GITAGENT_ENV`
+    /// when unset).
+    pub env: Option<String>,
 }
 
 pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
@@ -278,8 +289,43 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         None => (Vec::new(), Vec::new()),
     };
 
-    // --model, then gitagent.yaml, then the agent's `model.preferred`.
-    let mut model = match opts.model.as_deref().or(config.model.as_deref()) {
+    // The environment's settings (`config/`), only outside benchmark runs.
+    let outside_bench = opts.project_dir.is_some() || opts.home_dir.is_some();
+    let mut warnings = Vec::new();
+    let env_config = match (&agent, outside_bench) {
+        (Some(a), true) => {
+            let from_var = std::env::var("GITAGENT_ENV").ok();
+            let env = opts.env.as_deref().or(from_var.as_deref());
+            let (cfg, problems) = env_config::load(&a.root, env);
+            warnings.extend(problems);
+            if cfg.compliance_mode {
+                let report = validate::validate(&a.root, true);
+                let errors: Vec<String> = report
+                    .findings
+                    .iter()
+                    .filter(|f| f.severity == validate::Severity::Error)
+                    .map(ToString::to_string)
+                    .collect();
+                if !errors.is_empty() {
+                    bail!(
+                        "compliance_mode is on and the agent does not pass `gitagent validate --compliance`:\n{}",
+                        errors.join("\n")
+                    );
+                }
+            }
+            cfg
+        }
+        _ => EnvConfig::default(),
+    };
+
+    // --model, then the environment's model_override, then gitagent.yaml,
+    // then the agent's `model.preferred`.
+    let model_setting = opts
+        .model
+        .as_deref()
+        .or(env_config.model_override.as_deref())
+        .or(config.model.as_deref());
+    let mut model = match model_setting {
         Some(s) => ModelRef::parse(s)?,
         None => match agent.as_ref().and_then(AgentDir::preferred_model) {
             Some(m) => m?,
@@ -290,7 +336,6 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
     };
     // GITAGENT_MODEL_BASE_URL sends any model to an OpenAI-compatible
     // endpoint; never in benchmark runs (no project or home directory).
-    let outside_bench = opts.project_dir.is_some() || opts.home_dir.is_some();
     if outside_bench && model.base_url.is_none() && model.provider != "scripted" {
         if let Ok(url) = std::env::var("GITAGENT_MODEL_BASE_URL") {
             if !url.trim().is_empty() {
@@ -310,6 +355,9 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         if let Some(t) = m.runtime.as_ref().and_then(|r| r.timeout) {
             config.timeout_s = t;
         }
+        if let Some(t) = env_config.timeout_override {
+            config.timeout_s = t;
+        }
         // Temperature: runtime, then model constraints.
         let constraints = m.model.as_ref().and_then(|s| s.constraints.as_ref());
         if let Some(t) = m
@@ -322,6 +370,9 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         }
         if let Some(n) = constraints.and_then(|c| c.max_tokens) {
             profile.max_output_tokens = n;
+        }
+        if let Some(t) = env_config.temperature_override {
+            profile.temperature = Some(t);
         }
     }
 
@@ -381,7 +432,6 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         system_prompt.push_str(&skills::index(&skills));
     }
     // MCP servers: `.mcp.json`, then agent.yaml, then gitagent.yaml.
-    let mut warnings = Vec::new();
     let mcp_servers = match &opts.project_dir {
         Some(project) if outside_bench => {
             let mcp_json = mcp::read_mcp_json(&project.join(".mcp.json")).unwrap_or_else(|e| {
@@ -411,10 +461,14 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         system_prompt.push('\n');
         system_prompt.push_str(&section);
     }
-    let (supervision, section) = match agent.as_ref().and_then(|a| a.manifest.compliance.as_ref()) {
+    let compliance = agent.as_ref().and_then(|a| a.manifest.compliance.as_ref());
+    let (supervision, section) = match compliance {
         Some(c) => compliance::read(c),
         None => (Supervision::default(), String::new()),
     };
+    let audit_logging = env_config.audit_logging
+        || compliance
+            .is_some_and(|c| c["recordkeeping"]["audit_logging"] == serde_json::Value::Bool(true));
     if !section.is_empty() {
         system_prompt.push('\n');
         system_prompt.push_str(&section);
@@ -457,6 +511,8 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         supervision,
         warnings,
         conversation: opts.conversation,
+        env_config,
+        audit_logging,
     })
 }
 
@@ -934,6 +990,73 @@ profile: quiet
             .unwrap();
         }
         dir
+    }
+
+    #[test]
+    fn the_environments_settings_apply_in_order() {
+        let dir = agent_project();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("config")).unwrap();
+        std::fs::write(
+            root.join("config/default.yaml"),
+            "model_override: anthropic:claude-haiku-5-5\ntemperature_override: 0.9\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("config/prod.yaml"),
+            "model_override: anthropic:claude-opus-5-5\ntimeout_override: 90\nenv_vars: {REGION: eu}\n",
+        )
+        .unwrap();
+        let load_env = |env: Option<&str>, model: Option<&str>| {
+            load(&LoadOptions {
+                project_dir: Some(root.to_path_buf()),
+                env: env.map(str::to_string),
+                model: model.map(str::to_string),
+                ..Default::default()
+            })
+            .unwrap()
+        };
+        // The defaults alone: model_override beats the agent's preferred
+        // model, temperature_override beats runtime.temperature.
+        let spec = load_env(None, None);
+        assert_eq!(spec.model.to_string(), "anthropic:claude-haiku-5-5");
+        assert_eq!(spec.profile.temperature, Some(0.9));
+        assert_eq!(spec.env_config.name, None);
+        // An environment on top; its env_vars reach the spec.
+        let spec = load_env(Some("prod"), None);
+        assert_eq!(spec.model.to_string(), "anthropic:claude-opus-5-5");
+        assert_eq!(spec.config.timeout_s, 90);
+        assert_eq!(spec.env_config.env_vars["REGION"], "eu");
+        assert_eq!(spec.env_config.name.as_deref(), Some("prod"));
+        // --model still wins.
+        let spec = load_env(Some("prod"), Some("scripted:s.yaml"));
+        assert_eq!(spec.model.to_string(), "scripted:s.yaml");
+        // Benchmark runs read none of it.
+        let bench = load(&LoadOptions {
+            model: Some("scripted:s.yaml".into()),
+            env: Some("prod".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(bench.env_config, EnvConfig::default());
+
+        // compliance_mode: the agent must pass validate --compliance (this
+        // one is high risk with no supervision).
+        std::fs::write(root.join("config/strict.yaml"), "compliance_mode: true\n").unwrap();
+        let mut manifest = std::fs::read_to_string(root.join("agent.yaml")).unwrap();
+        manifest.push_str("compliance: {risk_tier: high}\n");
+        std::fs::write(root.join("agent.yaml"), manifest).unwrap();
+        let err = load(&LoadOptions {
+            project_dir: Some(root.to_path_buf()),
+            env: Some("strict".into()),
+            ..Default::default()
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("compliance_mode is on") && err.contains("[FINRA 3110]"),
+            "{err}"
+        );
     }
 
     #[test]

@@ -841,6 +841,7 @@ pub async fn run(
                                 memory: spec.memory.as_ref(),
                                 declared: &spec.declared_tools,
                                 mcp: opts.mcp.as_deref(),
+                                tool_env: &spec.env_config.env_vars,
                                 default_yield_ms: spec.profile.exec_default_yield_ms,
                                 remaining: remaining(),
                                 minutes_left: time_budget
@@ -1228,6 +1229,7 @@ fn discover_hooks(spec: &AgentSpec, work_dir: &Path, session_id: &str) -> Option
             &a.manifest.name,
             &spec.model.model,
             spec.config.hooks,
+            &spec.env_config.env_vars,
         )
     });
     let dirs: &[PathBuf] = if spec.config.hooks {

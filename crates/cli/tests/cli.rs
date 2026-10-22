@@ -1281,3 +1281,73 @@ fn relative_directories_work() {
     assert!(agent.join("hook-saw.json").is_file());
     assert!(dir.path().join("out/trajectory.json").is_file());
 }
+
+/// `config/default.yaml` and `config/<env>.yaml`: the environment's
+/// `model_override` picks the model unless `--model` is given; the
+/// environment comes from `--env` or `GITAGENT_ENV`.
+#[test]
+fn environments_pick_their_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("config")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: lyra\nversion: 1.0.0\ndescription: A test agent.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    let model = |name: &str| {
+        let path = dir.path().join(format!("{name}.yaml"));
+        std::fs::write(&path, format!("- text: \"from {name}\"\n")).unwrap();
+        format!("scripted:{}", path.display())
+    };
+    std::fs::write(
+        agent.join("config/default.yaml"),
+        format!("model_override: {}\n", model("default")),
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join("config/prod.yaml"),
+        format!("model_override: {}\n", model("prod")),
+    )
+    .unwrap();
+    let flag_model = model("flag");
+    let run = |args: &[&str], env_var: Option<&str>| {
+        let mut cmd = gitagent();
+        cmd.args(["-p", "x", "--conversation", "--dir"])
+            .arg(&agent)
+            .arg("--out-dir")
+            .arg(dir.path().join("out"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env_remove("GITAGENT_ENV");
+        if let Some(e) = env_var {
+            cmd.env("GITAGENT_ENV", e);
+        }
+        let out = cmd.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        (
+            String::from_utf8_lossy(&out.stdout).trim().to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    };
+    assert_eq!(run(&[], None).0, "from default");
+    let (reply, banner) = run(&["--env", "prod"], None);
+    assert_eq!(reply, "from prod");
+    assert!(banner.contains("· env prod"), "{banner}");
+    assert_eq!(run(&[], Some("prod")).0, "from prod");
+    assert_eq!(
+        run(&["--env", "prod", "--model", &flag_model], None).0,
+        "from flag"
+    );
+    let (reply, warnings) = run(&["--env", "staging"], None);
+    assert_eq!(reply, "from default");
+    assert!(
+        warnings.contains("config/staging.yaml does not exist"),
+        "{warnings}"
+    );
+}
