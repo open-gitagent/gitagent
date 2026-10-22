@@ -11,7 +11,7 @@ use serde_json::{Map, Value};
 #[derive(Clone, Default)]
 pub struct Events {
     out: Option<Arc<Mutex<Box<dyn Write + Send>>>>,
-    callback: Option<Arc<dyn Fn(Value) + Send + Sync>>,
+    callbacks: Vec<Arc<dyn Fn(Value) + Send + Sync>>,
 }
 
 impl Events {
@@ -23,8 +23,14 @@ impl Events {
     pub fn to_callback(f: impl Fn(Value) + Send + Sync + 'static) -> Self {
         Events {
             out: None,
-            callback: Some(Arc::new(f)),
+            callbacks: vec![Arc::new(f)],
         }
+    }
+
+    /// The same sink with `f` told about every event as well.
+    pub fn also(mut self, f: impl Fn(Value) + Send + Sync + 'static) -> Self {
+        self.callbacks.push(Arc::new(f));
+        self
     }
 
     pub fn stdout() -> Self {
@@ -34,18 +40,18 @@ impl Events {
     pub fn to_writer(w: Box<dyn Write + Send>) -> Self {
         Events {
             out: Some(Arc::new(Mutex::new(w))),
-            callback: None,
+            callbacks: Vec::new(),
         }
     }
 
     pub fn enabled(&self) -> bool {
-        self.out.is_some() || self.callback.is_some()
+        self.out.is_some() || !self.callbacks.is_empty()
     }
 
     /// Emits `{"event": kind, "ts": ..., ...fields}`. Write errors are ignored:
     /// a closed pipe must not stop the run.
     pub fn emit(&self, kind: &str, fields: Value) {
-        if self.out.is_none() && self.callback.is_none() {
+        if self.out.is_none() && self.callbacks.is_empty() {
             return;
         }
         let mut obj = Map::new();
@@ -54,7 +60,7 @@ impl Events {
         if let Value::Object(f) = fields {
             obj.extend(f);
         }
-        if let Some(f) = &self.callback {
+        for f in &self.callbacks {
             f(Value::Object(obj.clone()));
         }
         let Some(out) = &self.out else {

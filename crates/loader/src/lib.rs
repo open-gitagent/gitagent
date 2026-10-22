@@ -25,7 +25,7 @@ pub mod workflows;
 
 pub use agent_hooks::{HookEntry, HookEvent};
 pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
-pub use compliance::Supervision;
+pub use compliance::{AuditCfg, Supervision};
 pub use config::{Config, RepoConfig};
 pub use declared::DeclaredTool;
 pub use env_config::EnvConfig;
@@ -201,9 +201,9 @@ pub struct AgentSpec {
     /// The agent's `config/` settings for the environment. Never read in
     /// benchmark runs.
     pub env_config: EnvConfig,
-    /// Keep an audit log (the agent's `compliance.recordkeeping` or the
-    /// environment's `audit_logging`).
-    pub audit_logging: bool,
+    /// The audit log to keep (the agent's `compliance.recordkeeping` or
+    /// the environment's `audit_logging`), if any.
+    pub audit: Option<AuditCfg>,
     /// The agent's `knowledge/` documents. Never read in benchmark runs.
     pub knowledge: Knowledge,
     /// `hooks/bootstrap.md`: what the agent does at the start of a session
@@ -569,9 +569,40 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         Some(c) => compliance::read(c),
         None => (Supervision::default(), String::new()),
     };
+    let recordkeeping = compliance.map(|c| &c["recordkeeping"]);
     let audit_logging = env_config.audit_logging
-        || compliance
-            .is_some_and(|c| c["recordkeeping"]["audit_logging"] == serde_json::Value::Bool(true));
+        || recordkeeping.is_some_and(|r| r["audit_logging"] == serde_json::Value::Bool(true));
+    let audit = match (&agent, audit_logging) {
+        (Some(a), true) => Some(AuditCfg {
+            dir: std::env::var_os("GITAGENT_AUDIT_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| a.root.join(".gitagent/audit")),
+            contents: recordkeeping
+                .and_then(|r| r["log_contents"].as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect(),
+            immutable: recordkeeping
+                .is_some_and(|r| r["immutable"] == serde_json::Value::Bool(true)),
+        }),
+        _ => None,
+    };
+    // Segregation of duties: an agent holding two conflicting roles does
+    // not run (or is warned about, under advisory enforcement).
+    if let (Some(a), Some(sod)) = (&agent, &supervision.sod) {
+        if let Some((x, y)) = sod.conflict_of(&a.manifest.name) {
+            let message = format!(
+                "segregation of duties: {} holds both {x} and {y}, which conflict",
+                a.manifest.name
+            );
+            if sod.strict {
+                bail!("{message} (enforcement: strict)");
+            }
+            warnings.push(message);
+        }
+    }
     if !section.is_empty() {
         system_prompt.push('\n');
         system_prompt.push_str(&section);
@@ -627,7 +658,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         warnings,
         conversation: opts.conversation,
         env_config,
-        audit_logging,
+        audit,
         knowledge,
         bootstrap,
         teardown,

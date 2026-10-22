@@ -1853,3 +1853,188 @@ async fn workflows_run_their_steps_in_order() {
     .to_string();
     assert!(err.contains("no workflow named \"nope\""), "{err}");
 }
+
+/// The compliance runtime: the audit log records what `log_contents`
+/// names, a handoff blocks a caller without the role and asks when it has
+/// it, payments follow the spending rules and add up in the month's state,
+/// and a sub-agent holding conflicting roles does not run.
+#[tokio::test]
+async fn audit_log_handoffs_and_spending_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    let write = |p: PathBuf, t: &str| {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, t).unwrap();
+    };
+    write(
+        agent.join("agent.yaml"),
+        "name: teller\nversion: 1.0.0\ndescription: Pays.\nagents:\n  both: {description: Holds both roles.}\n  payer: {description: Pays.}\ncompliance:\n  risk_tier: high\n  recordkeeping: {audit_logging: true, log_contents: [tool_calls, model_version]}\n  segregation_of_duties:\n    roles: [{id: maker, description: m}, {id: approver, description: a}]\n    conflicts: [[maker, approver]]\n    assignments: {teller: [maker], both: [maker, approver], payer: [maker]}\n    handoffs:\n      - {action: transfer, required_roles: [maker, approver]}\n      - {action: audit-export, required_roles: [approver], approval_required: false}\n  financial_governance:\n    enabled: true\n    spending: {max_per_transaction_cents: 5000, max_monthly_cents: 8000, blocked_categories: [gambling], allowed_categories: [office, travel]}\n    approval: {require_above_cents: 2000, timeout_minutes: 1, auto_deny_on_timeout: true}\n",
+    );
+    write(agent.join("SOUL.md"), "I pay.\n");
+    write(
+        agent.join("agents/both/agent.yaml"),
+        "name: both\nversion: 1.0.0\ndescription: Both.\n",
+    );
+    write(agent.join("agents/both/SOUL.md"), "I hold both.\n");
+    write(
+        agent.join("agents/payer/agent.yaml"),
+        "name: payer\nversion: 1.0.0\ndescription: Payer.\n",
+    );
+    write(agent.join("agents/payer/SOUL.md"), "I pay too.\n");
+    for name in ["transfer", "audit-export", "pay"] {
+        write(
+            agent.join(format!("tools/{name}.sh")),
+            "cat >/dev/null; echo '{\"text\": \"done\"}'\n",
+        );
+        write(
+            agent.join(format!("tools/{name}.yaml")),
+            &format!("name: {name}\ndescription: {name}.\ninput_schema: {{type: object, properties: {{amount_cents: {{type: integer}}, category: {{type: string}}, note: {{type: string}}}}}}\nimplementation: {{script: {name}.sh}}\n"),
+        );
+    }
+    let spec = load(&LoadOptions {
+        project_dir: Some(agent.clone()),
+        model: Some("scripted:test".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    let audit = spec.audit.as_ref().unwrap();
+    assert_eq!(audit.dir, agent.join(".gitagent/audit"));
+    assert!(audit.logs("tool_calls") && !audit.logs("prompts_and_responses"));
+
+    let script = "- tool_calls: [{name: transfer, arguments: {note: approved}}]\n\
+                  - tool_calls: [{name: audit-export, arguments: {}}]\n\
+                  - tool_calls: [{name: pay, arguments: {amount_cents: 300, category: gambling}}]\n\
+                  - tool_calls: [{name: pay, arguments: {amount_cents: 300, category: food}}]\n\
+                  - tool_calls: [{name: pay, arguments: {amount_cents: 9000, category: office}}]\n\
+                  - tool_calls: [{name: pay, arguments: {amount_cents: 1500, category: office}}]\n\
+                  - tool_calls: [{name: pay, arguments: {amount_cents: 4500, category: travel, note: approved}}]\n\
+                  - tool_calls: [{name: pay, arguments: {amount_cents: 3000, category: travel, note: approved}}]\n\
+                  - tool_calls: [{name: subagent, arguments: {description: x, prompt: go, agent: both}}]\n\
+                  - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n";
+    let approver = test_approver(None);
+    let r = run_supervised(&spec, script, Some(approver.clone()), None).await;
+    assert_eq!(r.report.outcome, Outcome::Completed);
+    let results: Vec<String> = r.trajectory()["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| {
+            s["observation"]["results"][0]["content"]
+                .as_str()
+                .map(str::to_string)
+        })
+        .collect();
+    assert_eq!(results.len(), 10, "{results:#?}");
+    // transfer: a handoff the teller takes part in (maker), approval asked.
+    assert_eq!(results[0], "done");
+    // audit-export: a handoff needing the approver role the teller lacks.
+    assert!(
+        results[1].starts_with("Not run: audit-export needs the roles approver"),
+        "{}",
+        results[1]
+    );
+    assert!(
+        results[2].contains("the category gambling is blocked"),
+        "{}",
+        results[2]
+    );
+    assert!(
+        results[3].contains("not among the allowed ones"),
+        "{}",
+        results[3]
+    );
+    assert!(
+        results[4].contains("over the limit of 5000 per transaction"),
+        "{}",
+        results[4]
+    );
+    // 1500 is under the approval threshold and goes through.
+    assert_eq!(results[5], "done");
+    // 4500 needs approval (given) and goes through: 6000 this month.
+    assert_eq!(results[6], "done");
+    // 3000 more would pass the monthly cap of 8000.
+    assert!(
+        results[7].contains("would take this month's spending to 9000 of the 8000 allowed"),
+        "{}",
+        results[7]
+    );
+    assert!(
+        results[8].contains("holds both maker and approver, which conflict"),
+        "{}",
+        results[8]
+    );
+    let seen: Vec<String> = approver
+        .seen
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|q| q.reason.clone())
+        .collect();
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert!(seen[0].contains("transfer is a handoff through the roles maker → approver"));
+    assert!(seen[1].contains("a payment of 4500 cents is over 2000"));
+    let state: Value =
+        serde_json::from_slice(&std::fs::read(agent.join(".gitagent/state.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        state["spending"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap(),
+        6000
+    );
+
+    // The audit log: tool calls and model versions, no prompts or texts.
+    let mut files: Vec<_> = std::fs::read_dir(agent.join(".gitagent/audit"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    files.sort();
+    assert_eq!(files.len(), 1);
+    let log = std::fs::read_to_string(&files[0]).unwrap();
+    let records: Vec<Value> = log
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let events: Vec<&str> = records
+        .iter()
+        .map(|r| r["event"].as_str().unwrap())
+        .collect();
+    assert_eq!(events[0], "run_start");
+    assert!(
+        events.iter().filter(|e| **e == "tool_use").count() >= 9,
+        "{events:?}"
+    );
+    assert!(
+        events.contains(&"approval_request")
+            && events.contains(&"approval")
+            && events.contains(&"run_end")
+    );
+    assert!(records.iter().any(|r| r["event"] == "response"
+        && r["model"] == "scripted:test"
+        && r.get("text").is_none()));
+    assert!(records
+        .iter()
+        .all(|r| r["session_id"] == "-" && r["timestamp"].is_string()));
+    assert!(!events.contains(&"prompt"), "{events:?}");
+
+    // A strict agent holding both roles does not load at all.
+    write(
+        agent.join("agent.yaml"),
+        "name: teller\nversion: 1.0.0\ndescription: Pays.\ncompliance:\n  segregation_of_duties:\n    roles: [{id: maker, description: m}, {id: approver, description: a}]\n    conflicts: [[maker, approver]]\n    assignments: {teller: [maker, approver]}\n",
+    );
+    let err = load(&LoadOptions {
+        project_dir: Some(agent.clone()),
+        model: Some("scripted:test".into()),
+        ..Default::default()
+    })
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("teller holds both maker and approver, which conflict (enforcement: strict)"),
+        "{err}"
+    );
+}

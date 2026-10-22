@@ -15,6 +15,8 @@
 //! `communications.pre_review_required` makes the final response wait for
 //! approval as well. A request nobody answers is denied.
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::Value;
@@ -47,6 +49,86 @@ pub struct Supervision {
     /// The final response needs approval too.
     pub review_responses: bool,
     pub approval_timeout: Duration,
+    /// `segregation_of_duties`, when the section is present.
+    pub sod: Option<Sod>,
+    /// `financial_governance`, when `enabled: true`.
+    pub finance: Option<Finance>,
+}
+
+/// Segregation of duties: which agent holds which roles, which roles
+/// conflict, and which actions need a handoff.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Sod {
+    pub roles: Vec<String>,
+    pub conflicts: Vec<(String, String)>,
+    /// Agent name to the roles it holds.
+    pub assignments: BTreeMap<String, Vec<String>>,
+    pub handoffs: Vec<Handoff>,
+    /// `enforcement: strict` (the default): violations block.
+    pub strict: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Handoff {
+    /// The action, taken as a tool name (any naming), as `action_type` is.
+    pub action: String,
+    pub tools: Vec<String>,
+    pub required_roles: Vec<String>,
+    pub approval_required: bool,
+}
+
+impl Sod {
+    pub fn roles_of(&self, agent: &str) -> &[String] {
+        self.assignments.get(agent).map_or(&[], Vec::as_slice)
+    }
+
+    /// A conflicting pair of roles the agent holds, if any.
+    pub fn conflict_of(&self, agent: &str) -> Option<(String, String)> {
+        let held = self.roles_of(agent);
+        self.conflicts
+            .iter()
+            .find(|(a, b)| held.contains(a) && held.contains(b))
+            .cloned()
+    }
+
+    /// The handoff a tool call falls under, if any.
+    pub fn handoff_for(&self, tool: &str) -> Option<&Handoff> {
+        self.handoffs
+            .iter()
+            .find(|h| h.tools.iter().any(|t| t == tool))
+    }
+}
+
+/// Spending limits for payment-like tool calls: a call whose arguments
+/// carry `amount_cents` (or `amount`, in whole units) and, optionally, a
+/// `category`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Finance {
+    pub firewall: Option<String>,
+    pub max_per_transaction_cents: Option<u64>,
+    pub max_monthly_cents: Option<u64>,
+    pub currency: Option<String>,
+    pub allowed_categories: Vec<String>,
+    pub blocked_categories: Vec<String>,
+    pub require_above_cents: Option<u64>,
+    /// A request nobody answers in time counts as denied (true) or
+    /// approved (false).
+    pub auto_deny_on_timeout: bool,
+}
+
+/// Where and what the audit log records (`recordkeeping`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuditCfg {
+    pub dir: PathBuf,
+    /// `log_contents`; empty means everything.
+    pub contents: Vec<String>,
+    pub immutable: bool,
+}
+
+impl AuditCfg {
+    pub fn logs(&self, category: &str) -> bool {
+        self.contents.is_empty() || self.contents.iter().any(|c| c == category)
+    }
 }
 
 impl Default for Supervision {
@@ -57,6 +139,8 @@ impl Default for Supervision {
             kill_switch: false,
             review_responses: false,
             approval_timeout: DEFAULT_APPROVAL_TIMEOUT,
+            sod: None,
+            finance: None,
         }
     }
 }
@@ -101,8 +185,84 @@ pub fn read(compliance: &Value) -> (Supervision, String) {
         kill_switch: sup["kill_switch"] == Value::Bool(true),
         review_responses: compliance["communications"]["pre_review_required"] == Value::Bool(true),
         approval_timeout,
+        sod: read_sod(&compliance["segregation_of_duties"]),
+        finance: read_finance(&compliance["financial_governance"]),
     };
     (supervision, prompt_lines(compliance))
+}
+
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
+fn read_sod(v: &Value) -> Option<Sod> {
+    let v = v.as_object()?;
+    let v = Value::Object(v.clone());
+    let roles: Vec<String> = v["roles"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r["id"].as_str().or(r.as_str()))
+        .map(str::to_string)
+        .collect();
+    let conflicts = v["conflicts"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| Some((p[0].as_str()?.to_string(), p[1].as_str()?.to_string())))
+        .collect();
+    let assignments = v["assignments"]
+        .as_object()
+        .map(|m| m.iter().map(|(k, r)| (k.clone(), strings(r))).collect())
+        .unwrap_or_default();
+    let handoffs = v["handoffs"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|h| {
+            let action = h["action"].as_str()?.trim().to_string();
+            let mut tools = crate::sdk::normalize_tool_list(std::slice::from_ref(&action));
+            if !tools.contains(&action) {
+                tools.push(action.clone());
+            }
+            Some(Handoff {
+                action,
+                tools,
+                required_roles: strings(&h["required_roles"]),
+                approval_required: h["approval_required"] != Value::Bool(false),
+            })
+        })
+        .collect();
+    Some(Sod {
+        roles,
+        conflicts,
+        assignments,
+        handoffs,
+        strict: v["enforcement"].as_str() != Some("advisory"),
+    })
+}
+
+fn read_finance(v: &Value) -> Option<Finance> {
+    if v["enabled"] != Value::Bool(true) {
+        return None;
+    }
+    let spending = &v["spending"];
+    let approval = &v["approval"];
+    Some(Finance {
+        firewall: v["firewall"].as_str().map(str::to_string),
+        max_per_transaction_cents: spending["max_per_transaction_cents"].as_u64(),
+        max_monthly_cents: spending["max_monthly_cents"].as_u64(),
+        currency: spending["currency"].as_str().map(str::to_string),
+        allowed_categories: strings(&spending["allowed_categories"]),
+        blocked_categories: strings(&spending["blocked_categories"]),
+        require_above_cents: approval["require_above_cents"].as_u64(),
+        auto_deny_on_timeout: approval["auto_deny_on_timeout"] != Value::Bool(false),
+    })
 }
 
 /// The constraint lines of the OpenGAP prompt, in its order and wording.
@@ -241,6 +401,9 @@ mod tests {
         );
         assert!(s.kill_switch && s.review_responses && s.gates());
         assert_eq!(s.approval_timeout, Duration::from_secs(120));
+        let f = s.finance.as_ref().unwrap();
+        assert_eq!(f.require_above_cents, Some(0));
+        assert!(f.auto_deny_on_timeout && f.max_per_transaction_cents.is_none());
         assert_eq!(
             prompt,
             "# Compliance constraints\n\n- Escalate to human supervisor when:\n  - action_type: cli\n  - error_detected: true\n  - token_count_above: 5000\n  - confidence_below: 0.7\n- Never make misleading, exaggerated, or promissory statements\n- Redact all PII from outputs and intermediate reasoning\n"
@@ -257,6 +420,16 @@ mod tests {
         }));
         assert_eq!(s.hitl, Hitl::Advisory);
         assert!(!s.gates() && !s.kill_switch);
+        let sod = s.sod.as_ref().unwrap();
+        assert_eq!(sod.roles_of("checker"), ["review", "approve"]);
+        assert_eq!(
+            sod.conflicts,
+            vec![("create".to_string(), "approve".to_string())]
+        );
+        assert!(sod.conflict_of("maker").is_none() && sod.strict);
+        let h = sod.handoff_for("payment").unwrap();
+        assert!(h.approval_required && h.required_roles == ["create", "approve"]);
+        assert!(s.finance.is_none());
         assert!(prompt.contains("  - Agent \"checker\" has role(s): review, approve\n"));
         assert!(prompt.contains("  - create and approve\n"));
         assert!(prompt.contains(

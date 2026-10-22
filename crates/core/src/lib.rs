@@ -2,6 +2,7 @@
 //! completes the task or a limit is hit.
 
 mod approval;
+mod audit;
 mod fallback;
 mod snapshot;
 pub mod workflow;
@@ -203,7 +204,20 @@ pub async fn run(
         .with_context(|| format!("resolving {}", opts.out_dir.display()))?;
     let started = Instant::now();
     let deadline = opts.timeout.map(|t| started + t);
-    let events = opts.events.clone();
+    // The audit log hears every event the sinks hear.
+    let audit = spec.audit.as_ref().map(|cfg| {
+        std::sync::Arc::new(audit::AuditLog::new(
+            cfg,
+            opts.session_id.as_deref().unwrap_or("-"),
+        ))
+    });
+    let events = match &audit {
+        Some(a) => {
+            let a = a.clone();
+            opts.events.clone().also(move |e| a.record(&e))
+        }
+        None => opts.events.clone(),
+    };
     let mut summary: Option<String> = None;
     let remaining = || deadline.map(|d| d.saturating_duration_since(Instant::now()));
 
@@ -303,6 +317,9 @@ pub async fn run(
         None
     };
     let first_user = first_user_message(&instruction, snapshot.as_deref());
+    if let Some(a) = &audit {
+        a.start(&instruction);
+    }
     traj.push(Step::user(first_user.clone()));
     traj.flush()?;
 
@@ -789,7 +806,14 @@ pub async fn run(
                         }
                         run_call.arguments = arguments;
                         let mut denied = None;
-                        if let Some(reason) = gate.reason(&run_call, total.output_tokens) {
+                        if let Some(reason) = gate.block_reason(&run_call) {
+                            counters.inc("compliance_blocks");
+                            events.emit(
+                                "guard",
+                                json!({"turn": turns, "kind": "compliance_block", "reason": reason}),
+                            );
+                            denied = Some(format!("Not run: {reason}."));
+                        } else if let Some(reason) = gate.reason(&run_call, total.output_tokens) {
                             let request = ApprovalRequest {
                                 tool_name: run_call.name.clone(),
                                 arguments: run_call.arguments.clone(),
@@ -799,7 +823,8 @@ pub async fn run(
                                 "approval_request",
                                 json!({"turn": turns, "id": call.id, "name": run_call.name, "reason": request.reason}),
                             );
-                            let answer = gate.ask(&request).await;
+                            let on_timeout = gate.approve_on_timeout(&run_call);
+                            let answer = gate.ask_with(&request, on_timeout).await;
                             events.emit(
                                 "approval",
                                 json!({"turn": turns, "id": call.id, "approved": answer.approved, "reason": answer.reason}),
@@ -994,7 +1019,7 @@ pub async fn run(
                     }
                 }
             }
-            gate.observe(output.is_error);
+            gate.observe(&run_call, output.is_error);
             completed |= output.complete;
             events.emit("tool_result", {
                 let preview = truncate_chars(&output.content, 2000);
@@ -1567,6 +1592,17 @@ fn run_subagent<'a>(
                 names.join(", ")
             )));
         };
+        // Segregation of duties: a sub-agent holding conflicting roles does
+        // not run under strict enforcement.
+        if let Some(sod) = &spec.supervision.sod {
+            if let Some((a, b)) = sod.conflict_of(name) {
+                if sod.strict {
+                    return SubagentRun::failed(error_output(format!(
+                        "Sub-agent `{name}` holds both {a} and {b}, which conflict (segregation of duties, enforcement: strict)."
+                    )));
+                }
+            }
+        }
         let Some(prompt) = arg("prompt").filter(|p| !p.trim().is_empty()) else {
             return SubagentRun::failed(error_output(
                 "Invalid arguments for subagent: missing `prompt`.".into(),
