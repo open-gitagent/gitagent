@@ -4,8 +4,9 @@
 //! a fresh conversation); Ctrl-D, `exit` or `/quit` ends the session.
 //!
 //! Commands: `/help`, `/memory`, `/skills`, `/agents`, `/tools`,
-//! `/skill:<name> [request]` (sends the skill's instructions with the
-//! request), `/quit`.
+//! `/workflows`, `/skill:<name> [request]` (sends the skill's instructions
+//! with the request), `@<workflow> [key=value …]` (runs a workflow),
+//! `/quit`.
 
 use std::io::Write;
 use std::path::Path;
@@ -36,6 +37,43 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
         }
         if matches!(line, "exit" | "quit" | "/quit" | "/exit") {
             break;
+        }
+        if let Some(rest) = line.strip_prefix('@') {
+            let mut words = rest.split_whitespace().map(str::to_string);
+            let name = words.next().unwrap_or_default();
+            let inputs = match gitagent_core::workflow::parse_inputs(&words.collect::<Vec<_>>()) {
+                Ok(i) => i,
+                Err(e) => {
+                    eprintln!("gitagent: {e}");
+                    continue;
+                }
+            };
+            n += 1;
+            let opts = RunOptions {
+                instruction: String::new(),
+                work_dir: s.work_dir.clone(),
+                out_dir: out_dir.join(format!("task-{n}")),
+                timeout: Some(s.timeout),
+                session_id: Some(session_id.clone()),
+                events: s.events.clone(),
+                resume: None,
+                sandbox: s.sandbox.clone(),
+                tool_allowlist: None,
+                tool_denylist: Vec::new(),
+                hook_callbacks: None,
+                mcp: mcp.clone(),
+                approver: Some(crate::approver()),
+                kill: None,
+                steer: None,
+                external_tools: None,
+            };
+            match gitagent_core::run_workflow(&s.spec, s.provider.as_ref(), &name, &inputs, opts)
+                .await
+            {
+                Ok(report) => println!("{}", report.text()),
+                Err(e) => eprintln!("gitagent: {e:#}"),
+            }
+            continue;
         }
         let task = match line.strip_prefix('/') {
             Some(cmd) => match command(&s, cmd) {
@@ -149,6 +187,7 @@ fn command(s: &Setup, cmd: &str) -> Option<String> {
              /skills           list the skills\n\
              /agents           list the sub-agents\n\
              /tools            list the tools\n\
+             /workflows        list the workflows (run one with @<name> key=value …)\n\
              /skill:<name> …   send a skill's instructions with your request\n\
              /quit             end the session"
         ),
@@ -178,6 +217,14 @@ fn command(s: &Setup, cmd: &str) -> Option<String> {
             }
         }
         "tools" => println!("{}", tool_names(s).join(", ")),
+        "workflows" => {
+            if spec.workflows.is_empty() {
+                println!("No workflows.");
+            }
+            for w in &spec.workflows {
+                println!("{} — {}", w.name, w.description);
+            }
+        }
         _ => {
             if let Some(skill_name) = name.strip_prefix("skill:") {
                 let Some(skill) = spec.skills.iter().find(|k| k.name == skill_name) else {

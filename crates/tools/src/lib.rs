@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 
 pub mod naming;
 
+pub use declared::run as run_declared;
 pub use declared::spec as declared_spec;
 pub use memory::spec as memory_spec;
 
@@ -41,6 +42,7 @@ pub const TASK_COMPLETE: &str = "task_complete";
 pub const SKILL: &str = "skill";
 pub const SUBAGENT: &str = "subagent";
 pub const MEMORY: &str = "memory";
+pub const WORKFLOW: &str = "workflow";
 
 /// Upper bound on how long one call may wait.
 pub const MAX_YIELD_MS: u64 = 600_000;
@@ -470,6 +472,58 @@ fn run_apply_patch(call: &ToolCall, ctx: &mut ToolContext<'_>) -> anyhow::Result
             }
         },
     )
+}
+
+/// The `workflow` tool, offered when the agent has workflows with steps.
+pub fn workflow_spec(workflows: &[gitagent_loader::Workflow]) -> ToolSpec {
+    let runnable: Vec<&gitagent_loader::Workflow> =
+        workflows.iter().filter(|w| !w.is_narrative()).collect();
+    let names: Vec<&str> = runnable.iter().map(|w| w.name.as_str()).collect();
+    let list: Vec<String> = runnable
+        .iter()
+        .map(|w| {
+            let inputs: Vec<String> = w
+                .inputs
+                .iter()
+                .map(|i| {
+                    let mut s = i.name.clone();
+                    if !i.required {
+                        s.push('?');
+                    }
+                    if let Some(d) = &i.description {
+                        s.push_str(&format!(" ({d})"));
+                    }
+                    s
+                })
+                .collect();
+            if inputs.is_empty() {
+                format!("- {}: {}", w.name, w.description)
+            } else {
+                format!(
+                    "- {}: {} Inputs: {}.",
+                    w.name,
+                    w.description,
+                    inputs.join(", ")
+                )
+            }
+        })
+        .collect();
+    ToolSpec {
+        name: WORKFLOW.into(),
+        description: format!(
+            "Run one of the agent's workflows: its steps run in their set order and the result \
+             lists what each step did and the outputs. Workflows:\n{}",
+            list.join("\n")
+        ),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "enum": names, "description": "The workflow."},
+                "inputs": {"type": "object", "description": "Its inputs by name."}
+            },
+            "required": ["name"]
+        }),
+    }
 }
 
 /// The `skill` tool, offered when the config has skills. Added after the

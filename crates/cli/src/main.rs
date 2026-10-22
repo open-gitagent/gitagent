@@ -47,6 +47,15 @@ pub(crate) struct Cli {
     #[arg(value_name = "PROMPT", conflicts_with_all = ["prompt", "instruction_file"])]
     text: Option<String>,
 
+    /// Run this workflow of the agent (see `workflows/`) instead of a task.
+    #[arg(long, conflicts_with_all = ["prompt", "instruction_file", "text", "bench", "repo", "ipc"])]
+    workflow: Option<String>,
+
+    /// An input for --workflow, as key=value (a JSON value when it parses
+    /// as one); repeatable.
+    #[arg(long, requires = "workflow")]
+    input: Vec<String>,
+
     /// A remote sandbox is not available in this version.
     #[arg(long = "sandbox", hide = true)]
     remote_sandbox: bool,
@@ -272,6 +281,9 @@ async fn async_main(mut cli: Cli) -> ExitCode {
     };
     if cli.repo.is_some() && cli.bench {
         return usage_error(anyhow::anyhow!("--repo cannot be used with --bench"));
+    }
+    if let Some(name) = cli.workflow.clone() {
+        return run_workflow(cli, name).await;
     }
     if cli.ipc {
         ipc::run(cli).await;
@@ -524,6 +536,51 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
         f.terminal.linger().await;
     }
     ExitCode::from(code)
+}
+
+/// `--workflow <name>`: runs one of the agent's workflows and prints its
+/// report; exit code 1 when a step failed or the run stopped.
+async fn run_workflow(cli: Cli, name: String) -> ExitCode {
+    let result = async {
+        let s = setup(&cli, true)?;
+        let inputs =
+            gitagent_core::workflow::parse_inputs(&cli.input).map_err(|e| anyhow::anyhow!(e))?;
+        let session_id = cli
+            .session_id
+            .clone()
+            .unwrap_or_else(|| format!("gitagent-{}", std::process::id()));
+        let mcp = connect_mcp(&s.spec).await;
+        let opts = RunOptions {
+            instruction: String::new(),
+            work_dir: s.work_dir.clone(),
+            out_dir: cli.out_dir.clone(),
+            timeout: Some(s.timeout),
+            session_id: Some(session_id.clone()),
+            events: s.events.clone(),
+            resume: None,
+            sandbox: s.sandbox.clone(),
+            tool_allowlist: None,
+            tool_denylist: Vec::new(),
+            hook_callbacks: None,
+            mcp,
+            approver: Some(approver()),
+            kill: None,
+            steer: None,
+            external_tools: None,
+        };
+        let report =
+            gitagent_core::run_workflow(&s.spec, s.provider.as_ref(), &name, &inputs, opts).await?;
+        gitagent_core::end_session(&s.spec, &s.work_dir, &session_id).await;
+        anyhow::Ok(report)
+    }
+    .await;
+    match result {
+        Ok(report) => {
+            println!("{}", report.text());
+            ExitCode::from(u8::from(!report.succeeded()))
+        }
+        Err(e) => usage_error(e),
+    }
 }
 
 /// Runs the agent's teardown turn, when it has one, on the finished run's

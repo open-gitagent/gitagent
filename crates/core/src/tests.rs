@@ -1704,3 +1704,149 @@ async fn teardown_runs_one_last_turn_on_the_sessions_history() {
             .is_none()
     );
 }
+
+/// A workflow: a tool step run directly, a model step whose reply carries
+/// the outputs, a step skipped by its condition, a step needing approval,
+/// and a failing step under `on_step_failure: skip`.
+#[tokio::test]
+async fn workflows_run_their_steps_in_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    let write = |p: PathBuf, t: &str| {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, t).unwrap();
+    };
+    write(
+        agent.join("agent.yaml"),
+        "name: a\nversion: 1.0.0\ndescription: A.\n",
+    );
+    write(agent.join("SOUL.md"), "I am A.\n");
+    write(agent.join("tools/count.sh"), "input=$(cat); n=$(printf '%s' \"$input\" | tr -cd ',' | wc -c); printf '{\"count\": %s}' $((n + 1))\n");
+    write(
+        agent.join("tools/count.yaml"),
+        "name: count\ndescription: Counts items.\ninput_schema: {type: object, properties: {items: {type: string}}}\nimplementation: {script: count.sh}\n",
+    );
+    write(agent.join("tools/fail.sh"), "echo nope >&2; exit 1\n");
+    write(
+        agent.join("tools/fail.yaml"),
+        "name: fail\ndescription: Fails.\nimplementation: {script: fail.sh}\n",
+    );
+    write(
+        agent.join("workflows/review.yaml"),
+        "name: review\ndescription: Review items.\ninputs: [{name: items, type: string}, {name: mode, default: quick, required: false}]\noutputs: [{name: verdict, type: string}]\nsteps:\n  - id: count\n    action: Count the items.\n    tool: count\n    inputs: {items: \"${{ inputs.items }}\"}\n    outputs: [count]\n  - id: judge\n    action: Judge the items.\n    depends_on: [count]\n    inputs: {n: \"${{ steps.count.outputs.count }}\", mode: \"${{ inputs.mode }}\"}\n    outputs: [verdict, score]\n  - id: deep\n    action: Look deeper.\n    depends_on: [judge]\n    conditions: [\"${{ steps.judge.outputs.score > 9 }}\"]\n  - id: sign\n    action: Sign it off.\n    depends_on: [judge]\n    compliance: {requires_approval: true}\n    outputs: [signed]\n  - id: broken\n    action: Break.\n    tool: fail\n    depends_on: [sign]\nerror_handling: {on_step_failure: skip}\n",
+    );
+    let spec = load(&LoadOptions {
+        project_dir: Some(agent.clone()),
+        model: Some("scripted:test".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(spec
+        .system_prompt
+        .contains("- review: Review items. Inputs: items, mode?.\n"));
+    // The judge step's turn, then the sign step's turn.
+    let provider = ScriptedProvider::from_yaml(
+        "- text: \"Three items in quick mode look fine. {\\\"verdict\\\": \\\"ok\\\", \\\"score\\\": 7}\"\n\
+         - text: \"{\\\"signed\\\": true}\"\n",
+    )
+    .unwrap();
+    let approver = test_approver(None);
+    let work = dir.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let inputs = json!({"items": "a,b,c"}).as_object().cloned().unwrap();
+    let report = run_workflow(
+        &spec,
+        &provider,
+        "review",
+        &inputs,
+        RunOptions {
+            instruction: String::new(),
+            work_dir: work.clone(),
+            out_dir: dir.path().join("out"),
+            timeout: Some(Duration::from_secs(600)),
+            session_id: None,
+            events: gitagent_record::Events::disabled(),
+            resume: None,
+            sandbox: None,
+            tool_allowlist: None,
+            tool_denylist: Vec::new(),
+            hook_callbacks: None,
+            mcp: None,
+            approver: Some(approver.clone()),
+            kill: None,
+            steer: None,
+            external_tools: None,
+        },
+    )
+    .await
+    .unwrap();
+    let statuses: Vec<(&str, String)> = report
+        .steps
+        .iter()
+        .map(|s| (s.id.as_str(), format!("{:?}", s.status)))
+        .collect();
+    assert_eq!(
+        statuses,
+        vec![
+            ("count", "Done".to_string()),
+            ("judge", "Done".to_string()),
+            ("deep", "Skipped".to_string()),
+            ("sign", "Failed(\"not approved: not this one\")".to_string()),
+            ("broken", "Failed(\"Tool fail failed: exited with code 1: nope\")".to_string()),
+        ]
+    );
+    assert_eq!(report.steps[0].outputs["count"], 3);
+    assert_eq!(report.steps[1].outputs["verdict"], "ok");
+    assert_eq!(report.outputs["verdict"], "ok");
+    assert!(report.stopped.is_none() && !report.succeeded());
+    // The judge step saw the count and the default input.
+    let judge: Value = serde_json::from_slice(
+        &std::fs::read(
+            dir.path()
+                .join("out/steps/2-judge/attempt-1/trajectory.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let asked = judge["steps"][1]["message"].as_str().unwrap();
+    assert!(
+        asked.contains("# Workflow review, step judge\n\nJudge the items.")
+            && asked.contains("\"n\": 3")
+            && asked.contains("\"mode\": \"quick\""),
+        "{asked}"
+    );
+    let seen = approver.seen.lock().unwrap().clone();
+    assert_eq!(seen.len(), 1);
+    assert!(seen[0].reason.contains("step sign requires approval"));
+    assert!(report.text().contains("- deep: skipped"));
+
+    // Abort stops at the first failure; unknown workflows and missing inputs are errors.
+    let err = run_workflow(
+        &spec,
+        &provider,
+        "nope",
+        &Map::new(),
+        RunOptions {
+            instruction: String::new(),
+            work_dir: work.clone(),
+            out_dir: dir.path().join("out2"),
+            timeout: None,
+            session_id: None,
+            events: gitagent_record::Events::disabled(),
+            resume: None,
+            sandbox: None,
+            tool_allowlist: None,
+            tool_denylist: Vec::new(),
+            hook_callbacks: None,
+            mcp: None,
+            approver: None,
+            kill: None,
+            steer: None,
+            external_tools: None,
+        },
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("no workflow named \"nope\""), "{err}");
+}

@@ -28,7 +28,9 @@ pub fn spec(tool: &DeclaredTool) -> ToolSpec {
     }
 }
 
-pub(crate) async fn run(
+/// Runs a declared tool: the arguments are checked against its schema,
+/// then the script or request is made.
+pub async fn run(
     call: &ToolCall,
     tool: &DeclaredTool,
     remaining: Option<Duration>,

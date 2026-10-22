@@ -1693,3 +1693,71 @@ fn interactive_commands() {
         "{t}"
     );
 }
+
+/// `--workflow <name> --input k=v` runs a workflow of tool steps and prints
+/// the report; a failed step gives exit code 1.
+#[test]
+fn workflows_run_from_the_command_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("tools")).unwrap();
+    std::fs::create_dir_all(agent.join("workflows")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: a\nversion: 1.0.0\ndescription: A.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am A.\n").unwrap();
+    std::fs::write(
+        agent.join("tools/shout.sh"),
+        "jq -r '{text: (.text | ascii_upcase)}'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join("tools/shout.yaml"),
+        "name: shout\ndescription: Shouts.\ninput_schema: {type: object, properties: {text: {type: string}}}\nimplementation: {script: shout.sh, runtime: bash}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join("workflows/loud.yaml"),
+        "name: loud\ndescription: Shout twice.\ninputs: [{name: text}]\noutputs: [{name: result, type: string}]\nsteps:\n  - id: once\n    action: Shout.\n    tool: shout\n    inputs: {text: \"${{ inputs.text }}\"}\n    outputs: [text]\n  - id: twice\n    action: Shout again.\n    tool: shout\n    depends_on: [once]\n    inputs: {text: \"${{ steps.once.outputs.text }}!\"}\n    outputs: [result]\n",
+    )
+    .unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(&script, "[]\n").unwrap();
+    let out = gitagent()
+        .args(["--workflow", "loud", "--input", "text=hi there", "-d"])
+        .arg(&agent)
+        .args(["-m", &format!("scripted:{}", script.display())])
+        .arg("--out-dir")
+        .arg(dir.path().join("out"))
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("- once: done") && stdout.contains("- twice: done"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("Outputs: {\"result\":\"HI THERE!\"}"),
+        "{stdout}"
+    );
+
+    let out = gitagent()
+        .args(["--workflow", "loud", "-d"])
+        .arg(&agent)
+        .args(["-m", &format!("scripted:{}", script.display())])
+        .arg("--out-dir")
+        .arg(dir.path().join("out2"))
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("missing inputs: text"));
+}

@@ -589,6 +589,7 @@ pub fn validate(root: &Path, compliance: bool) -> Report {
     skill_files(root, &mut out);
     config_files(root, &mut out);
     knowledge_index(root, &mut out);
+    workflow_files(root, &manifest, &mut out);
     // Sub-agents that are whole agents are checked the same way.
     let mut subs: Vec<_> = std::fs::read_dir(root.join("agents"))
         .into_iter()
@@ -948,6 +949,71 @@ fn tool_files(root: &Path, out: &mut Vec<Finding>) {
                 "implementation",
                 "the 1.x layout (`script:`); OpenGAP uses `type: script` and `path:`",
             );
+        }
+    }
+}
+
+/// Every `workflows/*.yaml`; problems are warnings (the format leaves them
+/// unchecked), as are references to skills, tools and sub-agents that the
+/// agent does not have.
+fn workflow_files(root: &Path, manifest: &Value, out: &mut Vec<Finding>) {
+    let (workflows, problems) = crate::workflows::discover(root);
+    for p in problems {
+        let (file, message) = p.split_once(": ").unwrap_or(("workflows", p.as_str()));
+        out.push(Finding {
+            severity: Severity::Warning,
+            file: file.to_string(),
+            line: None,
+            message: message.to_string(),
+        });
+    }
+    let has_skill = |n: &str| root.join("skills").join(n).join("SKILL.md").is_file();
+    let has_tool = |n: &str| root.join("tools").join(format!("{n}.yaml")).is_file();
+    let has_agent = |n: &str| {
+        manifest["agents"].get(n).is_some()
+            || root.join("agents").join(n).join("agent.yaml").is_file()
+            || root.join("agents").join(format!("{n}.md")).is_file()
+    };
+    for w in &workflows {
+        for s in &w.steps {
+            let mut warn = |what: &str, name: &str| {
+                out.push(Finding {
+                    severity: Severity::Warning,
+                    file: w.file.clone(),
+                    line: None,
+                    message: format!(
+                        "step {:?} uses the {what} {name:?}, which the agent does not have",
+                        s.id
+                    ),
+                });
+            };
+            if let Some(n) = s.skill.as_deref().filter(|n| !has_skill(n)) {
+                warn("skill", n);
+            }
+            if let Some(n) = s
+                .tool
+                .as_deref()
+                .filter(|n| !has_tool(n) && !n.contains("__"))
+            {
+                let builtin = matches!(
+                    n,
+                    "exec"
+                        | "read_file"
+                        | "write_file"
+                        | "str_replace"
+                        | "apply_patch"
+                        | "cli"
+                        | "read"
+                        | "write"
+                        | "edit"
+                );
+                if !builtin {
+                    warn("tool", n);
+                }
+            }
+            if let Some(n) = s.agent.as_deref().filter(|n| !has_agent(n)) {
+                warn("sub-agent", n);
+            }
         }
     }
 }

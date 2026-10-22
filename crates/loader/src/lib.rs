@@ -20,6 +20,7 @@ mod skills;
 pub mod subagents;
 pub mod v1;
 pub mod validate;
+pub mod workflows;
 
 pub use agent_hooks::{HookEntry, HookEvent};
 pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
@@ -36,6 +37,7 @@ pub use profile::{
     ShapeCfg, StopCfg, ThinkingBinding, ThinkingDisplay, ToolCalling, ToolNaming, ToolsCfg,
 };
 pub use skills::{split_frontmatter, Skill};
+pub use workflows::Workflow;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -208,6 +210,8 @@ pub struct AgentSpec {
     /// `hooks/teardown.md`: what the agent does as a session ends, run as
     /// one final turn (see `gitagent_core::teardown`).
     pub teardown: Option<String>,
+    /// The agent's `workflows/`. Never read in benchmark runs.
+    pub workflows: Vec<Workflow>,
 }
 
 impl AgentSpec {
@@ -469,6 +473,24 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
             }
         }
     }
+    // Workflows from the agent directory.
+    let workflows = match &agent {
+        Some(a) => {
+            let root = a
+                .file_root("workflows")
+                .or_else(|| a.file_root("skillflows"))
+                .unwrap_or_else(|| a.root.clone());
+            let (ws, problems) = workflows::discover(&root);
+            warnings.extend(problems);
+            let section = workflows::prompt_section(&ws);
+            if !section.is_empty() {
+                system_prompt.push('\n');
+                system_prompt.push_str(&section);
+            }
+            ws
+        }
+        None => Vec::new(),
+    };
     // Knowledge and examples from the agent directory.
     let knowledge = match &agent {
         Some(a) => {
@@ -588,6 +610,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         knowledge,
         bootstrap,
         teardown,
+        workflows,
     })
 }
 

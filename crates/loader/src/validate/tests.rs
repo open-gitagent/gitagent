@@ -158,3 +158,29 @@ fn sub_agent_directories_are_checked_too() {
         assert!(got.iter().any(|g| g == expected), "missing {expected:?} in\n{}", got.join("\n"));
     }
 }
+
+#[test]
+fn workflows_are_checked_for_what_they_use() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), GOOD);
+    write(
+        dir.path(),
+        &[
+            (
+                "workflows/review.yaml",
+                "name: review\ndescription: d\nsteps:\n  - {id: a, action: x, skill: summarize}\n  - {id: b, action: y, skill: nope, tool: lookup, agent: checker}\n  - {id: c, action: z, tool: gone, agent: ghost}\n",
+            ),
+            ("workflows/broken.yaml", "name: broken\nsteps: []\n"),
+        ],
+    );
+    let got = messages(&validate(dir.path(), false));
+    for expected in [
+        "warning: workflows/review.yaml: step \"b\" uses the skill \"nope\", which the agent does not have",
+        "warning: workflows/review.yaml: step \"c\" uses the tool \"gone\", which the agent does not have",
+        "warning: workflows/review.yaml: step \"c\" uses the sub-agent \"ghost\", which the agent does not have",
+        "warning: workflows/broken.yaml: `steps` is empty",
+    ] {
+        assert!(got.iter().any(|g| g == expected), "missing {expected:?} in\n{}", got.join("\n"));
+    }
+    assert_eq!(got.len(), 4, "{got:?}");
+}

@@ -4,6 +4,7 @@
 mod approval;
 mod fallback;
 mod snapshot;
+pub mod workflow;
 
 pub use approval::{Approval, ApprovalRequest, Approver, KillSwitch};
 
@@ -822,6 +823,21 @@ pub async fn run(
                             .filter(|e| e.specs().iter().any(|t| t.name == run_call.name));
                         let mut out = if let Some(message) = denied {
                             error_output(message)
+                        } else if run_call.name == gitagent_tools::WORKFLOW
+                            && !spec.workflows.is_empty()
+                        {
+                            counters.inc("workflow_runs");
+                            let child = ChildRun {
+                                cwd: terminal.cwd().to_path_buf(),
+                                out_dir: opts.out_dir.join(format!("workflows/{call_seq}")),
+                                remaining: remaining(),
+                                sandbox: opts.sandbox.clone(),
+                                hooks: opts.hook_callbacks.clone(),
+                                mcp: opts.mcp.clone(),
+                                approver: opts.approver.clone(),
+                                kill: opts.kill.clone(),
+                            };
+                            workflow::run_as_tool(spec, provider, &run_call, child).await
                         } else if let Some(ext) = external {
                             counters.inc_labelled("external_tool_calls", &run_call.name);
                             let (content, is_error) =
@@ -1178,6 +1194,9 @@ pub fn offered_tools(
             .map(gitagent_tools::declared_spec),
     );
     tools.extend(mcp.into_iter().flat_map(|m| m.specs()));
+    if spec.workflows.iter().any(|w| !w.is_narrative()) {
+        tools.push(gitagent_tools::workflow_spec(&spec.workflows));
+    }
     tools.extend(external.into_iter().flat_map(|e| e.specs()));
     if let Some(allow) = allow {
         tools.retain(|t| allow.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
@@ -1188,6 +1207,32 @@ pub fn offered_tools(
         tools.retain(|t| t.name != gitagent_tools::TASK_COMPLETE);
     }
     tools
+}
+
+/// Runs the workflow `name` with `inputs` outside a conversation (the
+/// command line's `--workflow`): the steps use `opts` for where they work
+/// and what they may do.
+pub async fn run_workflow(
+    spec: &AgentSpec,
+    provider: &dyn Provider,
+    name: &str,
+    inputs: &Map<String, Value>,
+    opts: RunOptions,
+) -> Result<workflow::WorkflowReport> {
+    let deadline = opts.timeout.map(|t| Instant::now() + t);
+    let child = ChildRun {
+        cwd: std::path::absolute(&opts.work_dir)?,
+        out_dir: std::path::absolute(&opts.out_dir)?,
+        remaining: deadline.map(|d| d.saturating_duration_since(Instant::now())),
+        sandbox: opts.sandbox.clone(),
+        hooks: opts.hook_callbacks.clone(),
+        mcp: opts.mcp.clone(),
+        approver: opts.approver.clone(),
+        kill: opts.kill.clone(),
+    };
+    workflow::run_workflow(spec, provider, name, inputs, child)
+        .await
+        .map_err(|e| anyhow::anyhow!(e))
 }
 
 /// Runs the agent's `hooks/teardown.md` as the last turn of a session, so
@@ -1472,6 +1517,8 @@ struct ChildRun {
 /// What one sub-agent run came to.
 struct SubagentRun {
     out: ToolOutput,
+    /// The sub-agent's final answer alone.
+    answer: String,
     report: Option<RunReport>,
     /// It ran out of turns; what it had is returned as a partial result.
     partial: bool,
@@ -1482,6 +1529,7 @@ struct SubagentRun {
 impl SubagentRun {
     fn failed(out: ToolOutput) -> Self {
         SubagentRun {
+            answer: out.content.clone(),
             out,
             report: None,
             partial: false,
@@ -1727,6 +1775,7 @@ fn run_subagent<'a>(
                 out.is_error = report.outcome != Outcome::Completed && !partial;
                 SubagentRun {
                     out,
+                    answer,
                     report: Some(report),
                     partial,
                     model_override,
