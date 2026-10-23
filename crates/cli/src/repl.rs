@@ -187,6 +187,12 @@ fn banner(s: &Setup, st: &Style) {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
+    let home = std::env::var("HOME").unwrap_or_default();
+    let dir = s.work_dir.display().to_string();
+    let dir = match dir.strip_prefix(&home) {
+        Some(rest) if !home.is_empty() => format!("~{rest}"),
+        _ => dir,
+    };
     let mut extra = vec![format!("tools: {}", tool_names(s).join(", "))];
     if !spec.skills.is_empty() {
         let names: Vec<&str> = spec.skills.iter().map(|k| k.name.as_str()).collect();
@@ -205,6 +211,7 @@ fn banner(s: &Setup, st: &Style) {
         &version,
         &spec.model.to_string(),
         &branch,
+        &dir,
         &extra,
     );
 }

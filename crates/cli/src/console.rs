@@ -79,31 +79,65 @@ pub(crate) fn prompt(st: &Style) -> String {
     format!("{} ", st.orange("→"))
 }
 
-/// The session's first lines.
+/// The session's first lines: a boxed welcome with the build, the agent,
+/// its model and branch, and where it lives, then the tools and skills.
 pub(crate) fn banner(
     st: &Style,
     agent: &str,
     version: &str,
     model: &str,
     branch: &str,
+    dir: &str,
     extra: &[String],
 ) {
-    let mut parts = vec![st.bold(&st.orange("gitagent")), st.bold(agent)];
+    // (plain text, how to colour it) per line; width comes from the plain text.
+    let mut agent_line = agent.to_string();
     if !version.is_empty() {
-        parts.push(st.dim(&format!("v{version}")));
+        agent_line.push_str(&format!(" v{version}"));
     }
-    parts.push(model.to_string());
+    agent_line.push_str(&format!(" · {model}"));
     if !branch.is_empty() {
-        parts.push(branch.to_string());
+        agent_line.push_str(&format!(" · {branch}"));
     }
-    eprintln!("{}", parts.join(&st.dim(" · ")));
+    let title = format!("gitagent v{}", env!("CARGO_PKG_VERSION"));
+    let hint = "/help for commands · /quit to exit · Ctrl-C stops the current turn";
+    let rows: Vec<(String, u8)> = vec![
+        (title.clone(), 1),
+        (String::new(), 0),
+        (agent_line, 2),
+        (dir.to_string(), 3),
+        (String::new(), 0),
+        (hint.to_string(), 3),
+    ];
+    let width = rows
+        .iter()
+        .map(|(t, _)| t.chars().count())
+        .max()
+        .unwrap_or(0)
+        .min(100);
+    let bar = "─".repeat(width + 4);
+    eprintln!("{}", st.dim(&format!("╭{bar}╮")));
+    for (text, kind) in rows {
+        let text = cut(&text, width);
+        let pad = " ".repeat(width.saturating_sub(text.chars().count()));
+        let shown = match kind {
+            1 => format!("{} {}", st.orange("●"), st.bold(&text)),
+            2 => text.clone(),
+            3 => st.dim(&text),
+            _ => text.clone(),
+        };
+        // The dot adds two columns to the first row.
+        let pad = if kind == 1 {
+            " ".repeat(width.saturating_sub(text.chars().count() + 2))
+        } else {
+            pad
+        };
+        eprintln!("{}  {shown}{pad}  {}", st.dim("│"), st.dim("│"));
+    }
+    eprintln!("{}", st.dim(&format!("╰{bar}╯")));
     for line in extra {
         eprintln!("{}", st.dim(line));
     }
-    eprintln!(
-        "{}",
-        st.dim("/help for commands · /quit to exit · Ctrl-C stops the current turn")
-    );
 }
 
 /// Prints the live lines for a run's events.
