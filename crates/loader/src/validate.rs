@@ -597,6 +597,7 @@ pub fn validate(root: &Path, compliance: bool) -> Report {
     config_files(root, &mut out);
     knowledge_index(root, &mut out);
     workflow_files(root, &manifest, &mut out);
+    schedule_files(root, &mut out);
     // Sub-agents that are whole agents are checked the same way.
     let mut subs: Vec<_> = std::fs::read_dir(root.join("agents"))
         .into_iter()
@@ -1014,6 +1015,20 @@ fn tool_files(root: &Path, out: &mut Vec<Finding>) {
                 "the 1.x layout (`script:`); OpenGAP uses `type: script` and `path:`",
             );
         }
+    }
+}
+
+/// Every `schedules/*.yaml`; problems are warnings.
+fn schedule_files(root: &Path, out: &mut Vec<Finding>) {
+    let (_, problems) = crate::schedules::discover(root);
+    for p in problems {
+        let (file, message) = p.split_once(": ").unwrap_or(("schedules", p.as_str()));
+        out.push(Finding {
+            severity: Severity::Warning,
+            file: file.to_string(),
+            line: None,
+            message: message.to_string(),
+        });
     }
 }
 

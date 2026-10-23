@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod memory;
 pub mod plugins;
 mod profile;
+pub mod schedules;
 pub mod sdk;
 mod skills;
 pub mod subagents;
@@ -38,6 +39,7 @@ pub use profile::{
     AnthropicCfg, CacheCfg, ContextCfg, EditTool, Effort, GuardsCfg, Masking, OpenAiCfg, Profile,
     ShapeCfg, StopCfg, ThinkingBinding, ThinkingDisplay, ToolCalling, ToolNaming, ToolsCfg,
 };
+pub use schedules::Schedule;
 pub use skills::{split_frontmatter, Skill};
 pub use workflows::Workflow;
 
@@ -214,6 +216,9 @@ pub struct AgentSpec {
     pub teardown: Option<String>,
     /// The agent's `workflows/`. Never read in benchmark runs.
     pub workflows: Vec<Workflow>,
+    /// The agent's `schedules/` (run by `gitagent schedule`). Never read in
+    /// benchmark runs.
+    pub schedules: Vec<Schedule>,
     /// The plugins agent.yaml names, as loaded. Never read in benchmark runs.
     pub plugins: Vec<Plugin>,
 }
@@ -510,6 +515,15 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         }
         None => Vec::new(),
     };
+    let schedules = match &agent {
+        Some(a) => {
+            let root = a.file_root("schedules").unwrap_or_else(|| a.root.clone());
+            let (ss, problems) = schedules::discover(&root);
+            warnings.extend(problems);
+            ss
+        }
+        None => Vec::new(),
+    };
     // Knowledge and examples from the agent directory.
     let knowledge = match &agent {
         Some(a) => {
@@ -669,6 +683,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         bootstrap,
         teardown,
         workflows,
+        schedules,
         plugins: plugins.plugins,
     })
 }

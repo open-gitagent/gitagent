@@ -2080,3 +2080,212 @@ fn a_directory_that_is_not_an_agent_is_started_as_one() {
     run(&empty, false, false);
     assert!(empty.join("agent.yaml").is_file());
 }
+
+/// `gitagent schedule`: files in `schedules/` are listed with their next
+/// run, added, turned off, run once by hand, and fired by `start` when due;
+/// each job is logged and recorded in its file.
+#[test]
+fn schedules_are_listed_run_and_fired_when_due() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("schedules")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: lyra\nversion: 1.0.0\ndescription: A test agent.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    // 1.x's documented shape: `name`, a block prompt.
+    std::fs::write(
+        agent.join("schedules/daily-triage.yaml"),
+        "name: daily-triage\ndescription: Morning triage\ncron: \"0 8 * * 1-5\"\nprompt: |\n  Review the tickets.\nenabled: true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join("schedules/broken.yaml"),
+        "prompt: x\ncron: \"every day\"\n",
+    )
+    .unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(
+        &script,
+        "- tool_calls: [{name: write_file, arguments: {path: triage.txt, content: \"done\\n\"}}]\n\
+         - text: \"Triage saved.\"\n",
+    )
+    .unwrap();
+    let model = format!("scripted:{}", script.display());
+    let schedule = |args: &[&str]| {
+        let out = gitagent()
+            .arg("schedule")
+            .args(args)
+            .arg("-d")
+            .arg(&agent)
+            .env("HOME", dir.path())
+            .env("TZ", "UTC")
+            .output()
+            .unwrap();
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    };
+
+    let (code, out, err) = schedule(&["list"]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        out.contains("daily-triage — cron 0 8 * * 1-5 — next 20"),
+        "{out}"
+    );
+    assert!(
+        err.contains("schedules/broken.yaml: cron \"every day\""),
+        "{err}"
+    );
+    let valid = gitagent().arg("validate").arg(&agent).output().unwrap();
+    let report = String::from_utf8_lossy(&valid.stdout);
+    assert!(valid.status.success());
+    assert!(
+        report.contains("warning: schedules/broken.yaml: cron \"every day\""),
+        "{report}"
+    );
+    std::fs::remove_file(agent.join("schedules/broken.yaml")).unwrap();
+
+    let (code, out, err) = schedule(&[
+        "add",
+        "nightly",
+        "--cron",
+        "0 2 * * *",
+        "--prompt",
+        "Tidy: the notes.",
+        "--description",
+        "Nightly tidy",
+    ]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        out.contains("wrote") && agent.join("schedules/nightly.yaml").is_file(),
+        "{out}"
+    );
+    let (code, _, err) = schedule(&["add", "nightly", "--cron", "0 2 * * *", "--prompt", "x"]);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("already exists"), "{err}");
+    let (code, _, err) = schedule(&["add", "Bad Name", "--cron", "0 2 * * *", "--prompt", "x"]);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("dashes"), "{err}");
+
+    let (code, out, _) = schedule(&["disable", "nightly"]);
+    assert_eq!(code, Some(0));
+    assert!(out.contains("nightly disabled"));
+    let (_, out, _) = schedule(&["list"]);
+    assert!(
+        out.contains("nightly — cron 0 2 * * * — disabled — Nightly tidy"),
+        "{out}"
+    );
+    schedule(&["enable", "nightly"]);
+
+    // Run one by hand.
+    let out_dir = dir.path().join("out");
+    let (code, _, err) = schedule(&[
+        "run",
+        "daily-triage",
+        "-m",
+        &model,
+        "--out-dir",
+        out_dir.to_str().unwrap(),
+    ]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(err.contains("\"daily-triage\" completed"), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(agent.join("triage.txt")).unwrap(),
+        "done\n"
+    );
+    let log =
+        std::fs::read_to_string(agent.join(".gitagent/schedule-logs/daily-triage.jsonl")).unwrap();
+    assert_eq!(log.lines().count(), 1);
+    assert!(
+        log.contains("\"success\":true") && log.contains("Triage saved."),
+        "{log}"
+    );
+    let file = std::fs::read_to_string(agent.join("schedules/daily-triage.yaml")).unwrap();
+    assert!(
+        file.contains("lastResult: success")
+            && file.contains("lastRunAt: 20")
+            && file.contains("description: Morning triage"),
+        "{file}"
+    );
+    assert!(file.contains("Review the tickets."), "{file}");
+    assert!(
+        std::fs::read_dir(out_dir.join("daily-triage"))
+            .unwrap()
+            .count()
+            == 1
+    );
+    let (code, _, err) = schedule(&["run", "nope", "-m", &model]);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("no schedule \"nope\""), "{err}");
+
+    // `start`: a one-time run in the past is skipped; a schedule every two
+    // seconds fires and is logged; `--max-runs 1` then ends the loop.
+    schedule(&["disable", "daily-triage"]);
+    schedule(&["disable", "nightly"]);
+    std::fs::write(
+        agent.join("schedules/past.yaml"),
+        "prompt: Too late.\nrunAt: 2020-01-01T00:00:00Z\n",
+    )
+    .unwrap();
+    let (_, out, _) = schedule(&["list"]);
+    assert!(
+        out.contains("past — once at 2020-01-01T00:00:00Z — never"),
+        "{out}"
+    );
+    let (code, _, err) = schedule(&[
+        "start",
+        "-m",
+        &model,
+        "--out-dir",
+        out_dir.to_str().unwrap(),
+        "--max-runs",
+        "1",
+    ]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(err.contains("nothing left to run"), "{err}");
+    let (code, out, err) = schedule(&[
+        "add",
+        "ticker",
+        "--cron",
+        "*/2 * * * * *",
+        "--prompt",
+        "Tick.",
+        "--once",
+    ]);
+    assert_eq!(code, Some(0), "{out}{err}");
+    let (code, _, err) = schedule(&[
+        "start",
+        "-m",
+        &model,
+        "--out-dir",
+        out_dir.to_str().unwrap(),
+        "--max-runs",
+        "1",
+    ]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        err.contains("watching")
+            && err.contains("running \"ticker\"")
+            && err.contains("turned off (once)"),
+        "{err}"
+    );
+    let ticker = std::fs::read_to_string(agent.join("schedules/ticker.yaml")).unwrap();
+    assert!(
+        ticker.contains("enabled: false") && ticker.contains("mode: once"),
+        "{ticker}"
+    );
+    assert!(agent.join(".gitagent/schedule-logs/ticker.jsonl").is_file());
+    let (_, out, _) = schedule(&["list"]);
+    assert!(
+        out.contains("ticker — once, cron */2 * * * * * — disabled · last 20"),
+        "{out}"
+    );
+    let (code, out, _) = schedule(&["remove", "ticker"]);
+    assert_eq!(code, Some(0));
+    assert!(out.contains("removed") && !agent.join("schedules/ticker.yaml").exists());
+}

@@ -188,6 +188,7 @@ fn command(s: &Setup, cmd: &str) -> Option<String> {
              /agents           list the sub-agents\n\
              /tools            list the tools\n\
              /plugins          list the plugins\n\
+             /schedules        list the schedules (run them with `gitagent schedule start`)\n\
              /workflows        list the workflows (run one with @<name> key=value …)\n\
              /skill:<name> …   send a skill's instructions with your request\n\
              /quit             end the session"
@@ -235,6 +236,20 @@ fn command(s: &Setup, cmd: &str) -> Option<String> {
             }
             for w in &spec.workflows {
                 println!("{} — {}", w.name, w.description);
+            }
+        }
+        "schedules" => {
+            if spec.schedules.is_empty() {
+                println!("No schedules (gitagent schedule add … creates one).");
+            }
+            for sch in &spec.schedules {
+                println!(
+                    "{} — {}{} — {}",
+                    sch.id,
+                    sch.when(),
+                    if sch.enabled { "" } else { " (disabled)" },
+                    sch.description
+                );
             }
         }
         _ => {

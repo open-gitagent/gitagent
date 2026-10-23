@@ -59,6 +59,36 @@ The agent's shell never sees these keys.
 - **Safety:** it never commits to or pushes the base branch, and never force-pushes.
 - **Token:** `GITAGENT_GIT_TOKEN` or `GITHUB_TOKEN` is passed to git through a helper. It is never written to the repository, the logs or the events.
 
+### Schedules
+
+`schedules/*.yaml` in the agent directory are prompts the agent runs on a
+timetable, as in gitagent 1.x:
+
+```yaml
+id: daily-triage
+description: Morning ticket triage
+cron: "0 8 * * 1-5"      # minute hour day month weekday, local time (six fields add seconds)
+prompt: |
+  Review the open tickets and save a summary to memory.
+mode: repeat             # or once; `runAt: 2026-11-01T09:00:00Z` runs one time at a moment
+enabled: true
+```
+
+```sh
+gitagent schedule list -d ./project                      # with each one's next run
+gitagent schedule add nightly --cron "0 2 * * *" --prompt "Tidy the notes." -d ./project
+gitagent schedule run nightly -d ./project               # once, now
+gitagent schedule start -d ./project                     # keep running; fires each schedule when due
+gitagent schedule disable nightly -d ./project           # also enable, remove
+```
+
+`start` runs one job at a time, each as a fresh conversation, logs it to
+`.gitagent/schedule-logs/<id>.jsonl` and records `lastRunAt` and
+`lastResult` in the schedule's file (a `once` schedule is then turned off).
+Like 1.x's in-process scheduler, jobs fire only while `start` is running;
+for anything that must not be missed, have an external scheduler call
+`gitagent schedule run <id>`.
+
 ## As a library
 
 The `gitagent-sdk` crate offers a library interface over the same loop: `query(prompt, AgentOptions)` streams `system` / `assistant` / `user` / `result` messages, tools appear under the `.claude/` tool names (`Bash`, `Read`, `Edit`, …), and hooks are callbacks that receive `PreToolUse` / `PostToolUse` input and answer with `permissionDecision`, `updatedInput` or `updatedToolOutput`.
