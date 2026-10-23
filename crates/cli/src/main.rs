@@ -9,6 +9,7 @@ mod repl;
 mod repo_mode;
 mod sandbox_exec;
 mod schedule_cmd;
+mod ui_cmd;
 mod validate_cmd;
 
 use std::path::PathBuf;
@@ -209,7 +210,8 @@ fn main() -> ExitCode {
     }
     let learn = args.get(1).and_then(|a| a.to_str()) == Some("learn");
     let schedule = args.get(1).and_then(|a| a.to_str()) == Some("schedule");
-    let cli = (!learn && !schedule).then(Cli::parse);
+    let ui = args.get(1).and_then(|a| a.to_str()) == Some("ui");
+    let cli = (!learn && !schedule && !ui).then(Cli::parse);
     // `.env` files go into the environment before any thread starts;
     // never in benchmark runs.
     if let Some(cli) = cli.as_ref().filter(|c| !c.bench) {
@@ -221,6 +223,7 @@ fn main() -> ExitCode {
     {
         Ok(rt) if learn => rt.block_on(learn_cmd::run(&args[2..])),
         Ok(rt) if schedule => rt.block_on(schedule_cmd::run(&args[2..])),
+        Ok(rt) if ui => rt.block_on(ui_cmd::run(&args[2..])),
         Ok(rt) => rt.block_on(async_main(cli.expect("parsed above"))),
         Err(e) => usage_error(e.into()),
     }

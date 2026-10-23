@@ -366,36 +366,7 @@ impl Runner {
                 }
                 Err(e) => (false, format!("{e:#}")),
             };
-        let log_dir = self.dir.join(".gitagent/schedule-logs");
-        let line =
-            json!({"ts": ts, "success": success, "result": cut(&result, 5000), "out_dir": out_dir})
-                .to_string();
-        if let Err(e) = std::fs::create_dir_all(&log_dir).and_then(|_| {
-            use std::io::Write as _;
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(log_dir.join(format!("{}.jsonl", s.id)))
-                .and_then(|mut f| writeln!(f, "{line}"))
-        }) {
-            eprintln!("gitagent schedule: could not write the log: {e}");
-        }
-        let mut changes = vec![
-            ("lastRunAt", Value::String(ts.clone())),
-            (
-                "lastResult",
-                Value::String(if success { "success" } else { "error" }.into()),
-            ),
-        ];
-        if disable_after {
-            changes.push(("enabled", Value::Bool(false)));
-        }
-        if let Err(e) = schedules::update(&s.path, &changes) {
-            eprintln!(
-                "gitagent schedule: could not record the run in {}: {e}",
-                s.path.display()
-            );
-        }
+        record_job(&self.dir, s, &ts, success, &result, disable_after, &out_dir);
         self.setup.events.emit(
             "schedule",
             json!({"action": "result", "id": s.id, "success": success, "result": cut(&result, 2000), "ts": ts}),
@@ -481,7 +452,51 @@ impl Runner {
     }
 }
 
-fn cut(text: &str, max: usize) -> String {
+/// Logs a finished job to `.gitagent/schedule-logs/<id>.jsonl` and records
+/// it in the schedule's file (`lastRunAt`, `lastResult`, and `enabled:
+/// false` for a once schedule).
+pub(crate) fn record_job(
+    dir: &Path,
+    s: &Schedule,
+    ts: &str,
+    success: bool,
+    result: &str,
+    disable_after: bool,
+    out_dir: &Path,
+) {
+    let log_dir = dir.join(".gitagent/schedule-logs");
+    let line =
+        json!({"ts": ts, "success": success, "result": cut(result, 5000), "out_dir": out_dir})
+            .to_string();
+    if let Err(e) = std::fs::create_dir_all(&log_dir).and_then(|_| {
+        use std::io::Write as _;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_dir.join(format!("{}.jsonl", s.id)))
+            .and_then(|mut f| writeln!(f, "{line}"))
+    }) {
+        eprintln!("gitagent schedule: could not write the log: {e}");
+    }
+    let mut changes = vec![
+        ("lastRunAt", Value::String(ts.to_string())),
+        (
+            "lastResult",
+            Value::String(if success { "success" } else { "error" }.into()),
+        ),
+    ];
+    if disable_after {
+        changes.push(("enabled", Value::Bool(false)));
+    }
+    if let Err(e) = schedules::update(&s.path, &changes) {
+        eprintln!(
+            "gitagent schedule: could not record the run in {}: {e}",
+            s.path.display()
+        );
+    }
+}
+
+pub(crate) fn cut(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_string()
     } else {

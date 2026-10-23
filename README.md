@@ -89,6 +89,21 @@ Like 1.x's in-process scheduler, jobs fire only while `start` is running;
 for anything that must not be missed, have an external scheduler call
 `gitagent schedule run <id>`.
 
+### The web page
+
+```sh
+gitagent ui -d ./project            # serves http://127.0.0.1:3333/ and opens it
+gitagent ui -d ./project --port 0 --no-open -m anthropic:claude-opus-5-5
+```
+
+A local page for one agent, built on the same IPC protocol the SDKs use.
+Chat shows every tool call as a line you can unfold. Agent shows the
+files, the system prompt the model receives and the git history, with a
+revert for any commit. Approvals is the inbox for compliance requests.
+Schedules lists the agent's schedules and runs them while the page's
+server is up. Sessions keeps past conversations with their cost. The
+server listens on 127.0.0.1 only.
+
 ## As a library
 
 The `gitagent-sdk` crate offers a library interface over the same loop: `query(prompt, AgentOptions)` streams `system` / `assistant` / `user` / `result` messages, tools appear under the `.claude/` tool names (`Bash`, `Read`, `Edit`, …), and hooks are callbacks that receive `PreToolUse` / `PostToolUse` input and answer with `permissionDecision`, `updatedInput` or `updatedToolOutput`.

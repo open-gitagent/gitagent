@@ -1,0 +1,660 @@
+<title>gitagent</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: a narrow rail of views on the left, one main column with a status
+   line at the bottom like a shell prompt, and a right-hand context panel
+   where a view needs one. Dark first; everything is a line in a stream. */
+:root{
+  --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --bg:#0f1214; --panel:#151a1e; --raised:#1b2126; --line:#242c33; --line-strong:#334049;
+  --fg:#d9e0e6; --muted:#8a96a1; --faint:#5d6973;
+  --accent:#e2a93b; --accent-ink:#1a1407; --accent-soft:#e2a93b22;
+  --ok:#5fb27a; --err:#d9655c; --ok-soft:#5fb27a1f; --err-soft:#d9655c1f;
+  --sel:#e2a93b33;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme:light){
+  :root:not([data-theme="dark"]){
+    --bg:#f5f6f7; --panel:#ffffff; --raised:#eef0f2; --line:#dfe3e7; --line-strong:#c4cbd2;
+    --fg:#1c2329; --muted:#5a656f; --faint:#8a949d;
+    --accent:#a86d07; --accent-ink:#fff8ea; --accent-soft:#a86d0718;
+    --ok:#2f8a4c; --err:#b9463d; --ok-soft:#2f8a4c18; --err-soft:#b9463d18;
+    --sel:#a86d0733;
+    color-scheme:light;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f5f6f7; --panel:#ffffff; --raised:#eef0f2; --line:#dfe3e7; --line-strong:#c4cbd2;
+  --fg:#1c2329; --muted:#5a656f; --faint:#8a949d;
+  --accent:#a86d07; --accent-ink:#fff8ea; --accent-soft:#a86d0718;
+  --ok:#2f8a4c; --err:#b9463d; --ok-soft:#2f8a4c18; --err-soft:#b9463d18;
+  --sel:#a86d0733;
+  color-scheme:light;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--mono);font-size:13px;line-height:1.55;
+  display:flex;overflow:hidden;-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:1px solid var(--line-strong);border-radius:4px;padding:3px 9px;color:var(--fg)}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button:focus-visible,[tabindex]:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+button.primary:hover{opacity:.9;color:var(--accent-ink)}
+button.quiet{border-color:transparent;color:var(--muted)}
+button.quiet:hover{color:var(--accent)}
+button:disabled{opacity:.4;cursor:not-allowed}
+a{color:var(--accent)}
+.k{color:var(--muted)}
+.dim{color:var(--faint)}
+.ok{color:var(--ok)} .err{color:var(--err)} .acc{color:var(--accent)}
+
+/* rail */
+.rail{width:188px;min-width:188px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;
+  padding-block:14px;padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:10px}
+.brand{padding:4px 8px 12px;display:flex;flex-direction:column;gap:2px}
+.brand b{font-weight:600;letter-spacing:.02em}
+.brand span{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.views{display:flex;flex-direction:column;gap:2px}
+.view-btn{display:flex;align-items:center;gap:8px;padding:6px 8px;border:0;border-radius:4px;text-align:left;color:var(--muted);width:100%}
+.view-btn:hover{color:var(--fg);background:var(--raised)}
+.view-btn.on{color:var(--fg);background:var(--raised);box-shadow:inset 2px 0 0 var(--accent)}
+.view-btn .key{margin-left:auto;color:var(--faint);font-size:11px}
+.badge{background:var(--accent);color:var(--accent-ink);border-radius:9px;padding:0 6px;font-size:11px;font-weight:600;min-width:17px;text-align:center}
+.rail-foot{margin-top:auto;display:flex;flex-direction:column;gap:6px;padding:8px}
+.rail-foot .meta{color:var(--faint);font-size:11px;line-height:1.5;word-break:break-all}
+
+/* main */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.head{height:40px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.head h1{font-size:13px;font-weight:600}
+.head .sub{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.head .spacer{flex:1}
+.body{flex:1;min-height:0;display:flex}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.scroll{flex:1;min-height:0;overflow:auto}
+.pad{padding-block:14px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.status{height:30px;border-top:1px solid var(--line);background:var(--panel);display:flex;align-items:center;gap:14px;color:var(--muted);font-size:12px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));white-space:nowrap;overflow:hidden}
+.status .pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.status .pulse.on{background:var(--accent);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.status .pulse.on{animation:none}}
+.side{width:320px;min-width:320px;border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+.side.hidden{display:none}
+.side h2,.tree-head{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);padding:10px 14px 6px}
+
+/* stream */
+.stream{display:flex;flex-direction:column;gap:2px;max-width:960px}
+.row{display:grid;grid-template-columns:18px 1fr;gap:10px;padding:3px 0;align-items:start}
+.row .mark{color:var(--faint);text-align:center;user-select:none}
+.row.user .mark{color:var(--accent)}
+.row.user .text{color:var(--fg);white-space:pre-wrap}
+.row.agent .text{font-family:var(--sans);font-size:14px;line-height:1.6;max-width:72ch}
+.row.agent .text p{margin:6px 0} .row.agent .text>*:first-child{margin-top:0} .row.agent .text>*:last-child{margin-bottom:0}
+.row.agent .text ul,.row.agent .text ol{margin:6px 0;padding-left:22px}
+.row.agent .text code{font-family:var(--mono);font-size:12.5px;background:var(--raised);padding:1px 5px;border-radius:3px}
+.row.agent .text pre{background:var(--raised);border:1px solid var(--line);border-radius:4px;padding:10px 12px;overflow-x:auto;margin:8px 0}
+.row.agent .text pre code{background:none;padding:0}
+.row.agent .text h1,.row.agent .text h2,.row.agent .text h3{font-size:14px;font-weight:600;margin:10px 0 4px;text-wrap:balance}
+.row.agent .text blockquote{border-left:2px solid var(--line-strong);padding-left:10px;color:var(--muted)}
+.row.agent .text table{border-collapse:collapse;display:block;overflow-x:auto;max-width:100%}
+.row.agent .text th,.row.agent .text td{border:1px solid var(--line);padding:4px 8px;text-align:left;font-size:13px}
+.row.sys .text{color:var(--muted)}
+.row.sys.err .text{color:var(--err)}
+details.tool{display:contents}
+details.tool>summary{display:grid;grid-template-columns:18px 1fr;gap:10px;padding:3px 0;list-style:none;cursor:pointer;color:var(--muted)}
+details.tool>summary::-webkit-details-marker{display:none}
+details.tool>summary .mark{color:var(--faint);text-align:center}
+details.tool.running>summary .mark{color:var(--accent)}
+details.tool.failed>summary .mark{color:var(--err)}
+details.tool>summary .cmd{color:var(--fg);white-space:pre-wrap;word-break:break-word}
+details.tool>summary .tail{color:var(--faint)}
+details.tool .out{grid-column:2;margin-left:28px;border-left:1px solid var(--line);padding:4px 0 4px 12px;color:var(--muted);white-space:pre-wrap;word-break:break-word;max-height:320px;overflow:auto;font-size:12px}
+.row.think .text{color:var(--faint);white-space:pre-wrap;font-size:12px}
+.row.approval{background:var(--accent-soft);border-radius:4px;padding:8px 10px 8px 0;margin:4px 0}
+.row.approval .mark{color:var(--accent);font-weight:600}
+.row.approval .text{display:flex;flex-direction:column;gap:6px}
+.row.approval .cmd{color:var(--fg);white-space:pre-wrap;word-break:break-word}
+.row.approval .why{color:var(--muted)}
+.btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btns input{flex:1;min-width:160px;background:var(--bg);border:1px solid var(--line-strong);border-radius:4px;padding:3px 8px}
+.row.result .text{color:var(--muted)}
+.empty{color:var(--faint);padding:30px 0;max-width:60ch;line-height:1.7}
+.empty b{color:var(--muted);font-weight:500}
+
+/* composer */
+.composer{border-top:1px solid var(--line);padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.composer .box{display:grid;grid-template-columns:18px 1fr auto;gap:10px;align-items:start;max-width:960px}
+.composer .mark{color:var(--accent);padding-top:3px;text-align:center}
+.composer textarea{background:transparent;border:0;outline:0;resize:none;width:100%;min-height:24px;max-height:200px;line-height:1.55;padding:3px 0}
+.composer textarea::placeholder{color:var(--faint)}
+.composer .hint{grid-column:2;color:var(--faint);font-size:11px;display:flex;gap:14px;flex-wrap:wrap}
+.composer .hint kbd{color:var(--muted)}
+
+/* tables and lists */
+table.grid{border-collapse:collapse;width:100%;max-width:1100px}
+table.grid th{text-align:left;color:var(--faint);font-weight:500;font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:6px 10px 6px 0;border-bottom:1px solid var(--line)}
+table.grid td{padding:7px 10px 7px 0;border-bottom:1px solid var(--line);vertical-align:top}
+table.grid tr:hover td{background:var(--raised)}
+table.grid td.actions{white-space:nowrap;text-align:right}
+.pill{display:inline-block;border:1px solid var(--line-strong);border-radius:9px;padding:0 7px;font-size:11px;color:var(--muted)}
+.pill.on{border-color:var(--ok);color:var(--ok)}
+.pill.off{border-color:var(--line);color:var(--faint)}
+.list{display:flex;flex-direction:column}
+.item{display:flex;gap:12px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.item:hover{background:var(--raised)}
+.item .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item.on .t{color:var(--accent)}
+
+/* agent view */
+.tree{padding:4px 8px 14px;overflow:auto;flex:1;min-height:0}
+.node{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:3px;cursor:pointer;white-space:nowrap;color:var(--muted)}
+.node:hover{background:var(--raised);color:var(--fg)}
+.node.on{color:var(--accent);background:var(--raised)}
+.node .chev{width:10px;color:var(--faint);display:inline-block}
+.node.dir{color:var(--fg)}
+.kids{margin-left:12px;border-left:1px solid var(--line);padding-left:4px}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.tab{border:0;border-bottom:2px solid transparent;border-radius:0;padding:8px 10px;color:var(--muted)}
+.tab:hover{color:var(--fg)}
+.tab.on{color:var(--fg);border-bottom-color:var(--accent)}
+.editor{flex:1;min-height:0;display:flex;flex-direction:column}
+.editor .fmeta{display:flex;align-items:center;gap:12px;padding:8px 0;color:var(--muted);font-size:12px}
+.editor .fmeta .spacer{flex:1}
+.editor textarea{flex:1;min-height:200px;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:12px 14px;outline:0;resize:none;line-height:1.6;white-space:pre;overflow:auto;tab-size:2}
+.editor textarea:focus{border-color:var(--line-strong)}
+pre.doc{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:12px 14px;white-space:pre-wrap;word-break:break-word;line-height:1.6;max-width:100ch}
+.section{margin-bottom:16px}
+.section h3{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-bottom:6px;display:flex;gap:10px;align-items:baseline}
+.section h3 .k{text-transform:none;letter-spacing:0}
+.diff{background:var(--panel);border:1px solid var(--line);border-radius:4px;overflow-x:auto;line-height:1.5;font-size:12.5px}
+.diff .l{padding:0 12px;white-space:pre}
+.diff .l.h{color:var(--accent);background:var(--accent-soft)}
+.diff .l.hunk{color:var(--muted)}
+.diff .l.add{background:var(--ok-soft);color:var(--ok)}
+.diff .l.del{background:var(--err-soft);color:var(--err)}
+.change{display:grid;grid-template-columns:72px 1fr auto;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);cursor:pointer;align-items:baseline}
+.change:hover{background:var(--raised)}
+.change.on .subject{color:var(--accent)}
+.change .sha{color:var(--faint)}
+.change .when{color:var(--faint);font-size:12px;white-space:nowrap}
+.change .subject{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.change.working .sha{color:var(--accent)}
+
+.toast{position:fixed;bottom:40px;right:max(16px,env(safe-area-inset-right,0px));background:var(--raised);border:1px solid var(--line-strong);border-radius:4px;padding:8px 12px;color:var(--fg);display:none;max-width:60ch}
+.toast.on{display:block}
+.demo-note{display:none;background:var(--accent-soft);color:var(--fg);border-bottom:1px solid var(--line);padding:6px 16px;font-size:12px}
+.demo-note.on{display:block}
+.only-narrow{display:none}
+@media (max-width:760px){
+  .rail{width:0;min-width:0;padding:0;overflow:hidden;border:0}
+  .rail.open{position:fixed;inset:0 auto 0 0;width:220px;min-width:220px;z-index:20;padding-block:14px;padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:10px;box-shadow:0 0 0 100vmax #0008}
+  .only-narrow{display:inline-flex}
+  .side{position:fixed;inset:0 0 0 auto;width:min(320px,90vw);min-width:0;z-index:15}
+  .row.agent .text{font-size:14px}
+}
+</style>
+
+<div class="demo-note" id="demoNote">Preview with canned data: nothing here talks to a real agent. Type in the chat to see a scripted exchange.</div>
+<nav class="rail" id="rail">
+  <div class="brand"><b>gitagent</b><span id="agentName">…</span></div>
+  <div class="views" id="views"></div>
+  <div class="rail-foot">
+    <div class="meta" id="railMeta"></div>
+    <button class="quiet" id="themeBtn" title="Light or dark">theme</button>
+  </div>
+</nav>
+<main class="main">
+  <div class="head">
+    <button class="quiet only-narrow" id="menuBtn" title="Views">≡</button>
+    <h1 id="viewTitle">Chat</h1>
+    <span class="sub" id="viewSub"></span>
+    <span class="spacer"></span>
+    <span id="headActions"></span>
+  </div>
+  <div class="body" id="body"></div>
+  <div class="status" id="status"></div>
+</main>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+'use strict';
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const DEMO = !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+if (DEMO) $('#demoNote').classList.add('on');
+
+// ── State ────────────────────────────────────────────────────────────────
+const S = {
+  view: 'chat', agent: {}, tools: [], skills: [], session: {id:'', status:'idle', costs:{}},
+  rows: [], approvals: [], history: [], schedules: [], sessions: [], changes: {uncommitted:[], commits:[]},
+  running: false, startedAt: 0, selected: {}, side: true,
+};
+const VIEWS = [
+  ['chat','Chat','1'], ['agent','Agent','2'], ['approvals','Approvals','3'], ['schedules','Schedules','4'], ['sessions','Sessions','5'],
+];
+
+// ── Transport: the binary's HTTP API, or canned answers in the preview ───
+async function api(path, body) {
+  if (DEMO) return demoApi(path, body);
+  const r = await fetch('/api/' + path, body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if (!r.ok) throw new Error(path + ': ' + r.status + ' ' + (await r.text()));
+  return r.json();
+}
+function listen() {
+  if (DEMO) return;
+  const es = new EventSource('/api/events');
+  es.onmessage = ev => { try { onEvent(JSON.parse(ev.data)); } catch (_) {} };
+  es.onerror = () => { setStatus(); };
+}
+
+// ── Events from the running session (the IPC protocol's messages) ────────
+function onEvent(m) { reduce(S, m); if (m.type === 'schedule') refreshSchedules(); if (m.type === 'changes') refreshChanges(); render(); }
+// Folds one protocol message into a transcript state (the live one, or a
+// past session's).
+function reduce(S, m) {
+  const lastRow = (kind, create) => lastRowIn(S, kind, create);
+  switch (m.type) {
+    case 'user': S.rows.push({kind:'user', text:m.content}); S.running = true; S.startedAt = Date.now(); break;
+    case 'delta': {
+      if (m.deltaType === 'thinking') { const r = lastRow('think', true); r.text += m.content; }
+      else { const r = lastRow('agent', true); r.text += m.content; }
+      break;
+    }
+    case 'assistant': {
+      const r = lastRow('agent', true); r.text = m.content || r.text; r.done = true;
+      if (m.thinking) { const t = lastRow('think', false); if (t) t.text = m.thinking; }
+      if (m.errorMessage) S.rows.push({kind:'sys', err:true, text:m.errorMessage});
+      break;
+    }
+    case 'tool_use': S.rows.push({kind:'tool', id:m.toolCallId, name:m.toolName, args:m.args, out:null, error:false}); break;
+    case 'tool_result': { const t = S.rows.find(r => r.kind==='tool' && r.id===m.toolCallId); if (t) { t.out = typeof m.content === 'string' ? m.content : JSON.stringify(m.content, null, 2); t.error = !!m.isError; } break; }
+    case 'approval': {
+      if (m.action === 'request') S.approvals.push({id:m.id, toolName:m.toolName, args:m.args, reason:m.reason, ts:m.ts});
+      else { const i = S.approvals.findIndex(a => a.id===m.id); if (i>=0) { const a = S.approvals.splice(i,1)[0]; a.approved = m.approved; a.answer = m.reason; a.answeredAt = m.ts; S.history.unshift(a); } }
+      S.rows.push({kind:'approval', id:m.id, toolName:m.toolName, args:m.args, reason:m.reason, pending:m.action==='request', approved:m.approved});
+      if (m.action !== 'request') { const p = S.rows.find(r => r.kind==='approval' && r.id===m.id && r.pending); if (p) { p.pending=false; p.approved=m.approved; } S.rows.pop(); }
+      break;
+    }
+    case 'system':
+      if (m.subtype === 'turn_end') { S.running = false; if (m.metadata?.usage) addUsage(m.metadata.usage, S); const a = lastRow('agent', false); if (a) a.done = true; const t = lastRow('think', false); if (t) t.done = true; }
+      else if (m.subtype === 'session_start') { S.session.id = m.metadata?.sessionId || S.session.id; }
+      else if (m.subtype === 'session_end') { S.running = false; S.rows.push({kind:'sys', text:'session ended'}); }
+      else if (m.subtype === 'ready') { S.tools = m.metadata?.tools || S.tools; }
+      else if (m.subtype === 'hook_blocked' || m.subtype === 'warning' || m.subtype === 'error' || m.subtype === 'teardown') S.rows.push({kind:'sys', err:m.subtype==='error', text:(m.subtype==='teardown'?'teardown: ':'') + m.content});
+      break;
+    case 'schedule': S.rows.push({kind:'sys', text: m.action==='start' ? `schedule ${m.id} started` : `schedule ${m.id} ${m.success?'completed':'failed'}: ${m.result||''}`}); break;
+    case 'changes': break;
+    case 'status': S.running = !!m.running; break;
+    default: break;
+  }
+}
+function lastRowIn(S, kind, create) {
+  for (let i = S.rows.length - 1; i >= 0; i--) {
+    const r = S.rows[i];
+    if (r.kind === 'user') break;
+    if (r.kind === kind && !r.done) return r;
+  }
+  if (!create) return null;
+  const r = {kind, text:'', done:false}; S.rows.push(r); return r;
+}
+function addUsage(u, S) {
+  const c = S.session.costs || {};
+  c.inputTokens = (c.inputTokens||0) + (u.inputTokens||0);
+  c.outputTokens = (c.outputTokens||0) + (u.outputTokens||0);
+  c.costUsd = (c.costUsd||0) + (u.costUsd||0);
+  c.requests = (c.requests||0) + (u.requests||0);
+  S.session.costs = c;
+}
+
+// ── Rendering ────────────────────────────────────────────────────────────
+function render() {
+  renderRail(); renderStatus();
+  const title = VIEWS.find(v => v[0]===S.view)[1];
+  $('#viewTitle').textContent = title;
+  ({chat: renderChat, agent: renderAgent, approvals: renderApprovals, schedules: renderSchedules, sessions: renderSessions})[S.view]();
+}
+function renderRail() {
+  $('#agentName').textContent = S.agent.name ? `${S.agent.name} · ${S.agent.dir || ''}` : '…';
+  $('#agentName').title = S.agent.dir || '';
+  const v = $('#views'); v.innerHTML = '';
+  for (const [id, label, key] of VIEWS) {
+    const b = document.createElement('button'); b.className = 'view-btn' + (S.view===id?' on':''); b.id = 'view-' + id;
+    const n = id==='approvals' ? S.approvals.length : 0;
+    b.innerHTML = `<span>${label}</span>` + (n ? `<span class="badge">${n}</span>` : `<span class="key">${key}</span>`);
+    b.onclick = () => { S.view = id; $('#rail').classList.remove('open'); render(); };
+    v.appendChild(b);
+  }
+  $('#railMeta').innerHTML = `${esc(S.agent.model||'')}<br>${esc(S.agent.branch ? 'branch ' + S.agent.branch : '')}`;
+}
+function renderStatus() {
+  const c = S.session.costs || {};
+  const el = $('#status');
+  const running = S.running ? `<span class="pulse on"></span><span class="acc">working</span> <span id="elapsed"></span>` : `<span class="pulse"></span>idle`;
+  el.innerHTML = `${running}<span>${esc(S.agent.name||'')}</span><span>${esc(S.agent.model||'')}</span>` +
+    (S.agent.branch ? `<span>${esc(S.agent.branch)}</span>` : '') +
+    `<span>$${(c.costUsd||0).toFixed(4)}</span><span>${(c.inputTokens||0).toLocaleString()} in · ${(c.outputTokens||0).toLocaleString()} out</span>` +
+    (S.approvals.length ? `<span class="acc">${S.approvals.length} approval${S.approvals.length>1?'s':''} waiting</span>` : '') +
+    `<span class="dim" style="margin-left:auto">${esc(S.session.id||'')}</span>`;
+}
+setInterval(() => { const e = $('#elapsed'); if (e && S.running) e.textContent = Math.round((Date.now()-S.startedAt)/1000) + 's'; }, 1000);
+function setStatus() { renderStatus(); }
+
+function layout(mainHtml, sideHtml) {
+  const b = $('#body');
+  b.innerHTML = `<div class="col" id="col">${mainHtml}</div>` + (sideHtml !== undefined ? `<aside class="side${S.side?'':' hidden'}" id="side">${sideHtml}</aside>` : '');
+}
+
+// Chat ---------------------------------------------------------------------
+function renderChat() {
+  $('#viewSub').textContent = S.session.id ? '' : '';
+  $('#headActions').innerHTML = `<button class="quiet" id="newBtn">new session</button> <button class="quiet" id="abortBtn" ${S.running?'':'disabled'}>stop</button>`;
+  const keepScroll = $('#streamScroll') && ($('#streamScroll').scrollHeight - $('#streamScroll').scrollTop - $('#streamScroll').clientHeight < 80);
+  const draft = $('#input') ? $('#input').value : '';
+  layout(`<div class="scroll pad" id="streamScroll"><div class="stream" id="stream">${S.rows.length ? S.rows.map(rowHtml).join('') : emptyChat()}</div></div>
+    <div class="composer"><div class="box"><span class="mark">→</span><textarea id="input" rows="1" placeholder="Message ${esc(S.agent.name||'the agent')} — /help for commands"></textarea><button class="primary" id="sendBtn">send</button>
+    <div class="hint"><span><kbd>Enter</kbd> send</span><span><kbd>Shift+Enter</kbd> newline</span><span><kbd>/tools</kbd> <kbd>/skills</kbd> <kbd>/schedules</kbd> <kbd>@workflow</kbd></span>${S.running?'<span>typing while it works steers it</span>':''}</div></div></div>`);
+  $('#input').value = draft; autosize($('#input'));
+  $('#input').addEventListener('input', e => autosize(e.target));
+  $('#input').addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+  $('#sendBtn').onclick = send;
+  $('#newBtn').onclick = async () => { await api('new', {}); S.rows = []; S.session = {id:'', status:'idle', costs:{}}; const st = await api('state'); S.session = st.session || S.session; render(); };
+  $('#abortBtn').onclick = () => api('abort', {});
+  bindApprovalButtons();
+  const sc = $('#streamScroll'); if (keepScroll || S.running) sc.scrollTop = sc.scrollHeight;
+  if (!S.running) $('#input').focus({preventScroll:true});
+}
+function emptyChat() {
+  return `<div class="empty"><b>${esc(S.agent.name||'This agent')}</b> is ready. Its identity, rules, skills, memory and schedules are the files in <b>${esc(S.agent.dir||'the agent directory')}</b>; open the Agent view to read or change them. Every tool call shows here as a line you can unfold, and anything that needs your approval stops and waits.</div>`;
+}
+function rowHtml(r) {
+  switch (r.kind) {
+    case 'user': return `<div class="row user"><span class="mark">→</span><div class="text">${esc(r.text)}</div></div>`;
+    case 'agent': return `<div class="row agent"><span class="mark">${r.done?'·':'…'}</span><div class="text">${md(r.text)}</div></div>`;
+    case 'think': return `<details class="tool"><summary><span class="mark">∴</span><span class="cmd dim">reasoning</span></summary><div class="out">${esc(r.text)}</div></details>`;
+    case 'tool': {
+      const running = r.out === null;
+      const cmd = toolLine(r.name, r.args);
+      const tail = running ? '' : (r.error ? 'error' : firstLine(r.out));
+      return `<details class="tool${running?' running':''}${r.error?' failed':''}" ${running?'open':''}><summary><span class="mark">${r.error?'✗':running?'▸':'$'}</span><span><span class="cmd">${esc(cmd)}</span>${tail?` <span class="tail">— ${esc(tail)}</span>`:''}</span></summary>${r.out!==null?`<div class="out">${esc(r.out)}</div>`:''}</details>`;
+    }
+    case 'approval': return `<div class="row approval" data-id="${esc(r.id)}"><span class="mark">!</span><div class="text"><span class="cmd">${esc(toolLine(r.toolName, r.args))}</span><span class="why">${esc(r.reason||'needs approval')}</span>` +
+      (r.pending ? `<div class="btns"><button class="primary approve">approve</button><button class="deny">deny</button><input class="reason" placeholder="reason (optional)"></div>` : `<span class="${r.approved?'ok':'err'}">${r.approved?'approved':'denied'}</span>`) + `</div></div>`;
+    case 'sys': return `<div class="row sys${r.err?' err':''}"><span class="mark">#</span><div class="text">${esc(r.text)}</div></div>`;
+    default: return '';
+  }
+}
+function toolLine(name, args) {
+  const a = args || {};
+  if (name === 'cli' || name === 'exec') return 'cli ' + (a.command ?? a.cmd ?? '');
+  if (name === 'read' || name === 'read_file') return 'read ' + (a.path ?? a.file_path ?? '');
+  if (name === 'write' || name === 'write_file') return 'write ' + (a.path ?? a.file_path ?? '');
+  if (name === 'edit' || name === 'str_replace') return 'edit ' + (a.path ?? '');
+  if (name === 'memory') return 'memory ' + (a.action ?? '');
+  const short = Object.entries(a).map(([k,v]) => `${k}=${typeof v==='string'?JSON.stringify(v):JSON.stringify(v)}`).join(' ');
+  return name + (short ? ' ' + short : '');
+}
+function firstLine(s) { const l = String(s||'').split('\n').find(x => x.trim()) || ''; return l.length > 90 ? l.slice(0, 90) + '…' : l; }
+function autosize(t) { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px'; }
+async function send() {
+  const t = $('#input'); const text = t.value.trim(); if (!text) return;
+  t.value = ''; autosize(t);
+  if (S.running) { await api('steer', {text}); S.rows.push({kind:'sys', text:'steer: ' + text}); render(); return; }
+  if (DEMO) { onEvent({type:'user', content:text}); demoStream(text); return; }
+  await api('send', {text});
+}
+function bindApprovalButtons() {
+  document.querySelectorAll('.row.approval .approve, .row.approval .deny').forEach(b => b.onclick = async () => {
+    const row = b.closest('.row'); const id = row.dataset.id; const reason = $('.reason', row)?.value || '';
+    await answerApproval(id, b.classList.contains('approve'), reason);
+  });
+}
+async function answerApproval(id, approved, reason) {
+  await api('approve', {id, approved, reason});
+  if (DEMO) onEvent({type:'approval', action:'answered', id, approved, reason, ts:new Date().toISOString(), ...(S.approvals.find(a=>a.id===id)||{})});
+}
+
+// Agent ---------------------------------------------------------------------
+async function renderAgent() {
+  $('#viewSub').textContent = S.agent.dir || '';
+  $('#headActions').innerHTML = `<button class="quiet" id="sideBtn">${S.side?'hide files':'files'}</button>`;
+  const tab = S.selected.agentTab || 'file';
+  layout(`<div class="tabs">${[['file','File'],['prompt','What the model sees'],['changes','Changes']].map(([id,l]) => `<button class="tab${tab===id?' on':''}" data-tab="${id}">${l}</button>`).join('')}</div><div class="scroll pad" id="agentMain"></div>`,
+    `<div class="tree-head">files</div><div class="tree" id="tree"></div>`);
+  $('#sideBtn').onclick = () => { S.side = !S.side; render(); };
+  document.querySelectorAll('.tab').forEach(b => b.onclick = () => { S.selected.agentTab = b.dataset.tab; render(); });
+  loadTree('', $('#tree'));
+  const main = $('#agentMain');
+  if (tab === 'file') renderFile(main);
+  else if (tab === 'prompt') renderPrompt(main);
+  else renderChanges(main);
+}
+async function loadTree(rel, container) {
+  let d; try { d = await api('files?path=' + encodeURIComponent(rel)); } catch (e) { container.innerHTML = `<div class="node dim">${esc(e.message)}</div>`; return; }
+  container.innerHTML = '';
+  for (const e of d.entries) {
+    const row = document.createElement('div'); row.className = 'node' + (e.dir?' dir':'') + (S.selected.path===e.path?' on':'');
+    row.innerHTML = `<span class="chev">${e.dir?'▸':''}</span><span>${esc(e.name)}${e.dir?'/':''}</span>`;
+    container.appendChild(row);
+    if (e.dir) {
+      const kids = document.createElement('div'); kids.className = 'kids'; kids.hidden = !S.selected.open?.[e.path]; container.appendChild(kids);
+      if (!kids.hidden) loadTree(e.path, kids);
+      row.onclick = () => { S.selected.open = S.selected.open || {}; S.selected.open[e.path] = kids.hidden; kids.hidden = !kids.hidden; $('.chev', row).textContent = kids.hidden ? '▸' : '▾'; if (!kids.hidden && !kids.hasChildNodes()) loadTree(e.path, kids); };
+      if (!kids.hidden) $('.chev', row).textContent = '▾';
+    } else row.onclick = () => { S.selected.path = e.path; S.selected.agentTab = 'file'; render(); };
+  }
+  if (!d.entries.length) container.innerHTML = '<div class="node dim">(empty)</div>';
+}
+async function renderFile(main) {
+  const path = S.selected.path;
+  if (!path) { main.innerHTML = `<div class="empty">Pick a file on the right. <b>SOUL.md</b> is who the agent is, <b>RULES.md</b> what it must never do, <b>memory/MEMORY.md</b> what it remembers, <b>schedules/</b> when it runs on its own. Saving writes the file in the agent's folder; the change shows under Changes until it is committed.</div>`; return; }
+  let d; try { d = await api('file?path=' + encodeURIComponent(path)); } catch (e) { main.innerHTML = `<div class="empty err">${esc(e.message)}</div>`; return; }
+  if (d.kind !== 'text') { main.innerHTML = `<div class="empty">${esc(path)} is ${d.kind === 'missing' ? 'missing' : 'not a text file'}.</div>`; return; }
+  main.innerHTML = `<div class="editor"><div class="fmeta"><span>${esc(path)}</span><span class="dim" id="fstate">${d.size||''} bytes</span><span class="spacer"></span><button id="saveBtn" disabled>save</button></div><textarea id="fileText" spellcheck="false"></textarea></div>`;
+  const ta = $('#fileText'); ta.value = d.content;
+  ta.addEventListener('input', () => { $('#saveBtn').disabled = false; $('#fstate').textContent = 'unsaved'; });
+  ta.addEventListener('keydown', e => { if ((e.metaKey||e.ctrlKey) && e.key==='s') { e.preventDefault(); $('#saveBtn').click(); } if (e.key==='Tab') { e.preventDefault(); const s=ta.selectionStart; ta.setRangeText('  ', s, ta.selectionEnd, 'end'); } });
+  $('#saveBtn').onclick = async () => { await api('file', {path, content: ta.value}); $('#saveBtn').disabled = true; $('#fstate').textContent = 'saved'; toast('Saved ' + path); refreshChanges(); };
+}
+async function renderPrompt(main) {
+  let d; try { d = await api('prompt'); } catch (e) { main.innerHTML = `<div class="empty err">${esc(e.message)}</div>`; return; }
+  main.innerHTML = `<div class="empty" style="padding-top:0">This is the system prompt the model receives for this agent, assembled from the files: identity first, then rules, lessons, skills, sub-agents, workflows, knowledge, compliance and memory. ${d.chars ? `<b>${d.chars.toLocaleString()} characters</b>.` : ''}</div>` +
+    d.sections.map(s => `<div class="section"><h3>${esc(s.title)}${s.source?` <span class="k">${esc(s.source)}</span>`:''}</h3><pre class="doc">${esc(s.text)}</pre></div>`).join('');
+}
+async function renderChanges(main) {
+  await refreshChanges(false);
+  const c = S.changes; const sel = S.selected.sha;
+  main.innerHTML = `<div class="section"><h3>uncommitted <span class="k">${c.uncommitted.length ? c.uncommitted.length + ' file' + (c.uncommitted.length>1?'s':'') : 'nothing'}</span></h3>` +
+    (c.uncommitted.length ? `<div class="change working${sel==='working'?' on':''}" data-sha="working"><span class="sha">working</span><span class="subject">${c.uncommitted.map(u => u.status + ' ' + u.path).join(', ')}</span><span class="when"></span></div>` : '') + `</div>` +
+    `<div class="section"><h3>commits <span class="k">what the agent and you changed</span></h3>${c.commits.map(k => `<div class="change${sel===k.sha?' on':''}" data-sha="${esc(k.sha)}"><span class="sha">${esc(k.sha.slice(0,7))}</span><span class="subject">${esc(k.subject)}</span><span class="when">${esc(k.when)}</span></div>`).join('') || '<div class="dim">No commits yet.</div>'}</div>` +
+    `<div class="section" id="diffBox"></div>`;
+  document.querySelectorAll('.change').forEach(el => el.onclick = () => { S.selected.sha = el.dataset.sha; renderChanges(main); });
+  if (sel) {
+    let d; try { d = await api('change?sha=' + encodeURIComponent(sel)); } catch (e) { $('#diffBox').innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
+    $('#diffBox').innerHTML = `<h3>${sel==='working'?'working tree':esc(sel.slice(0,7))}` + (sel!=='working' ? ` <button class="quiet" id="revertBtn">revert this commit</button>` : '') + `</h3>` + diffHtml(d.text);
+    const rb = $('#revertBtn');
+    if (rb) rb.onclick = async () => {
+      if (!rb.dataset.sure) { rb.dataset.sure = '1'; rb.textContent = 'really revert? (a new commit undoes it)'; rb.classList.add('acc'); setTimeout(() => { delete rb.dataset.sure; rb.textContent = 'revert this commit'; rb.classList.remove('acc'); }, 4000); return; }
+      try { const r = await api('revert', {sha: sel}); toast('Reverted in ' + (r.sha||'').slice(0,7)); S.selected.sha = r.sha; renderChanges(main); } catch (e) { toast(e.message); }
+    };
+  }
+}
+function diffHtml(text) {
+  return `<div class="diff">${String(text||'').split('\n').map(l => {
+    const cls = l.startsWith('+++')||l.startsWith('---') ? 'h' : l.startsWith('@@') ? 'hunk' : l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : l.startsWith('diff ')||l.startsWith('index ') ? 'h' : '';
+    return `<div class="l ${cls}">${esc(l)||' '}</div>`;
+  }).join('')}</div>`;
+}
+async function refreshChanges(rerender = true) { try { S.changes = await api('changes'); } catch (_) {} if (rerender && S.view==='agent' && S.selected.agentTab==='changes') render(); }
+
+// Approvals -----------------------------------------------------------------
+function renderApprovals() {
+  $('#viewSub').textContent = ''; $('#headActions').innerHTML = '';
+  layout(`<div class="scroll pad">` +
+    (S.approvals.length ? S.approvals.map(a => `<div class="row approval" data-id="${esc(a.id)}"><span class="mark">!</span><div class="text"><span class="cmd">${esc(toolLine(a.toolName, a.args))}</span><span class="why">${esc(a.reason||'')} <span class="dim">· ${esc(fmtTime(a.ts))}</span></span><div class="btns"><button class="primary approve">approve</button><button class="deny">deny</button><input class="reason" placeholder="reason (optional)"></div></div></div>`).join('')
+      : `<div class="empty">Nothing is waiting. When the agent's compliance rules require a person, the request appears here and in the chat, and the agent waits for your answer.</div>`) +
+    `<div class="section" style="margin-top:20px"><h3>answered</h3>${S.history.length ? `<table class="grid"><tr><th>when</th><th>request</th><th>reason</th><th>answer</th></tr>${S.history.map(a => `<tr><td class="dim">${esc(fmtTime(a.answeredAt))}</td><td>${esc(toolLine(a.toolName,a.args))}</td><td class="k">${esc(a.reason||'')}</td><td class="${a.approved?'ok':'err'}">${a.approved?'approved':'denied'}${a.answer?` <span class="k">— ${esc(a.answer)}</span>`:''}</td></tr>`).join('')}</table>` : '<div class="dim">None yet this session.</div>'}</div></div>`);
+  bindApprovalButtons();
+}
+
+// Schedules ------------------------------------------------------------------
+async function renderSchedules() {
+  $('#viewSub').textContent = 'schedules/*.yaml · local time'; $('#headActions').innerHTML = `<button class="quiet" id="reloadSch">reload</button>`;
+  layout(`<div class="scroll pad" id="schMain"><div class="dim">loading…</div></div>`);
+  $('#reloadSch').onclick = () => refreshSchedules();
+  await refreshSchedules(false);
+  const m = $('#schMain'); if (!m) return;
+  m.innerHTML = S.schedules.length ? `<table class="grid"><tr><th>id</th><th>when</th><th>next</th><th>last</th><th></th><th></th></tr>${S.schedules.map(s => `<tr><td><b>${esc(s.id)}</b>${s.description?`<div class="k">${esc(s.description)}</div>`:''}</td><td>${esc(s.when)}</td><td>${esc(s.next||(s.enabled?'never':''))}</td><td class="k">${s.lastRunAt?esc(fmtTime(s.lastRunAt))+' · ':''}${s.lastResult?`<span class="${s.lastResult==='success'?'ok':'err'}">${esc(s.lastResult)}</span>`:''}</td><td><span class="pill ${s.enabled?'on':'off'}">${s.enabled?'enabled':'disabled'}</span></td><td class="actions"><button data-act="run" data-id="${esc(s.id)}">run now</button> <button class="quiet" data-act="${s.enabled?'disable':'enable'}" data-id="${esc(s.id)}">${s.enabled?'disable':'enable'}</button></td></tr>`).join('')}</table>
+    <div class="empty" style="padding-top:18px">Schedules fire while this page's server is running. A <b>once</b> schedule turns itself off after it runs. Each run is a fresh conversation, logged to <b>.gitagent/schedule-logs/</b> and recorded in its file.</div>`
+    : `<div class="empty">No schedules. Add one with <b>gitagent schedule add &lt;id&gt; --cron "0 8 * * 1-5" --prompt "…"</b>, or create a file under <b>schedules/</b> in the Agent view.</div>`;
+  m.querySelectorAll('button[data-act]').forEach(b => b.onclick = async () => { await api('schedule', {id:b.dataset.id, action:b.dataset.act}); toast(`${b.dataset.id}: ${b.dataset.act}`); refreshSchedules(); });
+}
+async function refreshSchedules(rerender = true) { try { S.schedules = (await api('schedules')).schedules; } catch (_) {} if (rerender && S.view==='schedules') render(); }
+
+// Sessions -------------------------------------------------------------------
+async function renderSessions() {
+  $('#viewSub').textContent = '.gitagent/sessions'; $('#headActions').innerHTML = '';
+  layout(`<div class="scroll pad" id="sessMain"></div>`, `<h2>past sessions</h2><div class="list scroll" id="sessList"></div>`);
+  try { S.sessions = (await api('sessions')).sessions; } catch (_) {}
+  const list = $('#sessList');
+  list.innerHTML = S.sessions.map(s => `<div class="item${S.selected.session===s.id?' on':''}" data-id="${esc(s.id)}"><span class="t">${esc(s.title||s.id)}</span><span class="dim">${esc(fmtTime(s.started))}</span></div>`).join('') || '<div class="dim" style="padding:10px 14px">None yet.</div>';
+  list.querySelectorAll('.item').forEach(el => el.onclick = () => { S.selected.session = el.dataset.id; renderSessions(); });
+  const main = $('#sessMain');
+  if (!S.selected.session) { main.innerHTML = `<div class="empty">Every conversation is kept under <b>.gitagent/sessions/&lt;id&gt;/</b> with its cost. Pick one on the right to read it.</div>`; return; }
+  let d; try { d = await api('session?id=' + encodeURIComponent(S.selected.session)); } catch (e) { main.innerHTML = `<div class="empty err">${esc(e.message)}</div>`; return; }
+  const c = d.costs || {};
+  let rows = d.rows || [];
+  if (d.messages) { const t = {rows:[], approvals:[], history:[], session:{costs:{}}}; for (const m of d.messages) reduce(t, m); rows = t.rows; }
+  main.innerHTML = `<div class="section"><h3>${esc(S.selected.session)} <span class="k">${esc(fmtTime(d.started))} · $${(c.costUsd||0).toFixed(4)} · ${(c.inputTokens||0).toLocaleString()} in · ${(c.outputTokens||0).toLocaleString()} out</span></h3></div><div class="stream">${rows.map(rowHtml).join('')}</div>`;
+}
+
+// Helpers --------------------------------------------------------------------
+function fmtTime(ts) { if (!ts) return ''; const d = new Date(ts); return isNaN(d) ? String(ts) : d.toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}); }
+let toastT = null;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2600); }
+function md(src) {
+  if (!src) return '';
+  let s = String(src); if (((s.match(/```/g)||[]).length) % 2 === 1) s += '\n```';
+  s = esc(s); const code = [];
+  s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, l, c) => { code.push('<pre><code>' + c.replace(/\n$/, '') + '</code></pre>'); return '\u0000' + (code.length-1) + '\u0000'; });
+  const inline = t => t.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>').replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const lines = s.split('\n'); let html = ''; let i = 0;
+  const isBlock = l => l.trim()==='' || /^#{1,6}\s/.test(l) || /^\s*[-*]\s/.test(l) || /^\s*\d+\.\s/.test(l) || /^&gt;/.test(l) || /^\u0000\d+\u0000$/.test(l.trim()) || /^\|/.test(l);
+  while (i < lines.length) {
+    const l = lines[i];
+    if (/^\u0000\d+\u0000$/.test(l.trim())) { html += l.trim(); i++; continue; }
+    let h = l.match(/^(#{1,6})\s+(.*)$/); if (h) { html += `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`; i++; continue; }
+    if (/^\|/.test(l)) { const rows = []; while (i < lines.length && /^\|/.test(lines[i])) { rows.push(lines[i]); i++; } const cells = r => r.replace(/^\||\|$/g,'').split('|').map(c => inline(c.trim())); html += '<table>' + rows.filter(r => !/^\|[\s:-]+\|$/.test(r.replace(/\|/g,'|'))).filter(r => !/^[\s|:-]+$/.test(r)).map((r, k) => '<tr>' + cells(r).map(c => k===0 ? `<th>${c}</th>` : `<td>${c}</td>`).join('') + '</tr>').join('') + '</table>'; continue; }
+    if (/^&gt;/.test(l)) { const b = []; while (i < lines.length && /^&gt;/.test(lines[i])) { b.push(lines[i].replace(/^&gt;\s?/, '')); i++; } html += `<blockquote>${inline(b.join(' '))}</blockquote>`; continue; }
+    if (/^\s*[-*]\s+/.test(l)) { let b = ''; while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { b += `<li>${inline(lines[i].replace(/^\s*[-*]\s+/, ''))}</li>`; i++; } html += `<ul>${b}</ul>`; continue; }
+    if (/^\s*\d+\.\s+/.test(l)) { let b = ''; while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { b += `<li>${inline(lines[i].replace(/^\s*\d+\.\s+/, ''))}</li>`; i++; } html += `<ol>${b}</ol>`; continue; }
+    if (l.trim() === '') { i++; continue; }
+    const buf = []; while (i < lines.length && !isBlock(lines[i])) { buf.push(lines[i]); i++; }
+    if (buf.length) html += `<p>${inline(buf.join(' '))}</p>`;
+  }
+  return html.replace(/\u0000(\d+)\u0000/g, (_, n) => code[+n]);
+}
+$('#themeBtn').onclick = () => {
+  const r = document.documentElement; const dark = r.getAttribute('data-theme') === 'dark' || (!r.getAttribute('data-theme') && matchMedia('(prefers-color-scheme: dark)').matches);
+  r.setAttribute('data-theme', dark ? 'light' : 'dark'); try { localStorage.setItem('ga_theme', dark ? 'light' : 'dark'); } catch (_) {}
+};
+$('#menuBtn').onclick = () => $('#rail').classList.toggle('open');
+document.addEventListener('keydown', e => {
+  if (e.altKey && /^[1-5]$/.test(e.key)) { S.view = VIEWS[+e.key-1][0]; render(); }
+  if (e.key === 'Escape') $('#rail').classList.remove('open');
+});
+
+// ── Preview data (only when the page is not served by the binary) ────────
+const DEMO_FILES = {
+  '': [{name:'agent.yaml',dir:false,path:'agent.yaml',size:412},{name:'SOUL.md',dir:false,path:'SOUL.md',size:96},{name:'RULES.md',dir:false,path:'RULES.md',size:60},{name:'memory',dir:true,path:'memory'},{name:'skills',dir:true,path:'skills'},{name:'hooks',dir:true,path:'hooks'},{name:'schedules',dir:true,path:'schedules'}],
+  'memory': [{name:'MEMORY.md',dir:false,path:'memory/MEMORY.md',size:88}], 'skills': [{name:'release-notes',dir:true,path:'skills/release-notes'}],
+  'skills/release-notes': [{name:'SKILL.md',dir:false,path:'skills/release-notes/SKILL.md',size:260}],
+  'hooks': [{name:'hooks.yaml',dir:false,path:'hooks/hooks.yaml',size:90},{name:'no-rm.sh',dir:false,path:'hooks/no-rm.sh',size:210}],
+  'schedules': [{name:'daily-triage.yaml',dir:false,path:'schedules/daily-triage.yaml',size:180}],
+};
+const DEMO_TEXT = {
+  'agent.yaml': 'spec_version: "0.1.0"\nname: lyra\nversion: 1.0.0\ndescription: A test agent that exercises the agent-directory features.\nmodel:\n  preferred: claude-sonnet-5-5\n  fallback: [claude-haiku-5-5]\nruntime:\n  max_turns: 30\nskills: [release-notes]\ntools: [word-count, shout]\ncompliance:\n  risk_tier: high\n  supervision: {human_in_the_loop: conditional, escalation_triggers: [{action_type: cli}]}\n',
+  'SOUL.md': '# Identity\n\nYou are Lyra, a careful engineer. You remember what matters and keep replies short.\n',
+  'RULES.md': '# Rules\n\n- Never run `rm -rf`.\n- Ask before paying anyone.\n',
+  'memory/MEMORY.md': '# Memory\n- Prefers tabs.\n- Deploys on Thursdays.\n- Uses Postgres.\n',
+  'hooks/hooks.yaml': 'hooks:\n  pre_tool_use:\n    - {script: no-rm.sh, description: Refuse rm -rf, compliance: true}\n',
+  'hooks/no-rm.sh': '#!/usr/bin/env bash\ninput=$(cat)\nif printf "%s" "$input" | jq -e \'.tool == "cli" and (.args.command | test("rm -rf"))\' >/dev/null; then\n  echo \'{"action": "block", "reason": "rm -rf is not allowed"}\'\nelse\n  echo \'{"action": "allow"}\'\nfi\n',
+  'schedules/daily-triage.yaml': 'name: daily-triage\ndescription: Morning ticket triage, weekdays at 8\ncron: "0 8 * * 1-5"\nprompt: |\n  Review the open tickets from the last 24 hours and save a one-line summary to memory.\nenabled: true\n',
+  'skills/release-notes/SKILL.md': '---\nname: release-notes\ndescription: Writes release notes from the commits since the last tag.\n---\n# Release notes\n\n1. List the commits since the last tag.\n2. Group them by area.\n3. One line per change, in plain words.\n',
+};
+const DEMO_CHANGES = {uncommitted:[{status:'M', path:'memory/MEMORY.md'}], commits:[
+  {sha:'a41c9e2f0d', subject:'Save memory: Deploys on Thursdays', when:'today 09:14', author:'gitagent'},
+  {sha:'7c02b1d9aa', subject:'gitagent: update learned lessons', when:'yesterday', author:'gitagent'},
+  {sha:'3f9e0a77c1', subject:'Add the release-notes skill', when:'Oct 20', author:'chandan'},
+  {sha:'9d1b2c3e44', subject:'Start the agent', when:'Oct 18', author:'chandan'}]};
+async function demoApi(path, body) {
+  const [p, qs] = path.split('?'); const q = new URLSearchParams(qs||'');
+  await new Promise(r => setTimeout(r, 60));
+  switch (p) {
+    case 'state': return {agent:{name:'lyra', dir:'~/agents/lyra', model:'anthropic:claude-sonnet-5-5', branch:'main'}, tools:['cli','read','write','edit','memory','word-count','shout'], session:{id:'gitagent-ui-4f2a', status:'idle', costs:{costUsd:0.0312, inputTokens:18422, outputTokens:1210, requests:6}},
+      approvals:[{id:'c-3', toolName:'cli', args:{command:'git push origin main'}, reason:'escalation: action type cli', ts:new Date(Date.now()-120000).toISOString()}], schedules: demoSchedules(), sessions: demoSessions(), changes: DEMO_CHANGES};
+    case 'files': return {entries: DEMO_FILES[q.get('path')||''] || []};
+    case 'file': if (body) { DEMO_TEXT[body.path] = body.content; return {ok:true}; } { const t = DEMO_TEXT[q.get('path')]; return t == null ? {kind:'missing'} : {kind:'text', content:t, size:t.length}; }
+    case 'prompt': return {chars: 2140, sections:[{title:'identity', source:'SOUL.md', text:DEMO_TEXT['SOUL.md'].replace(/^# .*\n\n/,'')},{title:'rules', source:'RULES.md', text:'- Never run `rm -rf`.\n- Ask before paying anyone.'},{title:'skills', source:'skills/', text:'## Skill: release-notes\nWrites release notes from the commits since the last tag.'},{title:'compliance constraints', source:'agent.yaml', text:'- Risk tier: high. A person reviews command-line actions before they run.'},{title:'memory', source:'memory/MEMORY.md', text:'- Prefers tabs.\n- Deploys on Thursdays.\n- Uses Postgres.'}]};
+    case 'changes': return DEMO_CHANGES;
+    case 'change': return {text: q.get('sha')==='working' ? 'diff --git a/memory/MEMORY.md b/memory/MEMORY.md\n--- a/memory/MEMORY.md\n+++ b/memory/MEMORY.md\n@@ -2,3 +2,4 @@\n - Prefers tabs.\n - Deploys on Thursdays.\n - Uses Postgres.\n+- Likes short replies.' : 'diff --git a/memory/MEMORY.md b/memory/MEMORY.md\n--- a/memory/MEMORY.md\n+++ b/memory/MEMORY.md\n@@ -1,3 +1,3 @@\n # Memory\n - Prefers tabs.\n-- Deploys on Fridays.\n+- Deploys on Thursdays.\n - Uses Postgres.'};
+    case 'revert': DEMO_CHANGES.commits.unshift({sha:'e5f6a7b8c9', subject:'Revert "' + (DEMO_CHANGES.commits.find(c=>c.sha===body.sha)||{subject:'…'}).subject + '"', when:'now', author:'you'}); return {ok:true, sha:'e5f6a7b8c9'};
+    case 'schedules': return {schedules: demoSchedules()};
+    case 'schedule': { const s = demoSchedules.list.find(x => x.id===body.id); if (s) { if (body.action==='enable') s.enabled = true; if (body.action==='disable') s.enabled = false; if (body.action==='run') { s.lastRunAt = new Date().toISOString(); s.lastResult='success'; onEvent({type:'schedule', action:'result', id:s.id, success:true, result:'Triage done: 2 tickets, none urgent.'}); } } return {ok:true}; }
+    case 'sessions': return {sessions: demoSessions()};
+    case 'session': return {started:new Date(Date.now()-86400000).toISOString(), costs:{costUsd:0.021, inputTokens:9000, outputTokens:640}, rows:[{kind:'user', text:'Write the release notes for the last tag.'},{kind:'tool', name:'cli', args:{command:'git log --oneline v1.0.0..HEAD'}, out:'7c02b1d gitagent: update learned lessons\n3f9e0a7 Add the release-notes skill\n[exit 0 · 0.0s]'},{kind:'agent', text:'## 1.0.1\n\n- Added the release-notes skill.\n- The agent now keeps lessons between runs.', done:true}]};
+    case 'approve': return {ok:true};
+    case 'new': S.session = {id:'gitagent-ui-' + Math.random().toString(16).slice(2,6), status:'idle', costs:{}}; return {sessionId:S.session.id};
+    default: return {ok:true};
+  }
+}
+function demoSchedules() {
+  demoSchedules.list = demoSchedules.list || [
+    {id:'daily-triage', description:'Morning ticket triage, weekdays at 8', when:'cron 0 8 * * 1-5', enabled:true, next:'tomorrow 08:00', lastRunAt:new Date(Date.now()-3600*26*1000).toISOString(), lastResult:'success'},
+    {id:'weekly-digest', description:'Sunday summary of the week', when:'cron 0 18 * * sun', enabled:false, next:'', lastRunAt:'', lastResult:''},
+    {id:'release-check', description:'', when:'once at 2026-11-01T09:00:00Z', enabled:true, next:'Nov 1 09:00', lastRunAt:'', lastResult:''},
+  ];
+  return demoSchedules.list.map(s => ({...s}));
+}
+function demoSessions() { return [{id:'gitagent-ui-3e1d', title:'Write the release notes for the last tag.', started:new Date(Date.now()-86400000).toISOString()}, {id:'gitagent-ui-29aa', title:'Why did the deploy fail on Thursday?', started:new Date(Date.now()-3*86400000).toISOString()}]; }
+function demoStream(text) {
+  const ts = new Date().toISOString();
+  const ev = [
+    {type:'delta', deltaType:'thinking', content:'The memory file has the deployment habits; check it, then look at the recent log before answering.'},
+    {type:'tool_use', toolCallId:'t1', toolName:'read', args:{path:'memory/MEMORY.md'}},
+    {type:'tool_result', toolCallId:'t1', toolName:'read', content:DEMO_TEXT['memory/MEMORY.md'], isError:false},
+    {type:'tool_use', toolCallId:'t2', toolName:'cli', args:{command:'git log --oneline -3'}},
+    {type:'tool_result', toolCallId:'t2', toolName:'cli', content:'a41c9e2 Save memory: Deploys on Thursdays\n7c02b1d gitagent: update learned lessons\n3f9e0a7 Add the release-notes skill\n[exit 0 · 0.0s]', isError:false},
+    {type:'approval', action:'request', id:'c-9', toolName:'cli', args:{command:'git push origin main'}, reason:'escalation: action type cli', ts},
+    {type:'delta', deltaType:'text', content:'About **' + text.slice(0, 60) + '**:\n\n'},
+    {type:'delta', deltaType:'text', content:'- Memory says you prefer tabs and deploy on Thursdays.\n- The last three commits are a memory save, a lessons update and the release-notes skill.\n\n'},
+    {type:'delta', deltaType:'text', content:'Pushing to `main` needs your approval first; it is waiting above.'},
+    {type:'assistant', content:'', stopReason:'stop', usage:{inputTokens:3120, outputTokens:84, costUsd:0.0021, requests:3}},
+    {type:'system', subtype:'turn_end', content:'', metadata:{outcome:'completed', usage:{inputTokens:3120, outputTokens:84, costUsd:0.0021, requests:3}}},
+  ];
+  let i = 0; const t = setInterval(() => { if (i >= ev.length) { clearInterval(t); return; } onEvent(ev[i++]); }, 380);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+(async function boot() {
+  try { const t = localStorage.getItem('ga_theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (_) {}
+  try {
+    const st = await api('state');
+    Object.assign(S, {agent: st.agent||{}, tools: st.tools||[], skills: st.skills||[], session: st.session||S.session, approvals: st.approvals||[], schedules: st.schedules||[], sessions: st.sessions||[], changes: st.changes||S.changes});
+    if (st.messages) for (const m of st.messages) reduce(S, m);
+    if (DEMO && !S.rows.length) S.rows = [
+      {kind:'user', text:'What changed this week?'},
+      {kind:'think', text:'The question is about recent work. The git log answers it; no files need to change.', done:true},
+      {kind:'tool', id:'d1', name:'cli', args:{command:'git log --oneline --since="7 days ago"'}, out:'a41c9e2 Save memory: Deploys on Thursdays\n7c02b1d gitagent: update learned lessons\n3f9e0a7 Add the release-notes skill\n[exit 0 · 0.0s]', error:false},
+      {kind:'agent', done:true, text:'Three commits this week:\n\n1. **A memory save.** Deploy day moved from Friday to Thursday.\n2. **Updated lessons**, learned from last week\'s runs.\n3. **The release-notes skill** was added.\n\nNothing is waiting on you except the push I asked about earlier.'},
+    ];
+  } catch (e) { S.rows.push({kind:'sys', err:true, text:'could not reach the server: ' + e.message}); }
+  render(); listen();
+})();
+</script>
