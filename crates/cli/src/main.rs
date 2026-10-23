@@ -1,4 +1,5 @@
 mod approval;
+mod console;
 mod init_cmd;
 mod install_cmd;
 mod ipc;

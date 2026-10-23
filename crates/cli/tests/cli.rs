@@ -1695,7 +1695,9 @@ fn interactive_commands() {
     assert!(stdout.contains("Here are the notes."), "{stdout}");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("lyra v1.0.0\n") && stderr.contains("Skills: release-notes\n"),
+        stderr.contains("gitagent · lyra · v1.0.0 · scripted:")
+            && stderr.contains("skills: release-notes\n")
+            && stderr.contains("● completed · 1 turn"),
         "{stderr}"
     );
     let t = std::fs::read_to_string(dir.path().join("out/task-1/trajectory.json")).unwrap();

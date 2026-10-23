@@ -15,17 +15,31 @@ use anyhow::Result;
 use gitagent_core::{Resume, RunOptions};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::{report, Setup};
+use crate::console::{self, Style};
+use crate::Setup;
 
 pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
-    banner(&s);
+    let st = Style::for_stderr();
+    let out_st = Style::for_stdout();
+    banner(&s, &st);
+    let agent_name = s
+        .spec
+        .agent
+        .as_ref()
+        .map_or_else(|| s.spec.config.name.clone(), |a| a.manifest.name.clone());
+    // Live lines for each tool call and result, on stderr.
+    let events = s.events.clone().also(move |e| {
+        if let Some(line) = console::event_line(&st, &e) {
+            eprintln!("{line}");
+        }
+    });
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut resume: Option<Resume> = None;
     let mut n = 0;
     let session_id = format!("gitagent-{}", std::process::id());
     let mcp = crate::connect_mcp(&s.spec).await;
     loop {
-        eprint!("→ ");
+        eprint!("{}", console::prompt(&st));
         let _ = std::io::stderr().flush();
         let Some(line) = lines.next_line().await? else {
             eprintln!();
@@ -83,13 +97,14 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             None => line.to_string(),
         };
         n += 1;
+        let started = std::time::Instant::now();
         let opts = RunOptions {
             instruction: task,
             work_dir: s.work_dir.clone(),
             out_dir: out_dir.join(format!("task-{n}")),
             timeout: Some(s.timeout),
             session_id: Some(session_id.clone()),
-            events: s.events.clone(),
+            events: events.clone(),
             resume: resume.take(),
             sandbox: s.sandbox.clone(),
             tool_allowlist: None,
@@ -104,7 +119,12 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
         tokio::select! {
             result = gitagent_core::run(&s.spec, s.provider.as_ref(), opts) => match result {
                 Ok(finished) => {
-                    report(&finished, !s.events.enabled());
+                    let r = &finished.report;
+                    match &r.summary {
+                        Some(text) => console::reply(&out_st, &agent_name, text),
+                        None => console::reply(&out_st, &agent_name, &format!("(no reply: the run ended with {})", r.outcome)),
+                    }
+                    console::status(&st, &r.outcome.to_string(), r.turns, started.elapsed(), r.usage.input_tokens, r.usage.output_tokens);
                     crate::export_telemetry(&finished, &s.spec).await;
                     crate::learn_cmd::after_run(&s, &finished.report, &s.work_dir, false).await;
                     resume = Some(finished.into_resume());
@@ -150,23 +170,43 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
 }
 
 /// What the session is, on stderr.
-fn banner(s: &Setup) {
+fn banner(s: &Setup, st: &Style) {
     let spec = &s.spec;
-    match &spec.agent {
-        Some(a) => eprintln!("{} v{}", a.manifest.name, a.manifest.version),
-        None => eprintln!("gitagent {}", env!("CARGO_PKG_VERSION")),
-    }
-    eprintln!("Model: {}", spec.model);
-    eprintln!("Tools: {}", tool_names(s).join(", "));
+    let (name, version) = match &spec.agent {
+        Some(a) => (a.manifest.name.clone(), a.manifest.version.clone()),
+        None => (
+            "gitagent".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+        ),
+    };
+    let branch = std::process::Command::new("git")
+        .current_dir(&s.work_dir)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    let mut extra = vec![format!("tools: {}", tool_names(s).join(", "))];
     if !spec.skills.is_empty() {
         let names: Vec<&str> = spec.skills.iter().map(|k| k.name.as_str()).collect();
-        eprintln!("Skills: {}", names.join(", "));
+        extra.push(format!("skills: {}", names.join(", ")));
     }
     if spec.profile.tools.subagents && !spec.agents.is_empty() {
         let names: Vec<&str> = spec.agents.iter().map(|a| a.name.as_str()).collect();
-        eprintln!("Agents: {}", names.join(", "));
+        extra.push(format!("agents: {}", names.join(", ")));
     }
-    eprintln!("Type /help for commands, /quit to exit. Ctrl-C stops the current turn.");
+    if let Some(e) = &spec.env_config.name {
+        extra.push(format!("env: {e}"));
+    }
+    console::banner(
+        st,
+        &name,
+        &version,
+        &spec.model.to_string(),
+        &branch,
+        &extra,
+    );
 }
 
 fn tool_names(s: &Setup) -> Vec<String> {
@@ -182,17 +222,23 @@ fn command(s: &Setup, cmd: &str) -> Option<String> {
     let spec = &s.spec;
     let (name, rest) = cmd.split_once(' ').unwrap_or((cmd, ""));
     match name {
-        "help" => println!(
-            "/memory           show the working memory\n\
-             /skills           list the skills\n\
-             /agents           list the sub-agents\n\
-             /tools            list the tools\n\
-             /plugins          list the plugins\n\
-             /schedules        list the schedules (run them with `gitagent schedule start`)\n\
-             /workflows        list the workflows (run one with @<name> key=value …)\n\
-             /skill:<name> …   send a skill's instructions with your request\n\
-             /quit             end the session"
-        ),
+        "help" => {
+            let st = Style::for_stdout();
+            for (c, d) in [
+                ("/memory", "show the working memory"),
+                ("/skills", "list the skills"),
+                ("/agents", "list the sub-agents"),
+                ("/tools", "list the tools"),
+                ("/plugins", "list the plugins"),
+                ("/schedules", "list the schedules (run them with `gitagent schedule start`)"),
+                ("/workflows", "list the workflows (run one with @<name> key=value …)"),
+                ("/skill:<name> …", "send a skill's instructions with your request"),
+                ("/quit", "end the session"),
+            ] {
+                let pad = " ".repeat(18usize.saturating_sub(c.chars().count()));
+                println!("{}{pad}{}", st.bold(c), st.dim(d));
+            }
+        }
         "memory" => match &spec.memory {
             None => println!("(memory is off)"),
             Some(m) => match std::fs::read_to_string(m.dir.join(&m.working.path)) {

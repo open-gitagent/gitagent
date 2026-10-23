@@ -43,11 +43,19 @@ impl Approver for TtyApprover {
         let mut rx = lines.lock().await;
         // Answers to questions nobody is waiting for any more.
         while rx.try_recv().is_ok() {}
+        let st = crate::console::Style::for_stderr();
         let question = format!(
-            "\ngitagent: approval needed ({})\n  {} {}\nApprove? [y/N] ",
-            request.reason,
-            request.tool_name,
-            serde_json::Value::Object(request.arguments.clone())
+            "\n{} {}\n  {}\n  {} ",
+            st.orange("!"),
+            st.bold(&format!(
+                "approval needed · {}",
+                crate::console::tool_line(
+                    &request.tool_name,
+                    Some(&serde_json::Value::Object(request.arguments.clone()))
+                )
+            )),
+            st.dim(&request.reason),
+            st.orange("approve? [y/N]")
         );
         let shown = std::fs::OpenOptions::new()
             .write(true)
