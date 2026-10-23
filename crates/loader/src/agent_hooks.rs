@@ -8,7 +8,9 @@
 //!     - script: check-command.sh
 //!       description: Refuses destructive commands
 //!       timeout: 10        # seconds, 30 by default
-//!       fail_open: false   # a failing hook blocks (the default)
+//!       fail_open: false   # a hook that crashes or times out blocks
+//!                          # (the default is true, as in 1.x: a warning, then on;
+//!                          # compliance hooks always block)
 //!       compliance: true   # runs even when hooks are turned off
 //!       applies_to: [cli]  # tool names (any naming); all tools when absent
 //! ```
@@ -241,7 +243,12 @@ fn entry(event: HookEvent, v: &Value, root: &Path) -> Result<HookEntry, String> 
             .to_string(),
         timeout,
         compliance: flag("compliance"),
-        fail_open: flag("fail_open"),
+        // As in 1.x, a hook that fails is a warning, not a block, unless it
+        // is a compliance hook or says otherwise.
+        fail_open: v
+            .get("fail_open")
+            .and_then(Value::as_bool)
+            .unwrap_or(!flag("compliance")),
         applies_to,
     })
 }
@@ -287,7 +294,12 @@ mod tests {
         assert_eq!(b.command[0], "python3");
         assert_eq!(b.timeout, DEFAULT_TIMEOUT);
         assert!(b.compliance && !b.fail_open && b.applies_to.is_empty());
-        assert_eq!(hooks[2].event, HookEvent::PreQuery);
+        let q = &hooks[2];
+        assert!(
+            q.fail_open && !q.compliance,
+            "plain hooks fail open as in 1.x"
+        );
+        assert_eq!(q.event, HookEvent::PreQuery);
 
         assert_eq!(warnings.len(), 3, "{warnings:?}");
         for expected in [

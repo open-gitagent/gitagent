@@ -1353,10 +1353,23 @@ fn environments_pick_their_settings() {
     assert_eq!(reply, "from prod");
     assert!(banner.contains("· env prod"), "{banner}");
     assert_eq!(run(&[], Some("prod")).0, "from prod");
+    // The environment's model_override beats --model (as in 1.x); --model
+    // counts where the environment names no model.
     assert_eq!(
         run(&["--env", "prod", "--model", &flag_model], None).0,
+        "from prod"
+    );
+    std::fs::write(agent.join("config/bare.yaml"), "env_vars: {}\n").unwrap();
+    std::fs::write(agent.join("config/default.yaml"), "env_vars: {}\n").unwrap();
+    assert_eq!(
+        run(&["--env", "bare", "--model", &flag_model], None).0,
         "from flag"
     );
+    std::fs::write(
+        agent.join("config/default.yaml"),
+        format!("model_override: {}\n", model("default")),
+    )
+    .unwrap();
     let (reply, warnings) = run(&["--env", "staging"], None);
     assert_eq!(reply, "from default");
     assert!(
@@ -1897,4 +1910,173 @@ fn plugins_are_managed_and_used() {
     let (code, _, err) = plugin(&["remove", "nope"]);
     assert_eq!(code, Some(1));
     assert!(err.contains("no plugin named \"nope\""));
+}
+
+/// An agent written for gitagent 1.x keeps working: `tools: [cli, read, …]`
+/// names no files, a hook that prints a log line (not an answer) allows,
+/// `runtime.timeout` and the 1.x compliance shape are accepted, the audit
+/// goes to 1.x's `.gitagent/audit.jsonl`, a memory `save` that sends the
+/// whole memory back with edits replaces it, and `validate` only warns.
+#[test]
+fn agents_written_for_1x_keep_working() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("hooks")).unwrap();
+    std::fs::create_dir_all(agent.join("memory")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: lyra\nversion: 1.0.0\ndescription: A 1.x agent.\n\
+         tools: [cli, read, write, memory]\n\
+         runtime: {timeout: 45, max_turns: 20}\n\
+         compliance:\n  risk_level: medium\n  human_in_the_loop: true\n  regulatory_frameworks: [SOC2]\n  recordkeeping: {audit_logging: true, retention_days: 90}\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am Lyra.\n").unwrap();
+    std::fs::write(
+        agent.join("memory/MEMORY.md"),
+        "# Memory\n- Prefers tabs.\n- Deploys on Fridays.\n- Uses Postgres.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agent.join("hooks/hooks.yaml"),
+        "hooks:\n  pre_tool_use: [{script: log.sh}]\n",
+    )
+    .unwrap();
+    let log = dir.path().join("hooks.log");
+    std::fs::write(
+        agent.join("hooks/log.sh"),
+        format!(
+            "input=$(cat)\nprintf '%s\\n' \"$input\" | grep -o '\"tool\":\"[a-z_]*\"' >> {}\necho \"logged $input\"\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(
+        &script,
+        "- tool_calls: [{name: exec, arguments: {cmd: \"echo hi\"}}]\n\
+         - tool_calls: [{name: memory, arguments: {action: save, content: \"# Memory\\n- Prefers tabs.\\n- Deploys on Thursdays.\\n- Uses Postgres.\\n- Likes short replies.\"}}]\n\
+         - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+    )
+    .unwrap();
+    let out = gitagent()
+        .args(["-p", "x", "--model"])
+        .arg(format!("scripted:{}", script.display()))
+        .arg("--dir")
+        .arg(&agent)
+        .arg("--out-dir")
+        .arg(dir.path().join("out"))
+        .env("HOME", dir.path())
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(!stderr.contains("lists the tool"), "{stderr}");
+    assert!(!stderr.contains("hook"), "{stderr}");
+    // The hook saw 1.x names and its log line counted as allow.
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        "\"tool\":\"cli\"\n\"tool\":\"memory\"\n\"tool\":\"task_complete\"\n"
+    );
+    let t = std::fs::read_to_string(dir.path().join("out/trajectory.json")).unwrap();
+    assert!(
+        t.contains("hi\\n") && t.contains("Rewrote memory/MEMORY.md"),
+        "{t}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(agent.join("memory/MEMORY.md")).unwrap(),
+        "# Memory\n- Prefers tabs.\n- Deploys on Thursdays.\n- Uses Postgres.\n- Likes short replies.\n"
+    );
+    let audit = std::fs::read_to_string(agent.join(".gitagent/audit.jsonl")).unwrap();
+    assert!(
+        audit.contains("\"tool_use\"") && audit.contains("\"run_end\""),
+        "{audit}"
+    );
+    assert!(!agent.join(".gitagent/audit").exists());
+
+    let out = gitagent()
+        .args(["validate", "--compliance", "-d"])
+        .arg(&agent)
+        .output()
+        .unwrap();
+    let report = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{report}");
+    assert!(!report.contains("error:"), "{report}");
+    for w in [
+        "compliance.risk_level: is gitagent 1.x's setting; OpenGAP calls it risk_tier",
+        "compliance.human_in_the_loop: is gitagent 1.x's setting",
+        "compliance.recordkeeping.retention_days: is gitagent 1.x's setting",
+        "hooks.pre_tool_use.0: has no `description`",
+    ] {
+        assert!(report.contains(w), "missing {w:?} in\n{report}");
+    }
+}
+
+/// As in 1.x, a `--dir` that is not an agent yet is started as one; the
+/// current directory is only when it is empty; `--bench` never scaffolds.
+#[test]
+fn a_directory_that_is_not_an_agent_is_started_as_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("s.yaml");
+    std::fs::write(&script, "- text: \"hello\"\n").unwrap();
+    let bench_script = dir.path().join("b.yaml");
+    std::fs::write(
+        &bench_script,
+        "- tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
+    )
+    .unwrap();
+    let fresh = dir.path().join("fresh");
+    std::fs::create_dir_all(&fresh).unwrap();
+    std::fs::write(fresh.join("notes.txt"), "x\n").unwrap();
+    let run = |work: &std::path::Path, dir_flag: bool, bench: bool| {
+        let mut cmd = gitagent();
+        cmd.args(["-p", "hi"])
+            .arg("--out-dir")
+            .arg(dir.path().join("out"))
+            .env("HOME", dir.path())
+            .current_dir(work);
+        if dir_flag {
+            cmd.arg("--dir").arg(work);
+        }
+        if bench {
+            cmd.arg("--model")
+                .arg(format!("scripted:{}", bench_script.display()))
+                .arg("--bench");
+        } else {
+            cmd.arg("--model")
+                .arg(format!("scripted:{}", script.display()))
+                .arg("--conversation");
+        }
+        let out = cmd.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stderr).to_string()
+    };
+    // The current directory with files in it is left alone.
+    run(&fresh, false, false);
+    assert!(!fresh.join("agent.yaml").exists());
+    // Named with --dir, it is started.
+    let err = run(&fresh, true, false);
+    assert!(err.contains("started an agent in"), "{err}");
+    assert!(fresh.join("agent.yaml").is_file() && fresh.join("SOUL.md").is_file());
+    assert!(fresh.join("notes.txt").is_file());
+    let manifest = std::fs::read_to_string(fresh.join("agent.yaml")).unwrap();
+    assert!(manifest.contains("name: fresh\n"), "{manifest}");
+    assert!(
+        manifest.contains("preferred: claude-sonnet-5-5\n"),
+        "{manifest}"
+    );
+    // Already an agent: nothing more is said.
+    let err = run(&fresh, true, false);
+    assert!(!err.contains("started an agent"), "{err}");
+    // An empty current directory is started; a bench run never is.
+    let empty = dir.path().join("empty");
+    std::fs::create_dir_all(&empty).unwrap();
+    run(&empty, false, true);
+    assert!(!empty.join("agent.yaml").exists());
+    run(&empty, false, false);
+    assert!(empty.join("agent.yaml").is_file());
 }

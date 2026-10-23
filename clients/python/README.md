@@ -29,7 +29,9 @@ print(q.result()["outcome"], q.costs())
   `dir`, `model`, `env`, `system_prompt`, `system_prompt_suffix`,
   `allowed_tools`, `disallowed_tools`, `max_turns`, `timeout_ms`,
   `session_id`, `resume`, `mcp_servers`, `constraints`, `conversation`,
-  `tool_names="v1"`, `prices`, `out_dir`, `binary`.
+  `tool_names` (`"v1"`, the default: 1.x's tool and argument names in
+  messages, hooks and approvals; `"gitagent"` for gitagent's own), `prices`,
+  `out_dir`, `binary`.
 - Iterating the `Query` gives the messages in order (`ready`,
   `session_start`, `user`, `assistant`, `tool_use`, `tool_result`,
   `turn_end`, …, `session_end`).
@@ -40,7 +42,8 @@ print(q.result()["outcome"], q.costs())
   `costs()` report on the session.
 - Hooks: `hooks={"pre_tool_use": fn, ...}`, where `fn(input)` returns
   `{"action": "allow" | "block" | "modify", ...}` or `None`. A hook that
-  raises blocks, unless named in `fail_open_hooks`.
+  raises is reported on stderr and the action goes on (as in 1.x), unless
+  named in `fail_closed_hooks`, which makes it block.
 - Approvals: `approver(request)` returns `True`, `False`, `(ok, reason)` or
   a dict; without one, every request is denied.
 

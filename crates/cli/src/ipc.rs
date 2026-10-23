@@ -18,9 +18,10 @@
 //!
 //! gitagent asks the client with `callback_request` (`kind`: `hook`,
 //! `approval` or `tool`) and waits for the `callback_response` with the
-//! same id: a hook that does not answer in time blocks (unless registered
-//! with `failOpen`), an approval that does not answer is denied, a client
-//! tool that does not answer returns an error.
+//! same id: a hook that does not answer in time is allowed with a warning
+//! (as in 1.x) unless registered with `failOpen: false`, an approval that
+//! does not answer is denied, a client tool that does not answer returns an
+//! error.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -106,7 +107,7 @@ impl Callbacks {
     }
 
     fn fail_open(&self, name: &str) -> bool {
-        self.registered.get(name).copied().unwrap_or(false)
+        self.registered.get(name).copied().unwrap_or(true)
     }
 
     fn send(&self, kind: &str, name: &str, input: Value) -> String {
@@ -533,11 +534,11 @@ fn read_init(line: &str) -> Result<Init, String> {
     for c in v["callbacks"].as_array().into_iter().flatten() {
         match c {
             Value::String(name) => {
-                callbacks.insert(name.clone(), false);
+                callbacks.insert(name.clone(), true);
             }
             Value::Object(o) => {
                 if let Some(name) = o.get("name").and_then(Value::as_str) {
-                    let open = o.get("failOpen").and_then(Value::as_bool).unwrap_or(false);
+                    let open = o.get("failOpen").and_then(Value::as_bool).unwrap_or(true);
                     callbacks.insert(name.to_string(), open);
                 }
             }

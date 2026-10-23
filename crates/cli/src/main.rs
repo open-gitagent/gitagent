@@ -343,6 +343,33 @@ pub(crate) fn setup(cli: &Cli, conversation: bool) -> Result<Setup> {
         Some(d) => std::path::absolute(d).with_context(|| format!("resolving {}", d.display()))?,
         None => std::env::current_dir().context("reading the current directory")?,
     };
+    // As in 1.x, a directory given with --dir that is not an agent yet is
+    // started as one (the current directory only when it is empty).
+    let is_agent =
+        work_dir.join("agent.yaml").is_file() || work_dir.join("gitagent.yaml").is_file();
+    let empty = std::fs::read_dir(&work_dir)
+        .map(|mut d| d.next().is_none())
+        .unwrap_or(true);
+    if !cli.bench && !is_agent && (cli.dir.is_some() || empty) {
+        // A scripted model is a test fixture, not a model to keep.
+        let model = cli
+            .model
+            .as_deref()
+            .filter(|m| !m.starts_with("scripted:"))
+            .unwrap_or("claude-sonnet-5-5");
+        match init_cmd::scaffold(&work_dir, &init_cmd::name_for(&work_dir), model, None) {
+            Ok((created, note)) if !created.is_empty() => eprintln!(
+                "gitagent: started an agent in {}: created {}{note}",
+                work_dir.display(),
+                created.join(", ")
+            ),
+            Ok(_) => {}
+            Err(e) => eprintln!(
+                "gitagent: could not start an agent in {}: {e}",
+                work_dir.display()
+            ),
+        }
+    }
     // Benchmark runs use only the built-in files and explicit flags, so the
     // task's directory or the machine's home cannot change the agent.
     let (project_dir, home_dir) = if cli.bench {

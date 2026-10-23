@@ -78,7 +78,7 @@ fn problems_are_reported_with_file_and_line() {
         "error: agent.yaml:14: favorite_color: is not a known setting",
         "warning: agent.yaml:13: plugins: is a gitagent 1.x setting, not part of the OpenGAP format",
         "error: SOUL.md: has headings but no text",
-        "error: hooks/hooks.yaml:4: hooks.pre_tool_use.0: `description` is required",
+        "warning: hooks/hooks.yaml:4: hooks.pre_tool_use.0: has no `description` (OpenGAP asks for one)",
         "error: hooks/hooks.yaml:5: hooks.pre_tool_use.0.script: hooks/gone.sh does not exist",
         "error: hooks/hooks.yaml:6: hooks.on_lunch: is not a known event",
         "warning: hooks/hooks.yaml:2: hooks.pre_query: is a gitagent extension, not one of the OpenGAP events",

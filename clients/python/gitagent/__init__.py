@@ -21,6 +21,7 @@ import os
 import queue
 import shutil
 import subprocess
+import sys
 import threading
 from typing import Any, Callable, Iterable, Iterator, Optional, Union
 
@@ -91,11 +92,11 @@ def query(
     constraints: Optional[dict[str, Any]] = None,
     tools: Optional[list[dict[str, Any]]] = None,
     hooks: Optional[dict[str, Hook]] = None,
-    fail_open_hooks: Iterable[str] = (),
+    fail_closed_hooks: Iterable[str] = (),
     approver: Optional[Approver] = None,
     callback_timeout_ms: Optional[int] = None,
     conversation: bool = True,
-    tool_names: Optional[str] = None,
+    tool_names: str = "v1",
     prices: Optional[dict[str, float]] = None,
     out_dir: Optional[str] = None,
     binary: Optional[str] = None,
@@ -105,8 +106,9 @@ def query(
     ``hooks`` maps ``on_session_start``, ``pre_query``, ``pre_tool_use``,
     ``post_tool_use``, ``post_response`` and ``on_error`` to callables that
     get the protocol's input and return ``{"action": "allow" | "block" |
-    "modify", ...}`` (or ``None`` to allow). A hook that raises blocks,
-    unless its name is in ``fail_open_hooks``. ``approver(request)`` answers
+    "modify", ...}`` (or ``None`` to allow). A hook that raises is reported
+    on stderr and the action goes on, as in 1.x, unless its name is in
+    ``fail_closed_hooks``, which makes it block. ``approver(request)`` answers
     a compliance approval with ``True``/``False``, ``(ok, reason)`` or a
     dict; without one, every request is denied.
     """
@@ -125,7 +127,7 @@ def query(
         ("mcpServers", mcp_servers),
         ("constraints", constraints),
         ("callbackTimeoutMs", callback_timeout_ms),
-        ("toolNames", tool_names),
+        ("toolNames", tool_names if tool_names == "v1" else None),
         ("prices", prices),
     ]:
         if value is not None:
@@ -138,13 +140,13 @@ def query(
     hooks = hooks or {}
     callbacks: list[Any] = []
     hook_handlers: dict[str, Hook] = {}
-    fail_open = set(fail_open_hooks)
+    fail_closed = set(fail_closed_hooks)
     for name, handler in hooks.items():
         wire = HOOK_NAMES.get(name)
         if wire is None:
             raise GitagentError(f"unknown hook {name!r}; hooks are {', '.join(HOOK_NAMES)}")
         hook_handlers[wire] = handler
-        callbacks.append({"name": wire, "failOpen": name in fail_open} if name in fail_open else wire)
+        callbacks.append({"name": wire, "failOpen": False} if name in fail_closed else wire)
     if approver is not None:
         callbacks.append("approval")
     tool_handlers = {t["name"]: t["handler"] for t in (tools or [])}
@@ -165,6 +167,7 @@ def query(
         },
         prompts=prompts,
         hook_handlers=hook_handlers,
+        fail_closed={HOOK_NAMES[n] for n in fail_closed},
         tool_handlers=tool_handlers,
         approver=approver,
     )
@@ -185,9 +188,11 @@ class Query:
         init: dict[str, Any],
         prompts: list[str],
         hook_handlers: dict[str, Hook],
+        fail_closed: set[str],
         tool_handlers: dict[str, ToolHandler],
         approver: Optional[Approver],
     ) -> None:
+        self._fail_closed = fail_closed
         args = [binary, "--ipc"]
         if out_dir:
             args += ["--out-dir", out_dir]
@@ -454,5 +459,8 @@ class Query:
                 return {"content": f"{type(e).__name__}: {e}", "isError": True}
             if kind == "approval":
                 return {"approved": False, "reason": f"{type(e).__name__}: {e}"}
-            return {"action": "block", "reason": f"{type(e).__name__}: {e}"}
+            if name in self._fail_closed:
+                return {"action": "block", "reason": f"{type(e).__name__}: {e}"}
+            print(f"gitagent: hook {name} failed: {type(e).__name__}: {e}; going on", file=sys.stderr)
+            return {"action": "allow"}
         return {}

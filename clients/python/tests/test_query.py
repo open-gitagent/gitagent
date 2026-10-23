@@ -77,7 +77,7 @@ class QueryTests(unittest.TestCase):
         self.assertEqual(q.session_id(), "t1")
         self.assertEqual(q.manifest()["name"], "lyra")
         self.assertIn("lookup_order", q.tools())
-        self.assertEqual(seen, ["exec", "lookup_order"])
+        self.assertEqual(seen, ["cli", "lookup_order"])
         results = [m for m in messages if m["type"] == "tool_result"]
         self.assertEqual(results[1]["content"], "Order 42 shipped on Monday.")
         self.assertEqual(q.result()["result"], "Order 42 shipped on Monday.")
@@ -102,7 +102,7 @@ class QueryTests(unittest.TestCase):
 
         def approver(request):
             asked.append(request["toolName"])
-            return (request["args"]["cmd"].endswith("one.txt"), "only one")
+            return (request["args"]["command"].endswith("one.txt"), "only one")
 
         q = query("first", dir=str(self.agent), model=model, approver=approver, binary=BIN,
                   out_dir=str(pathlib.Path(self.tmp.name) / "out"))
@@ -113,10 +113,35 @@ class QueryTests(unittest.TestCase):
             if m.get("subtype") == "turn_end" and len(replies) == 1:
                 q.send("second")
         self.assertEqual(replies, ["done one", "done two"])
-        self.assertEqual(asked, ["exec", "exec"])
+        self.assertEqual(asked, ["cli", "cli"])
         self.assertTrue((self.agent / "one.txt").is_file())
         self.assertFalse((self.agent / "two.txt").exists())
         q.close()
+
+    def test_a_raising_hook_is_allowed_unless_fail_closed(self) -> None:
+        model = self.script(
+            "s.yaml",
+            "- tool_calls: [{name: exec, arguments: {cmd: \"echo one > one.txt\"}}]\n- text: \"done\"\n",
+        )
+
+        def boom(ctx):
+            raise RuntimeError("bug in my hook")
+
+        q = query("x", dir=str(self.agent), model=model, binary=BIN, hooks={"pre_tool_use": boom},
+                  out_dir=str(pathlib.Path(self.tmp.name) / "out"))
+        with q:
+            messages = list(q)
+        self.assertEqual([m["content"] for m in messages if m["type"] == "assistant" and m["content"]], ["done"])
+        self.assertTrue((self.agent / "one.txt").is_file())
+        (self.agent / "one.txt").unlink()
+
+        q = query("x", dir=str(self.agent), model=model, binary=BIN, hooks={"pre_tool_use": boom},
+                  fail_closed_hooks=["pre_tool_use"], out_dir=str(pathlib.Path(self.tmp.name) / "out2"))
+        with q:
+            messages = list(q)
+        results = [m for m in messages if m["type"] == "tool_result"]
+        self.assertIn("bug in my hook", str(results[0]["content"]))
+        self.assertFalse((self.agent / "one.txt").exists())
 
     def test_a_bad_start_raises(self) -> None:
         with self.assertRaises(GitagentError) as caught:

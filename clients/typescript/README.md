@@ -32,8 +32,10 @@ console.log(q.result()?.outcome, q.costs());
   of them (one turn each). The other options are the protocol's: `dir`,
   `model`, `env`, `systemPrompt`, `systemPromptSuffix`, `allowedTools`,
   `disallowedTools`, `maxTurns`, `timeoutMs`, `sessionId`, `resume`,
-  `mcpServers`, `constraints`, `conversation`, `toolNames: "v1"`, `prices`,
-  `outDir`, `binary`, `abortController`.
+  `mcpServers`, `constraints`, `conversation`, `toolNames` (`"v1"`, the
+  default: 1.x's tool and argument names in messages, hooks and approvals;
+  `"gitagent"` for gitagent's own), `prices`, `outDir`, `binary`,
+  `abortController`.
 - `for await` over the `Query` gives the messages in order (`ready`,
   `session_start`, `user`, `assistant`, `tool_use`, `tool_result`,
   `turn_end`, …, `session_end`); breaking out of the loop aborts the turn
@@ -45,8 +47,9 @@ console.log(q.result()?.outcome, q.costs());
   report on the session.
 - Hooks (`onSessionStart`, `preQuery`, `preToolUse`, `postToolUse`,
   `postResponse`, `onError`) get the protocol's input and return `{action:
-  "allow" | "block" | "modify", …}`; one that throws blocks, unless named in
-  `failOpenHooks`. `approver(request)` answers compliance approvals; without
-  one, every request is denied.
+  "allow" | "block" | "modify", …}`; one that throws is reported on stderr
+  and the action goes on (as in 1.x), unless named in `failClosedHooks`,
+  which makes it block. `approver(request)` answers compliance approvals;
+  without one, every request is denied.
 
 Build: `npm install && npm run build`. Type check: `npm run check`.

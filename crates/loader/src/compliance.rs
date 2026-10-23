@@ -120,9 +120,19 @@ pub struct Finance {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuditCfg {
     pub dir: PathBuf,
+    /// One file for everything (gitagent 1.x's `.gitagent/audit.jsonl`)
+    /// instead of a file per day in `dir`.
+    pub file: Option<PathBuf>,
     /// `log_contents`; empty means everything.
     pub contents: Vec<String>,
     pub immutable: bool,
+}
+
+/// Whether a `compliance` section is written the gitagent 1.x way.
+pub fn is_v1_shape(compliance: &Value) -> bool {
+    compliance.get("risk_level").is_some()
+        || compliance["human_in_the_loop"].is_boolean()
+        || compliance["recordkeeping"].get("retention_days").is_some()
 }
 
 impl AuditCfg {
@@ -159,6 +169,10 @@ pub fn read(compliance: &Value) -> (Supervision, String) {
         Some("always") => Hitl::Always,
         Some("conditional") => Hitl::Conditional,
         Some("advisory") => Hitl::Advisory,
+        // 1.x's `human_in_the_loop: true` only asked for review in the
+        // prompt; nothing waited for a person, so it reports rather than
+        // gates.
+        None if compliance["human_in_the_loop"] == Value::Bool(true) => Hitl::Advisory,
         _ => Hitl::None,
     };
     let mut triggers = Vec::new();
@@ -370,6 +384,23 @@ fn prompt_lines(c: &Value) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_1x_shape_is_advisory_not_gating() {
+        let c = json!({
+            "risk_level": "medium",
+            "human_in_the_loop": true,
+            "regulatory_frameworks": ["SOC2"],
+            "recordkeeping": {"audit_logging": true, "retention_days": 90}
+        });
+        assert!(is_v1_shape(&c));
+        let (s, _) = read(&c);
+        assert_eq!(s.hitl, Hitl::Advisory);
+        assert!(!s.gates());
+        let (s, _) = read(&json!({"human_in_the_loop": false}));
+        assert_eq!(s.hitl, Hitl::None);
+        assert!(!is_v1_shape(&json!({"risk_tier": "high"})));
+    }
 
     #[test]
     fn supervision_and_prompt_lines() {

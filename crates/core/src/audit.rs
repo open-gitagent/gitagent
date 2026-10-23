@@ -31,6 +31,9 @@ impl AuditLog {
 
     /// Today's file.
     fn path(&self) -> PathBuf {
+        if let Some(f) = &self.cfg.file {
+            return f.clone();
+        }
         let now = gitagent_record::utc_now_rfc3339();
         let day: String = now.chars().take(10).filter(|c| *c != '-').collect();
         self.cfg.dir.join(format!("audit-{day}.jsonl"))

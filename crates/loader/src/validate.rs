@@ -214,6 +214,12 @@ const COMPLIANCE: Ty = Ty::Obj(&[
         Ty::Enum(&["low", "standard", "high", "critical"]),
     ),
     ("frameworks", STR_LIST),
+    // gitagent 1.x's shape, reported as warnings.
+    ("risk_level", Ty::Any),
+    ("human_in_the_loop", Ty::Any),
+    ("data_classification", Ty::Any),
+    ("regulatory_frameworks", Ty::Any),
+    ("review", Ty::Any),
     (
         "supervision",
         Ty::Obj(&[
@@ -248,6 +254,7 @@ const COMPLIANCE: Ty = Ty::Obj(&[
                 ])),
             ),
             ("immutable", Ty::Bool),
+            ("retention_days", Ty::Any),
         ]),
     ),
     (
@@ -650,9 +657,38 @@ fn manifest_extras(doc: &mut Doc, m: &Value, root: &Path) {
         .flatten()
         .filter_map(Value::as_str)
     {
-        if !root.join("tools").join(format!("{name}.yaml")).is_file() {
+        // 1.x listed its built-in tools here (`cli`, `read`, …).
+        if !crate::v1::is_v1_tool(name)
+            && !root.join("tools").join(format!("{name}.yaml")).is_file()
+        {
             doc.error("tools", format!("tools/{name}.yaml does not exist"));
         }
+    }
+    for (key, newer) in [
+        ("risk_level", "risk_tier"),
+        (
+            "human_in_the_loop",
+            "supervision.human_in_the_loop (always, conditional, advisory or none)",
+        ),
+        ("data_classification", "data_governance.data_classification"),
+        ("regulatory_frameworks", "frameworks"),
+        ("review", "supervision"),
+    ] {
+        if m["compliance"].get(key).is_some() {
+            doc.warn(
+                &format!("compliance.{key}"),
+                format!("is gitagent 1.x's setting; OpenGAP calls it {newer}"),
+            );
+        }
+    }
+    if m["compliance"]["recordkeeping"]
+        .get("retention_days")
+        .is_some()
+    {
+        doc.warn(
+            "compliance.recordkeeping.retention_days",
+            "is gitagent 1.x's setting; OpenGAP uses retention_period (like 90d)",
+        );
     }
     for (name, settings) in m["plugins"].as_object().into_iter().flatten() {
         if settings["enabled"] == Value::Bool(false) {
@@ -883,7 +919,7 @@ fn hooks(root: &Path, out: &mut Vec<Finding>) {
                 None => doc.error(&path, "`script` is required"),
             }
             if map.get("description").and_then(Value::as_str).is_none() {
-                doc.error(&path, "`description` is required");
+                doc.warn(&path, "has no `description` (OpenGAP asks for one)");
             }
             if let Some(t) = map.get("timeout") {
                 if t.as_u64().is_none_or(|n| n < 1) {
@@ -1294,7 +1330,7 @@ fn compliance_rules(doc: &mut Doc, m: &Value, root: &Path) {
         return;
     }
     let tier = c["risk_tier"].as_str();
-    if tier.is_none() {
+    if tier.is_none() && c.get("risk_level").is_none() {
         doc.error("compliance", "`risk_tier` is required");
     }
     let high = matches!(tier, Some("high" | "critical"));

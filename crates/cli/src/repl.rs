@@ -187,6 +187,7 @@ fn command(s: &Setup, cmd: &str) -> Option<String> {
              /skills           list the skills\n\
              /agents           list the sub-agents\n\
              /tools            list the tools\n\
+             /plugins          list the plugins\n\
              /workflows        list the workflows (run one with @<name> key=value …)\n\
              /skill:<name> …   send a skill's instructions with your request\n\
              /quit             end the session"
@@ -217,6 +218,17 @@ fn command(s: &Setup, cmd: &str) -> Option<String> {
             }
         }
         "tools" => println!("{}", tool_names(s).join(", ")),
+        "plugins" => {
+            if spec.plugins.is_empty() {
+                println!("No plugins.");
+            }
+            for p in &spec.plugins {
+                println!("{} v{} — {}", p.id, p.version, p.description);
+            }
+        }
+        "tasks" | "learned" => println!(
+            "/{name} belonged to 1.x's skill learner, which this version does not have; `learning: online` in gitagent.yaml learns lessons instead"
+        ),
         "workflows" => {
             if spec.workflows.is_empty() {
                 println!("No workflows.");

@@ -343,12 +343,12 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         _ => EnvConfig::default(),
     };
 
-    // --model, then the environment's model_override, then gitagent.yaml,
-    // then the agent's `model.preferred`.
-    let model_setting = opts
-        .model
+    // The environment's model_override, then --model, then gitagent.yaml,
+    // then the agent's `model.preferred` (the order of gitagent 1.x).
+    let model_setting = env_config
+        .model_override
         .as_deref()
-        .or(env_config.model_override.as_deref())
+        .or(opts.model.as_deref())
         .or(config.model.as_deref());
     let mut model = match model_setting {
         Some(s) => ModelRef::parse(s)?,
@@ -377,11 +377,13 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         if let Some(n) = m.runtime.as_ref().and_then(|r| r.max_turns) {
             config.max_turns = n;
         }
-        if let Some(t) = m.runtime.as_ref().and_then(|r| r.timeout) {
-            config.timeout_s = t;
-        }
-        if let Some(t) = env_config.timeout_override {
-            config.timeout_s = t;
+        // `runtime.timeout` is how long a command may run before the
+        // shell goes on in the background (as in 1.x), not the run's limit.
+        if let Some(t) = env_config
+            .timeout_override
+            .or(m.runtime.as_ref().and_then(|r| r.timeout))
+        {
+            profile.exec_default_yield_ms = t.saturating_mul(1000).min(600_000);
         }
         // Temperature: runtime, then model constraints.
         let constraints = m.model.as_ref().and_then(|s| s.constraints.as_ref());
@@ -577,6 +579,10 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
             dir: std::env::var_os("GITAGENT_AUDIT_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| a.root.join(".gitagent/audit")),
+            // A 1.x-shaped section keeps 1.x's single file.
+            file: compliance
+                .filter(|c| compliance::is_v1_shape(c))
+                .map(|_| a.root.join(".gitagent/audit.jsonl")),
             contents: recordkeeping
                 .and_then(|r| r["log_contents"].as_array())
                 .into_iter()
@@ -1302,11 +1308,18 @@ profile: quiet
         // An environment on top; its env_vars reach the spec.
         let spec = load_env(Some("prod"), None);
         assert_eq!(spec.model.to_string(), "anthropic:claude-opus-5-5");
-        assert_eq!(spec.config.timeout_s, 90);
+        assert_eq!(spec.profile.exec_default_yield_ms, 90_000);
         assert_eq!(spec.env_config.env_vars["REGION"], "eu");
         assert_eq!(spec.env_config.name.as_deref(), Some("prod"));
-        // --model still wins.
+        // A model_override (the environment's, or default.yaml's) wins over
+        // --model, as in 1.x; without one, --model counts.
         let spec = load_env(Some("prod"), Some("scripted:s.yaml"));
+        assert_eq!(spec.model.to_string(), "anthropic:claude-opus-5-5");
+        let spec = load_env(None, Some("scripted:s.yaml"));
+        assert_eq!(spec.model.to_string(), "anthropic:claude-haiku-5-5");
+        std::fs::write(root.join("config/bare.yaml"), "env_vars: {}\n").unwrap();
+        std::fs::write(root.join("config/default.yaml"), "env_vars: {}\n").unwrap();
+        let spec = load_env(Some("bare"), Some("scripted:s.yaml"));
         assert_eq!(spec.model.to_string(), "scripted:s.yaml");
         // Benchmark runs read none of it.
         let bench = load(&LoadOptions {
@@ -1350,7 +1363,7 @@ profile: quiet
             ..Default::default()
         })
         .unwrap();
-        assert_eq!(spec.config.timeout_s, 120);
+        assert_eq!(spec.profile.exec_default_yield_ms, 120_000);
     }
 
     #[test]

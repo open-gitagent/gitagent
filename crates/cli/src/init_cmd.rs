@@ -45,30 +45,64 @@ pub(crate) fn run(args: &[std::ffi::OsString]) -> ExitCode {
         eprintln!("gitagent init: {}: {e}", dir.display());
         return ExitCode::from(2);
     }
-    let name = cli.name.unwrap_or_else(|| {
-        let raw = dir
-            .file_name()
-            .map(|n| n.to_string_lossy().to_lowercase())
-            .unwrap_or_else(|| "agent".into());
-        let mut name: String = raw
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect();
-        name = name.trim_matches('-').to_string();
-        if name.is_empty() || !name.starts_with(|c: char| c.is_ascii_lowercase()) {
-            name = format!("agent-{name}").trim_matches('-').to_string();
+    let name = cli.name.unwrap_or_else(|| name_for(&dir));
+    match scaffold(&dir, &name, &cli.model, cli.description.as_deref()) {
+        Ok((created, note)) => {
+            if created.is_empty() {
+                println!(
+                    "gitagent init: {} already has its files{note}",
+                    dir.display()
+                );
+            } else {
+                println!(
+                    "gitagent init: created {} in {}{note}",
+                    created.join(", "),
+                    dir.display()
+                );
+            }
+            ExitCode::SUCCESS
         }
-        name
-    });
-    let description = cli
-        .description
+        Err(e) => {
+            eprintln!("gitagent init: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+/// The agent's name from a directory's name.
+pub(crate) fn name_for(dir: &std::path::Path) -> String {
+    let raw = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_else(|| "agent".into());
+    let mut name: String = raw
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    name = name.trim_matches('-').to_string();
+    if name.is_empty() || !name.starts_with(|c: char| c.is_ascii_lowercase()) {
+        name = format!("agent-{name}").trim_matches('-').to_string();
+    }
+    name
+}
+
+/// Writes the files an agent directory needs where they are missing, and
+/// starts a git repository if the directory is not in one. Gives the files
+/// created and a note on git.
+pub(crate) fn scaffold(
+    dir: &std::path::Path,
+    name: &str,
+    model: &str,
+    description: Option<&str>,
+) -> Result<(Vec<&'static str>, String), String> {
+    let description = description
+        .map(str::to_string)
         .unwrap_or_else(|| format!("The {name} agent."));
     let files = [
         (
             "agent.yaml",
             format!(
-                "spec_version: \"0.1.0\"\nname: {name}\nversion: 0.1.0\ndescription: {description}\nmodel:\n  preferred: {}\n  fallback: []\nruntime:\n  max_turns: 50\n",
-                cli.model
+                "spec_version: \"0.1.0\"\nname: {name}\nversion: 0.1.0\ndescription: {description}\nmodel:\n  preferred: {model}\n  fallback: []\nruntime:\n  max_turns: 50\n"
             ),
         ),
         (
@@ -85,21 +119,15 @@ pub(crate) fn run(args: &[std::ffi::OsString]) -> ExitCode {
             continue;
         }
         if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                eprintln!("gitagent init: {}: {e}", parent.display());
-                return ExitCode::from(2);
-            }
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
-        if let Err(e) = std::fs::write(&path, text) {
-            eprintln!("gitagent init: {}: {e}", path.display());
-            return ExitCode::from(2);
-        }
+        std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
         created.push(*rel);
     }
     let git = |args: &[&str]| {
         Command::new("git")
             .args(args)
-            .current_dir(&dir)
+            .current_dir(dir)
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false)
@@ -128,17 +156,5 @@ pub(crate) fn run(args: &[std::ffi::OsString]) -> ExitCode {
             note.push_str("; committed");
         }
     }
-    if created.is_empty() {
-        println!(
-            "gitagent init: {} already has its files{note}",
-            dir.display()
-        );
-    } else {
-        println!(
-            "gitagent init: created {} in {}{note}",
-            created.join(", "),
-            dir.display()
-        );
-    }
-    ExitCode::SUCCESS
+    Ok((created, note))
 }

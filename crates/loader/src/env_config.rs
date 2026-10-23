@@ -5,9 +5,9 @@
 //!
 //! ```yaml
 //! log_level: info               # debug, info, warn, error
-//! model_override: claude-sonnet-5-5
+//! model_override: claude-sonnet-5-5   # beats --model, as in 1.x
 //! temperature_override: 0.1
-//! timeout_override: 600         # seconds
+//! timeout_override: 600         # seconds a command may run before it goes on in the background
 //! env_vars: {API_BASE: "https://staging.example.com"}   # for tool and hook scripts
 //! compliance_mode: true         # the agent must pass `validate --compliance`
 //! audit_logging: true

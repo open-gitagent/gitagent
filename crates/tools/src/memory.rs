@@ -93,23 +93,37 @@ async fn save(
 ) -> Result<ToolOutput> {
     let path = cfg.dir.join(&layer.path);
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    // A model used to 1.x sends the whole memory back with its addition;
-    // only the addition is new.
-    let added = match content.trim().strip_prefix(existing.trim()) {
-        Some(rest) if !existing.trim().is_empty() => rest.trim(),
-        _ => content.trim(),
+    // A model used to 1.x sends the whole memory back, with its addition or
+    // its edits: an addition is appended; a text carrying most of the
+    // existing lines (a rewrite) replaces the file, as 1.x's save did.
+    let content = content.trim();
+    if content.is_empty() {
+        return Ok(ToolOutput::error("Nothing to save: `content` is empty."));
+    }
+    let old = existing.trim();
+    let existing_lines: Vec<&str> = old
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    let carried = existing_lines
+        .iter()
+        .filter(|l| content.contains(*l))
+        .count();
+    let rewrite = existing_lines.len() >= 2 && carried * 10 >= existing_lines.len() * 6;
+    let (text, verb) = if let Some(rest) = content.strip_prefix(old).filter(|_| !old.is_empty()) {
+        if rest.trim().is_empty() {
+            return Ok(ToolOutput::error(
+                "Nothing new to save: `content` is already in memory.",
+            ));
+        }
+        (format!("{old}\n{}\n", rest.trim()), "Saved to")
+    } else if rewrite {
+        (format!("{content}\n"), "Rewrote")
+    } else {
+        let sep = if old.is_empty() { "" } else { "\n" };
+        (format!("{old}{sep}{content}\n"), "Saved to")
     };
-    if added.is_empty() {
-        return Ok(ToolOutput::error(
-            "Nothing new to save: `content` is empty or already in memory.",
-        ));
-    }
-    let mut text = existing.trim_end().to_string();
-    if !text.is_empty() {
-        text.push('\n');
-    }
-    text.push_str(added);
-    text.push('\n');
 
     let now = gitagent_record::utc_now_rfc3339();
     let archive_rel = format!("archive/{}.md", &now[..7]);
@@ -130,7 +144,7 @@ async fn save(
     write(&path, &kept)?;
     counters.inc("memory_saves");
 
-    let mut note = format!("Saved to memory/{}.", layer.path.display());
+    let mut note = format!("{verb} memory/{}.", layer.path.display());
     if !overflow.is_empty() {
         note.push_str(&format!(
             " The oldest {} lines went to memory/{archive_rel} to stay within {} lines.",
@@ -408,6 +422,42 @@ mod tests {
             "{log}"
         );
         assert_eq!(c.get("memory_commits"), 1);
+    }
+
+    /// A model used to 1.x sends the whole memory back: with an addition it
+    /// is appended once; with edits or deletions it replaces the file; a
+    /// short unrelated note is appended.
+    #[test]
+    fn a_whole_memory_sent_back_is_merged_as_1x_did() {
+        let dir = tempfile::tempdir().unwrap();
+        let m = cfg(dir.path(), false);
+        let mut c = Counters::new();
+        let path = dir.path().join("memory/MEMORY.md");
+        let save = |content: &str, c: &mut Counters| {
+            run(&call(json!({"action": "save", "content": content})), &m, c)
+                .unwrap()
+                .content
+        };
+        write(&path, "# Memory\n- one\n- two\n- three\n").unwrap();
+        let out = save("# Memory\n- one\n- two\n- three\n- four", &mut c);
+        assert_eq!(out, "Saved to memory/MEMORY.md.");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# Memory\n- one\n- two\n- three\n- four\n"
+        );
+        let out = save("# Memory\n- one\n- three (not two)\n- four", &mut c);
+        assert_eq!(out, "Rewrote memory/MEMORY.md.");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# Memory\n- one\n- three (not two)\n- four\n"
+        );
+        save("- five", &mut c);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# Memory\n- one\n- three (not two)\n- four\n- five\n"
+        );
+        let out = save("# Memory\n- one\n- three (not two)\n- four\n- five", &mut c);
+        assert!(out.contains("already in memory"), "{out}");
     }
 
     #[test]

@@ -93,7 +93,9 @@ pub fn discover(agent: &AgentDir) -> (Vec<DeclaredTool>, Vec<String>) {
     let enabled = &agent.manifest.tools;
     if !enabled.is_empty() {
         for name in enabled {
-            if !tools.iter().any(|t| &t.name == name) {
+            // 1.x listed its built-in tools here (`cli`, `read`, …).
+            let built_in = crate::v1::is_v1_tool(name) || RESERVED.contains(&name.as_str());
+            if !built_in && !tools.iter().any(|t| &t.name == name) {
                 warnings.push(format!(
                     "agent.yaml lists the tool {name:?}, but no usable tools/{name}.yaml declares it"
                 ));

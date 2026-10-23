@@ -15,9 +15,11 @@
 //! `modifications` replaces fields of `data` (1.x's `"args": {…}` also
 //! works for tool arguments). Empty output allows.
 //!
-//! A hook that crashes, exits non-zero, times out or prints something that
-//! is not such an answer has failed: the action is blocked, unless the hook
-//! says `fail_open: true`. With several hooks for an event they run in file
+//! A hook that crashes, exits non-zero or times out has failed: with
+//! `fail_open` (the loader's default for plain hooks, as in 1.x) that is a
+//! warning and the action goes on; a compliance hook, or one with
+//! `fail_open: false`, blocks. Output that is not such an answer (a log
+//! line, or JSON without `action`) means allow, as it did in 1.x. With several hooks for an event they run in file
 //! order, each seeing the changes of the ones before; the first block wins.
 
 use std::path::{Path, PathBuf};
@@ -234,8 +236,10 @@ impl AgentHooks {
         if stdout.trim().is_empty() {
             return Ok(Answer::Allow);
         }
-        let answer: Value = serde_json::from_str(stdout.trim())
-            .map_err(|_| "printed something that is not JSON".to_string())?;
+        // As in 1.x: anything that is not an answer means allow.
+        let Ok(answer) = serde_json::from_str::<Value>(stdout.trim()) else {
+            return Ok(Answer::Allow);
+        };
         let reason = || {
             answer["reason"]
                 .as_str()
@@ -248,8 +252,7 @@ impl AgentHooks {
             Some("modify") => Ok(Answer::Modify(
                 answer.as_object().cloned().unwrap_or_default(),
             )),
-            Some(other) => Err(format!("unknown action {other:?}")),
-            None => Err("the answer has no `action`".into()),
+            _ => Ok(Answer::Allow),
         }
     }
 }
@@ -343,12 +346,21 @@ esac"#,
     async fn failures_block_unless_fail_open() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path();
-        for (body, why) in [
-            ("exit 1", "exited with"),
-            ("echo not json", "not JSON"),
-            ("echo '{\"ok\": true}'", "no `action`"),
-            ("sleep 3", "timed out"),
+        // Output that is not an answer allows, as in 1.x.
+        for body in [
+            "echo not json",
+            "echo '{\"ok\": true}'",
+            "echo '{\"action\": \"whatever\"}'",
         ] {
+            let e = hook(d, HookEvent::PreQuery, body, false);
+            let h = hooks(d, vec![e]);
+            assert_eq!(
+                h.fire(HookEvent::PreQuery, None, Map::new()).await,
+                Decision::Allow,
+                "{body}"
+            );
+        }
+        for (body, why) in [("exit 1", "exited with"), ("sleep 3", "timed out")] {
             let mut e = hook(d, HookEvent::PreQuery, body, false);
             e.timeout = Duration::from_secs(1);
             let h = hooks(d, vec![e.clone()]);

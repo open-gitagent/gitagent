@@ -75,14 +75,16 @@ export interface QueryOptions {
   constraints?: { temperature?: number; maxTokens?: number };
   tools?: GCToolDefinition[];
   hooks?: GCHooks;
-  /** Hooks whose failure lets the action go on. */
-  failOpenHooks?: (keyof GCHooks)[];
+  /** Hooks whose failure blocks the action; the others report the failure
+   *  and go on, as in 1.x. */
+  failClosedHooks?: (keyof GCHooks)[];
   approver?: (request: JsonObject) => ApprovalAnswer | Promise<ApprovalAnswer>;
   callbackTimeoutMs?: number;
   /** Default true: a plain reply ends each turn. */
   conversation?: boolean;
-  /** `"v1"` for gitagent 1.x tool and argument names in messages. */
-  toolNames?: "v1";
+  /** Tool and argument names in messages and hooks: `"v1"` (the default)
+   *  for gitagent 1.x's, `"gitagent"` for gitagent's own. */
+  toolNames?: "v1" | "gitagent";
   prices?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   outDir?: string;
   binary?: string;
@@ -127,15 +129,15 @@ export function query(options: QueryOptions): Query {
   copy("mcpServers", "mcpServers");
   copy("constraints", "constraints");
   copy("callbackTimeoutMs", "callbackTimeoutMs");
-  copy("toolNames", "toolNames");
+  if ((o.toolNames ?? "v1") === "v1") wire.toolNames = "v1";
   copy("prices", "prices");
   wire.conversation = o.conversation ?? true;
-  const failOpen = new Set(o.failOpenHooks ?? []);
+  const failClosed = new Set(o.failClosedHooks ?? []);
   const callbacks: unknown[] = [];
   const hooks = o.hooks ?? {};
   for (const name of Object.keys(hooks) as (keyof GCHooks)[]) {
     if (!hooks[name]) continue;
-    callbacks.push(failOpen.has(name) ? { name, failOpen: true } : name);
+    callbacks.push(failClosed.has(name) ? { name, failOpen: false } : name);
   }
   if (o.approver) callbacks.push("approval");
   const tools = o.tools ?? [];
@@ -146,7 +148,7 @@ export function query(options: QueryOptions): Query {
     callbacks,
     tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
   };
-  return new Query(binaryPath(o.binary), o.outDir, init, o.prompt, hooks, tools, o.approver, o.abortController);
+  return new Query(binaryPath(o.binary), o.outDir, init, o.prompt, hooks, failClosed, tools, o.approver, o.abortController);
 }
 
 /**
@@ -157,6 +159,7 @@ export function query(options: QueryOptions): Query {
 export class Query implements AsyncIterable<GCMessage> {
   private readonly proc: ChildProcessWithoutNullStreams;
   private readonly hooks: GCHooks;
+  private readonly failClosed: Set<keyof GCHooks>;
   private readonly tools: Map<string, GCToolDefinition>;
   private readonly approver?: QueryOptions["approver"];
   private readonly received: GCMessage[] = [];
@@ -183,6 +186,7 @@ export class Query implements AsyncIterable<GCMessage> {
     init: JsonObject,
     prompt: QueryOptions["prompt"],
     hooks: GCHooks,
+    failClosed: Set<keyof GCHooks>,
     tools: GCToolDefinition[],
     approver: QueryOptions["approver"],
     abortController?: AbortController,
@@ -191,6 +195,7 @@ export class Query implements AsyncIterable<GCMessage> {
     if (outDir) args.push("--out-dir", outDir);
     this.proc = spawn(binary, args, { stdio: ["pipe", "pipe", "pipe"] });
     this.hooks = hooks;
+    this.failClosed = failClosed;
     this.tools = new Map(tools.map((t) => [t.name, t]));
     this.approver = approver;
     this.readyPromise = new Promise((resolve) => {
@@ -413,7 +418,9 @@ export class Query implements AsyncIterable<GCMessage> {
       const why = e instanceof Error ? e.message : String(e);
       if (kind === "tool") return { content: why, isError: true };
       if (kind === "approval") return { approved: false, reason: why };
-      return { action: "block", reason: why };
+      if (this.failClosed.has(name as keyof GCHooks)) return { action: "block", reason: why };
+      process.stderr.write(`gitagent: hook ${name} failed: ${why}; going on\n`);
+      return { action: "allow" };
     }
     return {};
   }
