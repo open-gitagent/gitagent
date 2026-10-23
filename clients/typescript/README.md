@@ -30,6 +30,7 @@ console.log(q.result()?.outcome, q.costs());
 
 - `query(options)` starts a session; `prompt` is one message or an iterable
   of them (one turn each). The other options are the protocol's: `dir`,
+  `repo` (1.x's local repo mode: `{url, token?, dir?, session?, autoCommit?}`),
   `model`, `env`, `systemPrompt`, `systemPromptSuffix`, `allowedTools`,
   `disallowedTools`, `maxTurns`, `timeoutMs`, `sessionId`, `resume`,
   `mcpServers`, `constraints`, `conversation`, `toolNames` (`"v1"`, the
@@ -46,6 +47,7 @@ console.log(q.result()?.outcome, q.costs());
 - `sessionId()`, `manifest()`, `messages()`, `result()` and `costs()`
   report on the session.
 - Hooks (`onSessionStart`, `preQuery`, `preToolUse`, `postToolUse`,
+  `postToolFailure`, `fileChanged`,
   `postResponse`, `onError`) get the protocol's input and return `{action:
   "allow" | "block" | "modify", …}`; one that throws is reported on stderr
   and the action goes on (as in 1.x), unless named in `failClosedHooks`,

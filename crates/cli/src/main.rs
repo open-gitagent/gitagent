@@ -369,6 +369,13 @@ pub(crate) fn setup(cli: &Cli, conversation: bool) -> Result<Setup> {
                 work_dir.display()
             ),
         }
+    } else if !cli.bench && !cli.ipc && is_agent {
+        if let Some(note) = init_cmd::ensure_repo(&work_dir) {
+            eprintln!(
+                "gitagent: {} was not in a git repository{note}",
+                work_dir.display()
+            );
+        }
     }
     // Benchmark runs use only the built-in files and explicit flags, so the
     // task's directory or the machine's home cannot change the agent.

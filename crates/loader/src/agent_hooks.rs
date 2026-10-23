@@ -185,7 +185,8 @@ pub fn entry_in(
         description: description.to_string(),
         timeout: DEFAULT_TIMEOUT,
         compliance: false,
-        fail_open: false,
+        // As in 1.x, a failing plugin hook is a warning, not a block.
+        fail_open: true,
         applies_to: Vec::new(),
     })
 }

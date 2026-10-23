@@ -205,7 +205,8 @@ impl Callbacks {
         }
     }
 
-    /// A hook gitagent does not wait for (`postResponse`, `onError`).
+    /// A hook gitagent does not wait for (`postResponse`, `onError`,
+    /// `postToolFailure`, `fileChanged`).
     fn tell(&self, name: &str, event: &str, extra: Map<String, Value>) {
         if self.has(name) {
             let mut input = self.context(event);
@@ -277,6 +278,20 @@ impl ToolHooks for ClientHooks {
         is_error: bool,
     ) -> Decision {
         let cb = &self.0;
+        if is_error {
+            let mut extra = Map::new();
+            extra.insert("toolName".into(), json!(cb.tool_name(tool)));
+            extra.insert("args".into(), cb.args_out(tool, arguments));
+            extra.insert("error".into(), json!(output));
+            cb.tell("postToolFailure", "PostToolFailure", extra);
+        } else {
+            for path in gitagent_core::changed_paths(tool, arguments) {
+                let mut extra = Map::new();
+                extra.insert("toolName".into(), json!(cb.tool_name(tool)));
+                extra.insert("path".into(), json!(path));
+                cb.tell("fileChanged", "FileChanged", extra);
+            }
+        }
         if !cb.has("postToolUse") {
             return Decision::Allow;
         }
@@ -644,6 +659,18 @@ async fn session(cli: Cli, out: Out) -> i32 {
     if let Some(d) = s_opt("dir").or(s_opt("cwd")) {
         cfg.dir = Some(PathBuf::from(d));
     }
+    // 1.x's `repo` option: work in a clone of the repository on a session
+    // branch, committed and pushed when the session ends.
+    let repo = match &o["repo"] {
+        Value::Object(r) => match open_repo(&cfg, r) {
+            Ok(repo) => {
+                cfg.dir = Some(repo.dir.clone());
+                Some((repo, r.get("autoCommit") != Some(&Value::Bool(false))))
+            }
+            Err(e) => return fatal(&out, format!("{e:#}")),
+        },
+        _ => None,
+    };
     if let Some(n) = o["maxTurns"].as_u64() {
         cfg.max_turns = Some(n as u32);
     }
@@ -658,14 +685,12 @@ async fn session(cli: Cli, out: Out) -> i32 {
         Ok(s) => s,
         Err(e) => return fatal(&out, format!("{e:#}")),
     };
-    for key in ["repo", "sandbox"] {
-        if !o[key].is_null() {
-            out.system(
-                "warning",
-                format!("the `{key}` option is not supported in protocol {PROTOCOL}; ignored"),
-                None,
-            );
-        }
+    if !o["sandbox"].is_null() && o["sandbox"] != Value::Bool(false) {
+        out.system(
+            "warning",
+            format!("the `sandbox` option is not supported in protocol {PROTOCOL}; ignored"),
+            None,
+        );
     }
     let agent_warnings = s.spec.agent.iter().flat_map(|a| a.warnings.iter());
     for w in agent_warnings.chain(s.spec.warnings.iter()) {
@@ -685,6 +710,15 @@ async fn session(cli: Cli, out: Out) -> i32 {
     }
     if let Some(n) = c["maxTokens"].as_u64().or(c["max_tokens"].as_u64()) {
         s.spec.profile.max_output_tokens = n as u32;
+    }
+    for key in ["topP", "topK"] {
+        if !c[key].is_null() {
+            out.system(
+                "warning",
+                format!("constraints.{key} is not supported; ignored"),
+                None,
+            );
+        }
     }
     for (name, v) in o["mcpServers"].as_object().into_iter().flatten() {
         match gitagent_loader::mcp::parse(name, v, &s.work_dir) {
@@ -903,8 +937,15 @@ async fn session(cli: Cli, out: Out) -> i32 {
             }
         }
     }
-    let hooks: Option<Arc<dyn ToolHooks>> = (cb.has("preToolUse") || cb.has("postToolUse"))
-        .then(|| Arc::new(ClientHooks(cb.clone())) as Arc<dyn ToolHooks>);
+    let hooks: Option<Arc<dyn ToolHooks>> = [
+        "preToolUse",
+        "postToolUse",
+        "postToolFailure",
+        "fileChanged",
+    ]
+    .iter()
+    .any(|n| cb.has(n))
+    .then(|| Arc::new(ClientHooks(cb.clone())) as Arc<dyn ToolHooks>);
     let approver: Option<Arc<dyn Approver>> = cb
         .has("approval")
         .then(|| Arc::new(ClientApprover(cb.clone())) as Arc<dyn Approver>);
@@ -1107,13 +1148,60 @@ async fn session(cli: Cli, out: Out) -> i32 {
         }
     }
     gitagent_core::end_session(&s.spec, &s.work_dir, &session_id).await;
+    let mut end = json!({"sessionId": session_id});
+    if let Some((repo, auto_commit)) = &repo {
+        end["branch"] = json!(repo.branch);
+        if *auto_commit {
+            let message = format!("gitagent: auto-commit ({})", repo.branch);
+            match repo.commit(&message).and_then(|c| repo.push().map(|_| c)) {
+                Ok(commit) => {
+                    end["commit"] = json!(commit);
+                    end["pushed"] = json!(true);
+                }
+                Err(e) => out.system(
+                    "error",
+                    format!("committing and pushing {} failed: {e:#}", repo.branch),
+                    None,
+                ),
+            }
+        }
+    }
     let totals = *stream.totals.lock().unwrap_or_else(|e| e.into_inner());
+    end["costs"] = totals.json();
     out.system(
         "session_end",
         format!("Agent {agent_name} finished"),
-        Some(json!({"sessionId": session_id, "costs": totals.json()})),
+        Some(end),
     );
     0
+}
+
+/// Clones (or reuses a clone of) `repo.url` for an IPC session.
+fn open_repo(cfg: &Cli, r: &Map<String, Value>) -> anyhow::Result<gitagent_repo::Repo> {
+    let s = |k: &str| r.get(k).and_then(Value::as_str).map(str::to_string);
+    let url = s("url").ok_or_else(|| anyhow::anyhow!("the `repo` option needs a `url`"))?;
+    let token = s("token").or_else(|| {
+        ["GITAGENT_GIT_TOKEN", "GITHUB_TOKEN", "GIT_TOKEN"]
+            .iter()
+            .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()))
+    });
+    let dir = match s("dir").map(PathBuf::from).or(cfg.dir.clone()) {
+        Some(d) => std::path::absolute(&d)?,
+        None => std::env::current_dir()?.join(crate::repo_mode::repo_name(&url)),
+    };
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home_cfg = gitagent_loader::load_config(cfg.config.as_deref(), home.as_deref())?.repo;
+    let opts = gitagent_repo::RepoOptions {
+        url,
+        base: None,
+        branch: s("session"),
+        dir,
+        branch_prefix: home_cfg.branch_prefix,
+        author: home_cfg.author,
+        token,
+        helper_dir: cfg.out_dir.join("askpass"),
+    };
+    gitagent_repo::Repo::clone_for_task(&opts, "session")
 }
 
 fn save(path: &Path, messages: &[Message]) -> std::io::Result<()> {

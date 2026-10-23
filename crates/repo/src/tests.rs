@@ -191,6 +191,53 @@ fn the_token_never_lands_in_the_repository() {
 }
 
 #[test]
+fn an_earlier_clone_is_reused_and_its_branch_resumed() {
+    let (root, url) = remote();
+    let mut opts = options(root.path(), &url, "work");
+    opts.branch = Some("gitagent/session-1".into());
+    let first = Repo::clone_for_task(&opts, "first").unwrap();
+    std::fs::write(first.dir.join("a.txt"), "a\n").unwrap();
+    // Run records are not part of the work.
+    std::fs::create_dir_all(first.dir.join(".gitagent/sessions/s1")).unwrap();
+    std::fs::write(first.dir.join(".gitagent/audit.jsonl"), "{}\n").unwrap();
+    std::fs::write(first.dir.join(".gitagent/state.json"), "{}\n").unwrap();
+    std::fs::write(
+        first.dir.join(".gitagent/sessions/s1/messages.json"),
+        "[]\n",
+    )
+    .unwrap();
+    first.commit("first").unwrap();
+    let shown = Command::new("git")
+        .current_dir(&first.dir)
+        .args(["show", "--name-only", "--format=", "HEAD"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&shown.stdout).trim(), "a.txt");
+    assert!(first.commit("again").unwrap().is_none());
+    // Not pushed: the second session keeps the local commit.
+    let again = Repo::clone_for_task(&opts, "second").unwrap();
+    assert!(again.resumed);
+    assert_eq!(again.branch, "gitagent/session-1");
+    assert!(again.dir.join("a.txt").is_file());
+    // A new session in the same clone branches from the base.
+    opts.branch = None;
+    let fresh = Repo::clone_for_task(&opts, "third task").unwrap();
+    assert!(fresh.branch.starts_with("gitagent/third-task-"));
+    assert!(!fresh.dir.join("a.txt").exists());
+    // Uncommitted work is never thrown away.
+    std::fs::write(fresh.dir.join("b.txt"), "b\n").unwrap();
+    let err = Repo::clone_for_task(&opts, "fourth").unwrap_err();
+    assert!(err.to_string().contains("uncommitted changes"), "{err}");
+    std::fs::remove_file(fresh.dir.join("b.txt")).unwrap();
+    // A clone of something else is refused.
+    let (_other_root, other) = remote();
+    let mut elsewhere = options(root.path(), &other, "work");
+    elsewhere.branch = None;
+    let err = Repo::clone_for_task(&elsewhere, "x").unwrap_err();
+    assert!(err.to_string().contains("is a clone of"), "{err}");
+}
+
+#[test]
 fn slugs_and_non_empty_targets() {
     assert_eq!(slug("Fix the failing test!"), "fix-the-failing-test");
     assert_eq!(slug("   ***   "), "task");

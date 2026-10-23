@@ -41,6 +41,8 @@ HOOK_NAMES = {
     "pre_query": "preQuery",
     "pre_tool_use": "preToolUse",
     "post_tool_use": "postToolUse",
+    "post_tool_failure": "postToolFailure",
+    "file_changed": "fileChanged",
     "post_response": "postResponse",
     "on_error": "onError",
 }
@@ -90,6 +92,7 @@ def query(
     resume: bool = False,
     mcp_servers: Optional[dict[str, Any]] = None,
     constraints: Optional[dict[str, Any]] = None,
+    repo: Optional[dict[str, Any]] = None,
     tools: Optional[list[dict[str, Any]]] = None,
     hooks: Optional[dict[str, Hook]] = None,
     fail_closed_hooks: Iterable[str] = (),
@@ -104,17 +107,22 @@ def query(
     """Starts a session and returns the ``Query`` that streams its messages.
 
     ``hooks`` maps ``on_session_start``, ``pre_query``, ``pre_tool_use``,
-    ``post_tool_use``, ``post_response`` and ``on_error`` to callables that
+    ``post_tool_use``, ``post_tool_failure``, ``file_changed``, ``post_response``
+    and ``on_error`` to callables that
     get the protocol's input and return ``{"action": "allow" | "block" |
     "modify", ...}`` (or ``None`` to allow). A hook that raises is reported
     on stderr and the action goes on, as in 1.x, unless its name is in
     ``fail_closed_hooks``, which makes it block. ``approver(request)`` answers
     a compliance approval with ``True``/``False``, ``(ok, reason)`` or a
-    dict; without one, every request is denied.
+    dict; without one, every request is denied. ``repo`` is 1.x's local
+    repo mode: ``{"url", "token", "dir", "session", "autoCommit"}``; the
+    session works in a clone on a session branch, committed and pushed when
+    it ends.
     """
     options: dict[str, Any] = {}
     for key, value in [
         ("dir", dir),
+        ("repo", repo),
         ("model", model),
         ("env", env),
         ("systemPrompt", system_prompt),

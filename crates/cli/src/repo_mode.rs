@@ -178,7 +178,7 @@ fn shorten(text: &str, max: usize) -> String {
 }
 
 /// The last path part of the URL without `.git`.
-fn repo_name(url: &str) -> String {
+pub(crate) fn repo_name(url: &str) -> String {
     let last = url
         .trim_end_matches('/')
         .rsplit(['/', ':'])
@@ -194,12 +194,7 @@ fn repo_name(url: &str) -> String {
 
 /// Removes `user:password@` from a URL before it is shown or logged.
 fn without_credentials(url: &str) -> String {
-    match (url.find("://"), url.find('@')) {
-        (Some(scheme), Some(at)) if at > scheme => {
-            format!("{}{}", &url[..scheme + 3], &url[at + 1..])
-        }
-        _ => url.to_string(),
-    }
+    gitagent_repo::strip_credentials(url)
 }
 
 #[cfg(test)]

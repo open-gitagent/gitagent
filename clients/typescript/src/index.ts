@@ -11,8 +11,8 @@
  *
  * The agent runs in the gitagent binary (`GITAGENT_BIN`, or `gitagent` on
  * the PATH); this package only translates calls and messages. A query is one
- * session: a string prompt runs one turn, an async iterable of strings runs
- * a turn per item, and `send()` adds turns while iterating.
+ * session: a string prompt runs one turn, an async iterable of strings (or
+ * of 1.x's `{type: "user", content}` messages) runs a turn per item, and `send()` adds turns while iterating.
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
@@ -44,9 +44,21 @@ export interface GCHooks {
   preQuery?: GCHook;
   preToolUse?: GCHook;
   postToolUse?: GCHook;
+  /** After a tool call that failed; not waited for. */
+  postToolFailure?: GCHook;
+  /** For each file a file tool changed; not waited for. */
+  fileChanged?: GCHook;
   postResponse?: GCHook;
   onError?: GCHook;
 }
+
+/** A user message, as 1.x's prompt iterables gave them. */
+export interface GCUserMessage {
+  type: "user";
+  content: string;
+}
+
+type PromptItem = string | GCUserMessage;
 
 export type ApprovalAnswer = boolean | { approved: boolean; reason?: string };
 
@@ -57,9 +69,22 @@ export interface GCToolDefinition {
   handler: (args: JsonObject) => unknown | Promise<unknown>;
 }
 
-export interface QueryOptions {
-  prompt: string | Iterable<string> | AsyncIterable<string>;
+/** 1.x's local repo mode: the session works in a clone of `url` on a
+ *  session branch, committed and pushed when it ends. */
+export interface LocalRepoOptions {
+  url: string;
+  token?: string;
   dir?: string;
+  /** A session branch from an earlier run to resume. */
+  session?: string;
+  /** Default true. */
+  autoCommit?: boolean;
+}
+
+export interface QueryOptions {
+  prompt: string | Iterable<PromptItem> | AsyncIterable<PromptItem>;
+  dir?: string;
+  repo?: LocalRepoOptions;
   model?: string;
   env?: string;
   systemPrompt?: string;
@@ -72,7 +97,8 @@ export interface QueryOptions {
   sessionId?: string;
   resume?: boolean;
   mcpServers?: Record<string, JsonObject>;
-  constraints?: { temperature?: number; maxTokens?: number };
+  /** `topP` and `topK` are accepted for 1.x code and ignored with a warning. */
+  constraints?: { temperature?: number; maxTokens?: number; topP?: number; topK?: number };
   tools?: GCToolDefinition[];
   hooks?: GCHooks;
   /** Hooks whose failure blocks the action; the others report the failure
@@ -115,6 +141,7 @@ export function query(options: QueryOptions): Query {
     if (o[key] !== undefined) wire[name] = o[key];
   };
   copy("dir", "dir");
+  copy("repo", "repo");
   copy("model", "model");
   copy("env", "env");
   copy("systemPrompt", "systemPrompt");
@@ -348,8 +375,8 @@ export class Query implements AsyncIterable<GCMessage> {
     if (typeof prompt === "string") {
       this.pending.push(prompt);
     } else {
-      for await (const p of prompt as AsyncIterable<string>) {
-        this.pending.push(p);
+      for await (const p of prompt as AsyncIterable<PromptItem>) {
+        this.pending.push(typeof p === "string" ? p : String(p.content ?? ""));
         this.nextPrompt();
       }
     }

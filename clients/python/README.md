@@ -26,7 +26,7 @@ print(q.result()["outcome"], q.costs())
 
 - `query(prompt, **options)` starts a session; `prompt` is one message or a
   list of them (one turn each). Options are the protocol's, in snake_case:
-  `dir`, `model`, `env`, `system_prompt`, `system_prompt_suffix`,
+  `dir`, `repo` (1.x local repo mode), `model`, `env`, `system_prompt`, `system_prompt_suffix`,
   `allowed_tools`, `disallowed_tools`, `max_turns`, `timeout_ms`,
   `session_id`, `resume`, `mcp_servers`, `constraints`, `conversation`,
   `tool_names` (`"v1"`, the default: 1.x's tool and argument names in

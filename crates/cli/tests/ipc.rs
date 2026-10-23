@@ -370,3 +370,101 @@ fn startup_problems_and_blocking_hooks() {
     let (code, _) = s.finish();
     assert_eq!(code, 0);
 }
+
+/// 1.x's `repo` option: the session works in a clone on a session branch
+/// and the changes are committed and pushed when it ends; a second session
+/// with `session` set to that branch reuses the clone and resumes it.
+#[test]
+fn the_repo_option_clones_commits_and_resumes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    git(root, &["init", "-q", "--bare", "-b", "main", "origin.git"]);
+    git(root, &["init", "-q", "-b", "main", "seed"]);
+    let seed = root.join("seed");
+    agent(&seed, "");
+    git(&seed, &["add", "."]);
+    git(
+        &seed,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ],
+    );
+    let url = root.join("origin.git").to_string_lossy().into_owned();
+    git(&seed, &["push", "-q", &url, "main"]);
+
+    let model = script(
+        root,
+        "s.yaml",
+        "- tool_calls: [{name: write_file, arguments: {path: fix.txt, content: \"fixed\\n\"}}]\n\
+         - text: \"Added fix.txt.\"\n",
+    );
+    let clone = root.join("clone");
+    let mut s = Session::start(root, &root.join("out"));
+    s.send(json!({
+        "type": "initialize", "protocol": 1,
+        "options": {"model": model, "repo": {"url": url, "dir": clone, "session": "gitagent/session-ab12"}}
+    }));
+    s.until(is("system", "session_start"));
+    s.send(json!({"type": "user", "content": "fix it"}));
+    s.until(is("system", "turn_end"));
+    s.send(json!({"type": "end"}));
+    let (code, rest) = s.finish();
+    assert_eq!(code, 0);
+    let end = rest
+        .iter()
+        .find(|m| is("system", "session_end")(m))
+        .unwrap();
+    assert_eq!(end["metadata"]["branch"], "gitagent/session-ab12");
+    assert_eq!(end["metadata"]["pushed"], true);
+    assert!(end["metadata"]["commit"].is_string(), "{end}");
+    assert!(clone.join("fix.txt").is_file());
+    let remote = git(root, &["ls-remote", "--heads", &url]);
+    assert!(
+        remote.contains("refs/heads/gitagent/session-ab12"),
+        "{remote}"
+    );
+    assert_eq!(
+        git(&clone, &["log", "-1", "--format=%s"]).trim(),
+        "gitagent: auto-commit (gitagent/session-ab12)"
+    );
+
+    // The same clone and branch again, with nothing to commit.
+    let model = script(root, "t.yaml", "- text: \"Nothing to do.\"\n");
+    let mut s = Session::start(root, &root.join("out2"));
+    s.send(json!({
+        "type": "initialize", "protocol": 1,
+        "options": {"model": model, "repo": {"url": url, "dir": clone, "session": "gitagent/session-ab12", "autoCommit": false}}
+    }));
+    s.until(is("system", "session_start"));
+    s.send(json!({"type": "user", "content": "anything"}));
+    s.until(is("system", "turn_end"));
+    s.send(json!({"type": "end"}));
+    let (code, rest) = s.finish();
+    assert_eq!(code, 0);
+    let end = rest
+        .iter()
+        .find(|m| is("system", "session_end")(m))
+        .unwrap();
+    assert_eq!(end["metadata"]["branch"], "gitagent/session-ab12");
+    assert!(end["metadata"].get("pushed").is_none(), "{end}");
+}

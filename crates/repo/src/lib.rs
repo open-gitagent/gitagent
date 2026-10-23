@@ -15,6 +15,14 @@ use anyhow::{bail, Context, Result};
 /// only on git commands that talk to the remote.
 const TOKEN_VAR: &str = "GITAGENT_ASKPASS_TOKEN";
 
+/// Pathspecs for the agent's own run records, which are never part of the
+/// work: audit logs, state and stored sessions.
+const NOT_WORK: [&str; 3] = [
+    ":(exclude).gitagent/audit*",
+    ":(exclude).gitagent/state.json",
+    ":(exclude).gitagent/sessions",
+];
+
 #[derive(Debug, Clone)]
 pub struct RepoOptions {
     pub url: String,
@@ -48,7 +56,11 @@ pub struct Repo {
 impl Repo {
     /// Clones the repository and checks out the working branch.
     pub fn clone_for_task(opts: &RepoOptions, task: &str) -> Result<Repo> {
-        if opts.dir.exists()
+        // A clone of the same repository from an earlier session is reused,
+        // as 1.x did, so a session branch can be resumed in place.
+        let reuse = opts.dir.join(".git").exists();
+        if !reuse
+            && opts.dir.exists()
             && std::fs::read_dir(&opts.dir).map_or(true, |mut d| d.next().is_some())
         {
             bail!("{} already exists and is not empty", opts.dir.display());
@@ -69,19 +81,45 @@ impl Repo {
             token: opts.token.clone(),
         };
 
-        let parent = opts.dir.parent().unwrap_or(Path::new("."));
-        std::fs::create_dir_all(parent)?;
-        repo.remote_git(
-            parent,
-            &[
-                "clone",
-                "--filter=blob:none",
-                "--no-tags",
-                &opts.url,
-                &opts.dir.to_string_lossy(),
-            ],
-        )
-        .context("cloning the repository")?;
+        if reuse {
+            let origin = repo
+                .git(&["remote", "get-url", "origin"])
+                .unwrap_or_default();
+            if strip_credentials(origin.trim()) != strip_credentials(&opts.url) {
+                bail!(
+                    "{} is a clone of {}, not of {}",
+                    opts.dir.display(),
+                    strip_credentials(origin.trim()),
+                    strip_credentials(&opts.url)
+                );
+            }
+            let mut status = vec!["status", "--porcelain", "--", "."];
+            status.extend(NOT_WORK);
+            if !repo.git(&status)?.trim().is_empty() {
+                bail!(
+                    "{} has uncommitted changes; commit or remove them first",
+                    opts.dir.display()
+                );
+            }
+            repo.remote_git(&opts.dir, &["fetch", "--prune", "--no-tags", "origin"])
+                .context("fetching the repository")?;
+            // origin/HEAD may be missing in an old clone.
+            let _ = repo.remote_git(&opts.dir, &["remote", "set-head", "origin", "--auto"]);
+        } else {
+            let parent = opts.dir.parent().unwrap_or(Path::new("."));
+            std::fs::create_dir_all(parent)?;
+            repo.remote_git(
+                parent,
+                &[
+                    "clone",
+                    "--filter=blob:none",
+                    "--no-tags",
+                    &opts.url,
+                    &opts.dir.to_string_lossy(),
+                ],
+            )
+            .context("cloning the repository")?;
+        }
 
         repo.base = match &opts.base {
             Some(b) => b.clone(),
@@ -98,6 +136,16 @@ impl Repo {
         match &opts.branch {
             Some(b) if *b == repo.base => {
                 bail!("refusing to work on the base branch {b:?}; pick another --branch")
+            }
+            Some(b) if repo.local_branch(b) => {
+                // A session branch from an earlier run in this clone: keep
+                // its commits and take the remote's if they follow on.
+                repo.git(&["checkout", "-q", b])?;
+                if remote_branches.contains(b) {
+                    let _ = repo.git(&["merge", "-q", "--ff-only", &format!("origin/{b}")]);
+                }
+                repo.branch = b.clone();
+                repo.resumed = true;
             }
             Some(b) if remote_branches.contains(b) => {
                 repo.git(&["checkout", "-B", b, &format!("origin/{b}")])?;
@@ -120,11 +168,14 @@ impl Repo {
         Ok(repo)
     }
 
-    /// Commits every change. Returns the commit id, or `None` when nothing
-    /// changed.
+    /// Commits every change except the agent's own run records (audit
+    /// logs, state, stored sessions). Returns the commit id, or `None` when
+    /// nothing changed.
     pub fn commit(&self, message: &str) -> Result<Option<String>> {
         self.check_branch()?;
-        self.git(&["add", "-A"])?;
+        let mut add = vec!["add", "-A", "--", "."];
+        add.extend(NOT_WORK);
+        self.git(&add)?;
         if self.git_status(&["diff", "--cached", "--quiet"])? {
             return Ok(None);
         }
@@ -161,6 +212,16 @@ impl Repo {
             );
         }
         Ok(())
+    }
+
+    fn local_branch(&self, name: &str) -> bool {
+        self.git(&[
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{name}"),
+        ])
+        .is_ok()
     }
 
     fn default_branch(&self) -> Result<String> {
@@ -256,6 +317,16 @@ fn split_author(author: &str) -> (String, String) {
 }
 
 /// Lowercase letters, digits and dashes from the start of the task.
+/// `url` without a user or token in it.
+pub fn strip_credentials(url: &str) -> String {
+    match (url.find("://"), url.find('@')) {
+        (Some(scheme), Some(at)) if at > scheme => {
+            format!("{}{}", &url[..scheme + 3], &url[at + 1..])
+        }
+        _ => url.to_string(),
+    }
+}
+
 pub fn slug(task: &str) -> String {
     let mut out = String::new();
     for c in task.chars() {

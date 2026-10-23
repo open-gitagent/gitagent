@@ -1346,8 +1346,17 @@ async fn notify_tool_hooks(h: &Hooks, call: &gitagent_provider::ToolCall, out: &
     if !h.has(HookEvent::FileChanged) {
         return;
     }
-    let arg = |k: &str| call.arguments.get(k).and_then(Value::as_str);
-    let paths: Vec<String> = match call.name.as_str() {
+    for path in changed_paths(&call.name, &call.arguments) {
+        let mut d = data();
+        d.insert("file_path".into(), json!(path));
+        h.event(HookEvent::FileChanged, Some(&call.name), d).await;
+    }
+}
+
+/// The files a successful call of a file tool changed.
+pub fn changed_paths(tool: &str, arguments: &Map<String, Value>) -> Vec<String> {
+    let arg = |k: &str| arguments.get(k).and_then(Value::as_str);
+    match tool {
         gitagent_tools::WRITE_FILE | gitagent_tools::STR_REPLACE => {
             arg("path").map(str::to_string).into_iter().collect()
         }
@@ -1367,11 +1376,6 @@ async fn notify_tool_hooks(h: &Hooks, call: &gitagent_provider::ToolCall, out: &
             .map(|p| p.trim().to_string())
             .collect(),
         _ => Vec::new(),
-    };
-    for path in paths {
-        let mut d = data();
-        d.insert("file_path".into(), json!(path));
-        h.event(HookEvent::FileChanged, Some(&call.name), d).await;
     }
 }
 

@@ -124,37 +124,63 @@ pub(crate) fn scaffold(
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
         created.push(*rel);
     }
-    let git = |args: &[&str]| {
-        Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    };
-    let mut note = String::new();
-    if !git(&["rev-parse", "--is-inside-work-tree"]) {
-        if git(&["init", "--quiet"]) {
-            note.push_str("; git repository started");
-        } else {
-            note.push_str("; git is not available, so no repository was started");
-        }
+    let mut note = start_git(dir).unwrap_or_default();
+    if git(dir, &["rev-parse", "--is-inside-work-tree"])
+        && !created.is_empty()
+        && commit_all(dir, "Start the agent")
+    {
+        note.push_str("; committed");
     }
-    if git(&["rev-parse", "--is-inside-work-tree"]) && !created.is_empty() {
-        let committed = git(&["add", "-A"])
-            && git(&[
+    Ok((created, note))
+}
+
+fn git(dir: &std::path::Path, args: &[&str]) -> bool {
+    Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+fn commit_all(dir: &std::path::Path, message: &str) -> bool {
+    git(dir, &["add", "-A"])
+        && git(
+            dir,
+            &[
                 "-c",
                 "user.name=gitagent",
                 "-c",
                 "user.email=gitagent@localhost",
                 "commit",
                 "--quiet",
+                "--allow-empty",
                 "-m",
-                "Start the agent",
-            ]);
-        if committed {
-            note.push_str("; committed");
-        }
+                message,
+            ],
+        )
+}
+
+/// Starts a git repository in `dir` if it is not inside one; gives a note
+/// for the user when something happened.
+fn start_git(dir: &std::path::Path) -> Option<String> {
+    if git(dir, &["rev-parse", "--is-inside-work-tree"]) {
+        return None;
     }
-    Ok((created, note))
+    Some(if git(dir, &["init", "--quiet"]) {
+        "; git repository started".into()
+    } else {
+        "; git is not available, so no repository was started".into()
+    })
+}
+
+/// As 1.x's ensureRepo: an agent directory outside git becomes a repository
+/// with a first commit, so memory saves can be committed. Gives a line for
+/// the user when it did something.
+pub(crate) fn ensure_repo(dir: &std::path::Path) -> Option<String> {
+    let note = start_git(dir)?;
+    if git(dir, &["rev-parse", "--is-inside-work-tree"]) && commit_all(dir, "Initial commit") {
+        return Some(format!("{note}; committed what was there"));
+    }
+    Some(note)
 }
