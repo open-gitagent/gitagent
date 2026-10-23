@@ -16,7 +16,7 @@ use gitagent_core::{Resume, RunOptions};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::console::{self, Style};
-use crate::Setup;
+use crate::{lineedit, Setup};
 
 pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
     let st = Style::for_stderr();
@@ -35,18 +35,40 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
         }
     });
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
+    // On a terminal, a line editor with command suggestions; piped input
+    // is read line by line.
+    let editing = std::io::IsTerminal::is_terminal(&std::io::stdin()) && st.is_color();
+    let choices = choices(&s);
+    let mut history: Vec<String> = Vec::new();
     let mut resume: Option<Resume> = None;
     let mut n = 0;
     let session_id = format!("gitagent-{}", std::process::id());
     let mcp = crate::connect_mcp(&s.spec).await;
     loop {
-        eprint!("{}", console::prompt(&st));
-        let _ = std::io::stderr().flush();
-        let Some(line) = lines.next_line().await? else {
-            eprintln!();
-            break;
+        let line = if editing {
+            match lineedit::read_line(st, console::prompt(&st), choices.clone(), history.clone())
+                .await
+            {
+                Some(l) => l,
+                None => break,
+            }
+        } else {
+            eprint!("{}", console::prompt(&st));
+            let _ = std::io::stderr().flush();
+            let Some(line) = lines.next_line().await? else {
+                eprintln!();
+                break;
+            };
+            line
         };
         let line = line.trim();
+        if !line.is_empty() && history.last().map(String::as_str) != Some(line) {
+            history.push(line.to_string());
+        }
+        if line == "/" {
+            command(&s, "help");
+            continue;
+        }
         if line.is_empty() {
             continue;
         }
@@ -237,6 +259,176 @@ fn banner(s: &Setup, st: &Style) {
     );
 }
 
+/// `/help`: a guide to the session, printed to stdout.
+fn help(s: &Setup) {
+    let st = Style::for_stdout();
+    let spec = &s.spec;
+    let h = |t: &str| println!("\n{}", st.bold(&st.orange(t)));
+    let row = |c: &str, d: &str| {
+        let pad = " ".repeat(24usize.saturating_sub(c.chars().count()).max(2));
+        println!("  {}{pad}{}", st.bold(c), st.dim(d));
+    };
+    println!(
+        "{} {}",
+        st.bold(&st.orange(&format!("gitagent v{}", env!("CARGO_PKG_VERSION")))),
+        st.dim("· how this session works")
+    );
+
+    h("Commands");
+    for (c, d) in COMMANDS {
+        row(c, d);
+    }
+    row(
+        "@<workflow> k=v …",
+        "run a workflow step by step, without the model choosing",
+    );
+    row("/", "this guide");
+
+    h("Talking to the agent");
+    println!("  Type a message and press Enter; each message continues the same conversation.");
+    println!(
+        "  {} is a tool call, the dim line under it the result; {} marks an error or a blocked action;",
+        st.orange("$"),
+        st.orange("✗")
+    );
+    println!(
+        "  {} closes the turn with the outcome, time and tokens. Ctrl-C stops a running turn.",
+        st.orange("●")
+    );
+
+    h("Skills and workflows");
+    if spec.skills.is_empty() {
+        println!("  No skills in skills/. A skill is a SKILL.md with instructions the agent follows when asked.");
+    } else {
+        for k in &spec.skills {
+            row(&format!("/skill:{}", k.name), &k.description);
+        }
+    }
+    if !spec.workflows.is_empty() {
+        for w in &spec.workflows {
+            row(&format!("@{}", w.name), &w.description);
+        }
+    }
+
+    h("Approvals");
+    println!(
+        "  When a rule needs a person, the session pauses with {} and waits for y or n.",
+        st.orange("! approval needed")
+    );
+    println!("  Rules live in agent.yaml under compliance, and in hooks/ scripts.");
+
+    h("Keys");
+    row("Tab", "complete the command or workflow under the cursor");
+    row(
+        "↑ ↓",
+        "earlier messages, or a pick while the menu is showing",
+    );
+    row("Ctrl-A / Ctrl-E", "start / end of the line");
+    row("Ctrl-U / Ctrl-W", "clear the line / delete the last word");
+    row(
+        "Ctrl-C",
+        "clear the line; on an empty line, end the session",
+    );
+    row("Ctrl-D", "end the session");
+
+    h("Where the agent lives");
+    let root = spec
+        .agent
+        .as_ref()
+        .map(|a| a.root.display().to_string())
+        .unwrap_or_else(|| s.work_dir.display().to_string());
+    println!("  {}", st.dim(&root));
+    for (f, d) in [
+        ("agent.yaml", "name, model, tools, compliance, plugins"),
+        (
+            "SOUL.md · RULES.md",
+            "who the agent is · what it must never do",
+        ),
+        ("memory/MEMORY.md", "what it remembers between sessions"),
+        (
+            "skills/ · tools/",
+            "instructions it can follow · YAML tools it can call",
+        ),
+        (
+            "hooks/hooks.yaml",
+            "scripts that run before and after tool calls",
+        ),
+        (
+            "schedules/ · workflows/",
+            "prompts on a timetable · step-by-step procedures",
+        ),
+        (
+            "knowledge/ · agents/",
+            "documents it can read · sub-agents it can delegate to",
+        ),
+    ] {
+        row(f, d);
+    }
+
+    h("Outside the session");
+    row("gitagent -p \"task\" -d dir", "one task, then exit");
+    row("gitagent schedule …", "list, add, run, start the schedules");
+    row(
+        "gitagent plugin …",
+        "install, list, enable, disable plugins",
+    );
+    row(
+        "gitagent validate dir",
+        "check the agent's files (--compliance for the rules)",
+    );
+    row("gitagent ui -d dir", "a local web page for the agent");
+    row("gitagent --help", "every flag");
+    println!();
+}
+
+/// What the line editor can complete: the commands and the workflows.
+fn choices(s: &Setup) -> Vec<lineedit::Choice> {
+    let mut v: Vec<lineedit::Choice> = COMMANDS
+        .iter()
+        .map(|(c, d)| lineedit::Choice {
+            text: c.trim_end_matches(" …").to_string(),
+            about: d.to_string(),
+        })
+        .collect();
+    for k in &s.spec.skills {
+        v.push(lineedit::Choice {
+            text: format!("/skill:{}", k.name),
+            about: k.description.clone(),
+        });
+    }
+    for w in &s.spec.workflows {
+        v.push(lineedit::Choice {
+            text: format!("@{}", w.name),
+            about: w.description.clone(),
+        });
+    }
+    v
+}
+
+/// The commands and one line about each, for /help and the editor.
+const COMMANDS: [(&str, &str); 11] = [
+    ("/memory", "show the working memory"),
+    ("/skills", "list the skills"),
+    ("/agents", "list the sub-agents"),
+    ("/tools", "list the tools"),
+    ("/plugins", "list the plugins"),
+    (
+        "/schedules",
+        "list the schedules (run them with `gitagent schedule start`)",
+    ),
+    (
+        "/workflows",
+        "list the workflows (run one with @<name> key=value …)",
+    ),
+    (
+        "/skill:<name> …",
+        "send a skill's instructions with your request",
+    ),
+    ("/new", "start a fresh conversation (keeps the session)"),
+    ("/clear", "clear the screen"),
+    ("/quit", "end the session"),
+];
+
 fn st_is_color(st: &Style) -> bool {
     st.is_color()
 }
@@ -254,25 +446,7 @@ fn command(s: &Setup, cmd: &str) -> Option<String> {
     let spec = &s.spec;
     let (name, rest) = cmd.split_once(' ').unwrap_or((cmd, ""));
     match name {
-        "help" => {
-            let st = Style::for_stdout();
-            for (c, d) in [
-                ("/memory", "show the working memory"),
-                ("/skills", "list the skills"),
-                ("/agents", "list the sub-agents"),
-                ("/tools", "list the tools"),
-                ("/plugins", "list the plugins"),
-                ("/schedules", "list the schedules (run them with `gitagent schedule start`)"),
-                ("/workflows", "list the workflows (run one with @<name> key=value …)"),
-                ("/skill:<name> …", "send a skill's instructions with your request"),
-                ("/new", "start a fresh conversation (keeps the session)"),
-                ("/clear", "clear the screen"),
-                ("/quit", "end the session"),
-            ] {
-                let pad = " ".repeat(18usize.saturating_sub(c.chars().count()));
-                println!("{}{pad}{}", st.bold(c), st.dim(d));
-            }
-        }
+        "help" => help(s),
         "memory" => match &spec.memory {
             None => println!("(memory is off)"),
             Some(m) => match std::fs::read_to_string(m.dir.join(&m.working.path)) {

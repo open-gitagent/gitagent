@@ -4,6 +4,7 @@ mod init_cmd;
 mod install_cmd;
 mod ipc;
 mod learn_cmd;
+mod lineedit;
 mod otel;
 mod plugin_cmd;
 mod repl;
