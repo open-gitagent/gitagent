@@ -49,6 +49,10 @@ impl Style {
         }
     }
 
+    pub(crate) fn is_color(&self) -> bool {
+        self.color
+    }
+
     fn wrap(&self, code: &str, s: &str) -> String {
         if self.color {
             format!("\x1b[{code}m{s}\x1b[0m")
@@ -116,25 +120,23 @@ pub(crate) fn banner(
         .unwrap_or(0)
         .min(100);
     let bar = "─".repeat(width + 4);
-    eprintln!("{}", st.dim(&format!("╭{bar}╮")));
+    let mut box_lines = vec![st.dim(&format!("╭{bar}╮"))];
     for (text, kind) in rows {
         let text = cut(&text, width);
-        let pad = " ".repeat(width.saturating_sub(text.chars().count()));
         let shown = match kind {
             1 => format!("{} {}", st.orange("●"), st.bold(&text)),
-            2 => text.clone(),
             3 => st.dim(&text),
             _ => text.clone(),
         };
         // The dot adds two columns to the first row.
-        let pad = if kind == 1 {
-            " ".repeat(width.saturating_sub(text.chars().count() + 2))
-        } else {
-            pad
-        };
-        eprintln!("{}  {shown}{pad}  {}", st.dim("│"), st.dim("│"));
+        let used = text.chars().count() + if kind == 1 { 2 } else { 0 };
+        let pad = " ".repeat(width.saturating_sub(used));
+        box_lines.push(format!("{}  {shown}{pad}  {}", st.dim("│"), st.dim("│")));
     }
-    eprintln!("{}", st.dim(&format!("╰{bar}╯")));
+    box_lines.push(st.dim(&format!("╰{bar}╯")));
+    for line in &box_lines {
+        eprintln!("{line}");
+    }
     for line in extra {
         eprintln!("{}", st.dim(line));
     }
@@ -315,6 +317,59 @@ fn group(n: u64) -> String {
         out.push(c);
     }
     out
+}
+
+/// A line that redraws itself while the model works, on a terminal only.
+/// Dropping it clears the line.
+pub(crate) struct Spinner {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Spinner {
+    pub(crate) fn start(st: Style, label: &'static str) -> Spinner {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(!st.color));
+        if st.color {
+            let flag = stop.clone();
+            let started = std::time::Instant::now();
+            tokio::spawn(async move {
+                const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                let mut i = 0;
+                while !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    let secs = started.elapsed().as_secs();
+                    let line = format!(
+                        "\r\x1b[2K{} {}",
+                        st.orange(FRAMES[i % FRAMES.len()]),
+                        st.dim(&if secs >= 2 {
+                            format!("{label} · {secs}s")
+                        } else {
+                            label.to_string()
+                        })
+                    );
+                    eprint!("{line}");
+                    let _ = std::io::stderr().flush();
+                    i += 1;
+                    tokio::time::sleep(Duration::from_millis(120)).await;
+                }
+            });
+        }
+        Spinner { stop }
+    }
+}
+
+impl Drop for Spinner {
+    fn drop(&mut self) {
+        if !self.stop.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            eprint!("\r\x1b[2K");
+            let _ = std::io::stderr().flush();
+        }
+    }
+}
+
+/// Clears the spinner's line before another line is printed.
+pub(crate) fn clear_line(st: &Style) {
+    if st.color {
+        eprint!("\r\x1b[2K");
+    }
 }
 
 pub(crate) fn cut(s: &str, max: usize) -> String {

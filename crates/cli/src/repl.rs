@@ -30,6 +30,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
     // Live lines for each tool call and result, on stderr.
     let events = s.events.clone().also(move |e| {
         if let Some(line) = console::event_line(&st, &e) {
+            console::clear_line(&st);
             eprintln!("{line}");
         }
     });
@@ -89,6 +90,23 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             }
             continue;
         }
+        if matches!(line, "/new" | "/reset") {
+            if resume.take().is_some() {
+                eprintln!(
+                    "{}",
+                    st.dim("fresh conversation; the shell and history were dropped")
+                );
+            } else {
+                eprintln!("{}", st.dim("already a fresh conversation"));
+            }
+            continue;
+        }
+        if line == "/clear" {
+            if st_is_color(&st) {
+                eprint!("\x1b[2J\x1b[H");
+            }
+            continue;
+        }
         let task = match line.strip_prefix('/') {
             Some(cmd) => match command(&s, cmd) {
                 Some(prompt) => prompt,
@@ -116,15 +134,18 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             steer: None,
             external_tools: None,
         };
+        let spinner = console::Spinner::start(st, "thinking");
         tokio::select! {
             result = gitagent_core::run(&s.spec, s.provider.as_ref(), opts) => match result {
                 Ok(finished) => {
+                    drop(spinner);
                     let r = &finished.report;
                     match &r.summary {
                         Some(text) => console::reply(&out_st, &agent_name, text),
                         None => console::reply(&out_st, &agent_name, &format!("(no reply: the run ended with {})", r.outcome)),
                     }
                     console::status(&st, &r.outcome.to_string(), r.turns, started.elapsed(), r.usage.input_tokens, r.usage.output_tokens);
+                    eprintln!();
                     crate::export_telemetry(&finished, &s.spec).await;
                     crate::learn_cmd::after_run(&s, &finished.report, &s.work_dir, false).await;
                     resume = Some(finished.into_resume());
@@ -216,6 +237,10 @@ fn banner(s: &Setup, st: &Style) {
     );
 }
 
+fn st_is_color(st: &Style) -> bool {
+    st.is_color()
+}
+
 fn tool_names(s: &Setup) -> Vec<String> {
     gitagent_core::offered_tools(&s.spec, None, None, None, &[])
         .into_iter()
@@ -240,6 +265,8 @@ fn command(s: &Setup, cmd: &str) -> Option<String> {
                 ("/schedules", "list the schedules (run them with `gitagent schedule start`)"),
                 ("/workflows", "list the workflows (run one with @<name> key=value …)"),
                 ("/skill:<name> …", "send a skill's instructions with your request"),
+                ("/new", "start a fresh conversation (keeps the session)"),
+                ("/clear", "clear the screen"),
                 ("/quit", "end the session"),
             ] {
                 let pad = " ".repeat(18usize.saturating_sub(c.chars().count()));
