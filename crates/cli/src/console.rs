@@ -134,6 +134,12 @@ pub(crate) fn banner(
         box_lines.push(format!("{}  {shown}{pad}  {}", st.dim("│"), st.dim("│")));
     }
     box_lines.push(st.dim(&format!("╰{bar}╯")));
+    if st.color {
+        for row in big_text("gitagent") {
+            eprintln!("{}", st.orange(&row));
+        }
+        eprintln!();
+    }
     for line in &box_lines {
         eprintln!("{line}");
     }
@@ -319,6 +325,80 @@ fn group(n: u64) -> String {
     out
 }
 
+/// A word in the classic line-drawn letters, six rows tall. Only the
+/// letters of "gitagent" are drawn; others come out as a blank column.
+fn big_text(word: &str) -> Vec<String> {
+    const G: [&str; 6] = [
+        "       ", "  __ _ ", " / _` |", "| (_| |", " \\__, |", " |___/ ",
+    ];
+    const I: [&str; 6] = [" _ ", "(_)", "| |", "| |", "|_|", "   "];
+    const T: [&str; 6] = [" _   ", "| |_ ", "| __|", "| |_ ", " \\__|", "     "];
+    const A: [&str; 6] = [
+        "       ", "  __ _ ", " / _` |", "| (_| |", " \\__,_|", "       ",
+    ];
+    const E: [&str; 6] = ["      ", "  ___ ", " / _ \\", "|  __/", " \\___|", "      "];
+    const N: [&str; 6] = [
+        "       ", " _ __  ", "| '_ \\ ", "| | | |", "|_| |_|", "       ",
+    ];
+    let glyph = |c: char| -> Option<[&str; 6]> {
+        Some(match c {
+            'g' => G,
+            'i' => I,
+            't' => T,
+            'a' => A,
+            'e' => E,
+            'n' => N,
+            _ => return None,
+        })
+    };
+    let mut rows: Vec<Vec<char>> = vec![Vec::new(); 6];
+    for c in word.chars() {
+        join(&mut rows, &glyph(c).unwrap_or(["  "; 6]));
+    }
+    rows.iter()
+        .map(|r| r.iter().collect::<String>().trim_end().to_string())
+        .collect()
+}
+
+/// Adds a glyph to the right of `rows`, pulled in until the letters touch
+/// and one column further where the touching characters are the same.
+fn join(rows: &mut [Vec<char>], glyph: &[&str; 6]) {
+    let glyph: Vec<Vec<char>> = glyph.iter().map(|r| r.chars().collect()).collect();
+    if rows.iter().all(Vec::is_empty) {
+        for (r, g) in rows.iter_mut().zip(&glyph) {
+            *r = g.clone();
+        }
+        return;
+    }
+    let gaps: Vec<(usize, usize)> = rows
+        .iter()
+        .zip(&glyph)
+        .map(|(r, g)| {
+            (
+                r.iter().rev().take_while(|c| **c == ' ').count(),
+                g.iter().take_while(|c| **c == ' ').count(),
+            )
+        })
+        .collect();
+    let mut shift = gaps.iter().map(|(t, l)| t + l).min().unwrap_or(0);
+    let touching_match = rows.iter().zip(&glyph).zip(&gaps).all(|((r, g), (t, l))| {
+        t + l > shift || g.len() == *l || r.len() == *t || r[r.len() - 1 - t] == g[*l]
+    });
+    if touching_match && rows.iter().zip(&gaps).any(|(r, (t, _))| r.len() > *t) {
+        shift += 1;
+    }
+    for ((r, g), (t, l)) in rows.iter_mut().zip(&glyph).zip(&gaps) {
+        let mut left = shift;
+        let drop_right = (*t).min(left);
+        r.truncate(r.len() - drop_right);
+        left -= drop_right;
+        let skip = (*l).min(left);
+        left -= skip;
+        // What is left is the one merged column: the glyph's copy goes.
+        r.extend(g.iter().skip(skip + left));
+    }
+}
+
 /// A line that redraws itself while the model works, on a terminal only.
 /// Dropping it clears the line.
 pub(crate) struct Spinner {
@@ -430,6 +510,19 @@ mod tests {
         assert_eq!(group(1234567), "1,234,567");
         assert_eq!(group(84), "84");
         assert_eq!(cut("abcdef", 4), "abc…");
+    }
+
+    #[test]
+    fn the_big_word_is_six_even_rows() {
+        let rows = big_text("gitagent");
+        assert_eq!(rows.len(), 6);
+        let widths: Vec<usize> = rows.iter().map(|r| r.chars().count()).collect();
+        assert!(widths.iter().all(|w| *w <= 42), "{widths:?}");
+        assert_eq!(
+            rows[2], " / _` | || __|/ _` |/ _` |/ _ \\| '_ \\| __|",
+            "{rows:#?}"
+        );
+        assert!(rows[5].starts_with(" |___/"), "{rows:#?}");
     }
 
     #[test]
