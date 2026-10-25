@@ -36,7 +36,7 @@ This is gitagent 2, the Rust binary. Agents, hooks, schedules and client code wr
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/v2/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/scripts/install.sh | sh
 ```
 
 This installs the binary for your system (Linux x86_64/arm64, macOS arm64/x86_64) into `~/.local/bin`; set `INSTALL_DIR` to change that. To build from source you need Rust (the version is pinned in `rust-toolchain.toml`):
@@ -298,6 +298,10 @@ gitagent learn --model anthropic:claude-opus-5-5 --from bench/jobs/<job> [--from
 
 It learns only from tasks in the `dev` list of `bench/split.json`. Review the diff of `prompts/lessons.md` before committing it; set `lessons: false` in a profile to leave lessons out.
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to build, test and send a change.
+
 ## Development
 
 ```sh
@@ -311,3 +315,7 @@ The tests need no network or keys: a scripted provider replays model replies fro
 - `BLUEPRINT.md`: what is built and why.
 - `TASKS.md`: the milestones.
 - `docs/DEVIATIONS.md`: where the implementation differs from the blueprint, and why.
+
+## License
+
+[MIT](./LICENSE)
