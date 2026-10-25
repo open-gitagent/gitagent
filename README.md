@@ -512,7 +512,7 @@ The same shape is available from the command line: `gitagent -p "..." --output-f
 gitagent 3 replaces the TypeScript packages (1.x and 2.x) with one binary. What carries over unchanged:
 
 - **Agent folders.** `agent.yaml`, `SOUL.md`, `RULES.md`, `memory/`, `skills/`, `tools/`, `hooks/`, `schedules/`, `workflows/`, `agents/`, `config/` and `.env` are read as they were. 1.x settings such as `tools: [cli, read, write, memory]`, `runtime.timeout` and the 1.x `compliance` shape are accepted; `gitagent validate` points out the newer spelling as a warning, never an error.
-- **Hook scripts.** They get the same JSON and answer the same way; output that is not an answer, or a script that crashes, allows the action with a warning, as before.
+- **Hook scripts.** They get the same JSON and answer the same way; output that is not an answer, or a script that crashes, allows the action with a warning, as before. Only hooks marked `compliance: true` or `fail_open: false`, which are new, block in those cases.
 - **The CLI.** `gitagent`, `-p`, `-d`, `-m`, `-e`, `--repo`, `--pat`, `--session` and the REPL's slash commands work as before.
 - **SDK code.** `query()`, `tool()`, hooks, `steer()`, `abort()`, the message types and the `repo` option are the same; the TypeScript package now needs the `gitagent` binary installed.
 
