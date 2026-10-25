@@ -13,7 +13,7 @@
 <text x="890.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">100%</text>
 <text x="352" y="74" fill="#f1e9df" text-anchor="end" font-weight="600">gitagent 3 · Opus 5.5</text>
 <rect x="370.0" y="55" width="338.8" height="28" rx="5" fill="#e05a44"/>
-<text x="718.8" y="74" fill="#f1e9df" font-weight="600">93.0% ±0.8</text>
+<text x="718.8" y="74" fill="#f1e9df" font-weight="600">93.03% ±0.8</text>
 <text x="352" y="120" fill="#b8a899" text-anchor="end" font-weight="400">Artificial Analysis harness · Fable 5.1</text>
 <rect x="370.0" y="101" width="296.4" height="28" rx="5" fill="#4a3f36"/>
 <text x="676.4" y="120" fill="#b8a899" font-weight="600">91.4%</text>

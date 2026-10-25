@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Terminal--Bench_2.1-93.0%25_%C2%B10.8-e05a44?style=flat-square" alt="Terminal-Bench 2.1: 93.0% ±0.8" />
+  <img src="https://img.shields.io/badge/Terminal--Bench_2.1-93.03%25_%C2%B10.8-e05a44?style=flat-square" alt="Terminal-Bench 2.1: 93.03% ±0.8" />
   <img src="https://img.shields.io/badge/version-3.0.0-2a1f18?style=flat-square" alt="version 3.0.0" />
   <img src="https://img.shields.io/badge/built_with-Rust-2a1f18?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/github/license/open-gitagent/gitagent?style=flat-square&color=2a1f18" alt="license" />
@@ -32,7 +32,7 @@
   <img src="./docs/media/console.gif" alt="A gitagent session in the terminal" width="820" />
 </p>
 
-**Terminal-Bench 2.1: 93.0% ±0.8** with Claude Opus 5.5, all 89 tasks, five runs each, code frozen at the published commit; the ± is the run-to-run variation, as on the official leaderboard. The published harnesses on the same benchmark: Terminus 2 with the same model 87.6%, Codex CLI with GPT-6 Astra 87.4%, and the highest published entry, Artificial Analysis's own harness with Claude Fable 5.1 at maximum effort, 91.4%. The numbers are under [Results](#results); the reason is under [How gitagent works](#how-gitagent-works).
+**Terminal-Bench 2.1: 93.03% ±0.8** with Claude Opus 5.5, all 89 tasks, five runs each, code frozen at the published commit; the ± is the run-to-run variation, as on the official leaderboard. The published harnesses on the same benchmark: Terminus 2 with the same model 87.6%, Codex CLI with GPT-6 Astra 87.4%, and the highest published entry, Artificial Analysis's own harness with Claude Fable 5.1 at maximum effort, 91.4%. The numbers are under [Results](#results); the reason is under [How gitagent works](#how-gitagent-works).
 
 ## Why gitagent
 
@@ -49,7 +49,7 @@ Most agent frameworks treat the agent as code scattered across your application.
 
 Fork an agent. Branch a personality. `git log` its memory. Diff its rules. Review a change to its behaviour like a code change. Every result traces back to a commit.
 
-**gitagent 3** is the Rust rewrite: one static binary with no runtime to install, the harness that scored 93.0% on Terminal-Bench 2.1, a console in your terminal, parallel sub-agents with a live task board, and SDKs for Python, TypeScript and any other language over a simple line protocol. Agents, hooks, schedules and SDK code written for the TypeScript gitagent (1.x and 2.x) run unchanged, and agent folders in the OpenGAP format load too. See [Coming from the TypeScript gitagent](#coming-from-the-typescript-gitagent).
+**gitagent 3** is the Rust rewrite: one static binary with no runtime to install, the harness that scored 93.03% on Terminal-Bench 2.1, a console in your terminal, parallel sub-agents with a live task board, and SDKs for Python, TypeScript and any other language over a simple line protocol. Agents, hooks, schedules and SDK code written for the TypeScript gitagent (1.x and 2.x) run unchanged, and agent folders in the OpenGAP format load too. See [Coming from the TypeScript gitagent](#coming-from-the-typescript-gitagent).
 
 ## Install
 
@@ -222,7 +222,7 @@ The headline run's logs are public: every trial of it, with its trajectory and v
 
 | Harness | Model | Terminal-Bench 2.1 | Runs per task | Source |
 |---|---|---|---|---|
-| **gitagent 3** | Claude Opus 5.5 | **93.0% ±0.8** (414/445; 75 of 89 tasks passed every run) | 5 | [job logs on the Harbor hub](#the-same-run-by-time-limit) |
+| **gitagent 3** | Claude Opus 5.5 | **93.03% ±0.8** (414/445; 75 of 89 tasks passed every run) | 5 | [job logs on the Harbor hub](#the-same-run-by-time-limit) |
 | Terminus 2 | Claude Opus 5.5 | 87.6% | 1 | [Vals.ai](https://www.vals.ai/benchmarks/terminal-bench-2-1) |
 | Codex CLI | GPT-6 Astra | 87.4% ±0.9 | — | [Snorkel, the official leaderboard](https://snorkel.ai/leaderboard/terminal-bench-2-1/) |
 | Artificial Analysis's own harness | Claude Fable 5.1, max effort | 91.4% | — | [Artificial Analysis](https://artificialanalysis.ai/evaluations/terminalbench-2-1) |
@@ -242,7 +242,7 @@ Pass@k is the chance that at least one of k runs passes:
 | 60 min | 65 | 95.4% | 97.7% | 100.0% | [job](https://hub.harborframework.com/jobs/e1ea8dbd-7a55-4fa3-95de-b9338a3c1223) |
 | 2 h | 5 | 100.0% | 100.0% | 100.0% | [job](https://hub.harborframework.com/jobs/127445ee-63ec-44c7-8206-189eb22cd912) |
 | 3 h 20 min | 5 | 100.0% | 100.0% | 100.0% | [job](https://hub.harborframework.com/jobs/1d8e0bdb-7ae5-4ec7-8e54-329007590e9d) |
-| **all** | **445** | **93.0% ±0.8** | | | |
+| **all** | **445** | **93.03% ±0.8** | | | |
 
 Two of the 89 tasks start a virtual machine inside the task container, which this host cannot do, and no harness has passed them here; without those two the mean is 95.2%. The ±0.8 is the standard error across the five runs (93.3, 95.5, 92.1, 92.1 and 92.1%), the measure the official leaderboard shows; across tasks, the 95% interval is 88.8–96.9%, which answers the wider question of how the score would hold on a different set of tasks. It cost $112.85, about $0.25 per run, with 92% of the input tokens served from the prompt cache.
 
