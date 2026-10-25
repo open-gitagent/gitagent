@@ -1,0 +1,62 @@
+family: openai
+tool_calling: native
+tool_naming: gitagent             # gitagent | sdk: the tool names the model sees (sdk = Bash, Read, Edit, …; measure before changing)
+edit_tool: apply_patch
+effort: high
+# No temperature: reasoning models do not take sampling parameters.
+max_output_tokens: 64000          # reasoning counts toward this limit
+context_window: 400000
+exec_default_yield_ms: 10000
+shape: { cap_tokens: 8000, head_ratio: 0.3, collapse_min_run: 3 }
+guards:
+  time_budget: true              # minutes-left footer, nudge, final call; only when the run has a time limit
+  nudge_at: 0.7
+  force_stop_at: 0.9
+  loop_detector: true            # warn after loop_repeats identical calls and results
+  loop_repeats: 3
+  loop_effort_bump: false        # raise effort for one call after a loop warning
+  turn_warning: true             # warn at 80% of max_turns and before the last call (always on for sub-agents)
+context:
+  masking: none                  # none | client | server (server: Anthropic clears old results)
+  mask_batch_tokens: 50000
+  keep_last: 8
+  compaction: true               # summarize the history when it nears the context window
+  compact_at_tokens: 16000
+lessons: true                    # append prompts/lessons.md (learned from dev runs)
+snapshot: false                  # environment snapshot in the first message (on in the benchmark profiles)
+stop:                            # stop check: task_complete needs a check after the last change (task mode only)
+  enabled: true
+  max_rejections: 2
+  # A command matching one of these changed something (after removing
+  # redirections to /dev/null and between file descriptors).
+  edit_patterns:
+    - '\bsed\s+(-\w+\s+)*-i'
+    - '\bperl\s+-\w*i'
+    - '>{1,2}\s*[^\s&|>]'
+    - '\btee\b'
+    - '\b(mv|cp|rm|ln|chmod|patch)\s'
+    - '\bgit\s+(apply|am|checkout|switch|merge|cherry-pick|rebase|reset|restore|revert|commit|stash\s+pop)\b'
+    - '\b(pip3?|npm|pnpm|yarn|cargo|apt-get|apt|apk|yum|dnf|gem|conda)\s+(install|add)\b'
+  # A finished command matching one of these checked something.
+  verify_patterns:
+    - '\b(pytest|py\.test|tox|nox)\b'
+    - '\bpython3?\s+-m\s+(pytest|unittest|doctest)\b'
+    - '\b(npm|pnpm|yarn)\s+(run\s+)?test\b'
+    - '\b(cargo|go)\s+(test|run)\b'
+    - '\bmake\b'
+    - '\b(ctest|jest|mocha|vitest|rspec|phpunit)\b'
+    - '\b(mvn|gradle|gradlew)\b.*\btest\b'
+    - '\b(curl|wget|nc|ncat)\s'
+    - '\bpython3?\s+(-c|\S+\.py)'
+    - '\bnode\s+(-e|\S+\.m?js)'
+    - '(^|[;&|(]\s*|\s)\./[\w.-]+'
+    - '\b(bash|sh)\s+\S+\.sh\b'
+    - '\b(diff|cmp)\s'
+    - '\b(psql|mysql|sqlite3)\s'
+    - '\bgit\s+(clone|push|log|status|diff|show)\b'
+    - '\b(java|ruby|perl|php|Rscript|julia|lua)\s+\S+'
+cache: { breakpoints: [], ttl: 5m }
+tools: { write_stdin: true, image_read: true, todo: false, subagents: false, subagent_depth: 1, max_concurrent_subagents: 4 }
+openai:
+  reasoning_summary: auto
+  prompt_cache_key: gitagent

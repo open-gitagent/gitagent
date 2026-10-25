@@ -1,19 +1,19 @@
-node_modules/
-dist/
-pi-mono/
-.claude/
-.gitagent/
-.gitagent/whatsapp-auth/
-*.tgz
-snake-game.html
-examples/debug-events.ts
+/target/
+bench/jobs/
 .env
-cmd
-workspace/
-memory/.latest-frame.jpg
-memory/.latest-screen.jpg
+*.env
 .DS_Store
-.basecode/
-.cursor/
-.vscode/
-.mcp.json
+.env.*
+__pycache__/
+*.pyc
+dist/
+
+# The full run log, the dev/held-out split, the round history, the published
+# scores and the lesson store stay on the benchmark machine; the public proof
+# is the job logs on the Harbor hub.
+bench/RESULTS.md
+bench/split.json
+bench/rounds.json
+bench/leaderboard.json
+bench/lessons/
+bench/reruns/
