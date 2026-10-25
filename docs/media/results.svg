@@ -11,7 +11,7 @@
 <text x="640.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">95%</text>
 <line x1="770.0" y1="40" x2="770.0" y2="232" stroke="#332b25" stroke-width="1"/>
 <text x="770.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">100%</text>
-<text x="236" y="74" fill="#f1e9df" text-anchor="end" font-weight="600">gitagent 2 · Opus 5.5</text>
+<text x="236" y="74" fill="#f1e9df" text-anchor="end" font-weight="600">gitagent 3 · Opus 5.5</text>
 <rect x="250.0" y="55" width="338.8" height="28" rx="5" fill="#e05a44"/>
 <text x="598.8" y="74" fill="#f1e9df" font-weight="600">93.03%</text>
 <text x="236" y="120" fill="#b8a899" text-anchor="end" font-weight="400">Artificial Analysis harness · Fable 5.1</text>

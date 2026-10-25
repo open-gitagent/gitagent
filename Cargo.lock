@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-cli"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-context"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "gitagent-provider",
  "serde_json",
@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-core"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-guards"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "regex",
@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-hooks"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "async-trait",
  "gitagent-loader",
@@ -501,7 +501,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-learn"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "gitagent-loader",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-loader"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-mcp"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "gitagent-loader",
  "gitagent-provider",
@@ -538,7 +538,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-provider"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -553,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-record"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "serde",
@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-repo"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "tempfile",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-sandbox"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "landlock",
@@ -582,7 +582,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-sdk"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -600,14 +600,14 @@ dependencies = [
 
 [[package]]
 name = "gitagent-shaper"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "gitagent-terminal"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "portable-pty",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "gitagent-tools"
-version = "2.0.0"
+version = "3.0.0"
 dependencies = [
  "anyhow",
  "gitagent-context",

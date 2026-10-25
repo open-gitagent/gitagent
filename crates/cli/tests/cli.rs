@@ -1695,7 +1695,7 @@ fn interactive_commands() {
     assert!(stdout.contains("Here are the notes."), "{stdout}");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("● gitagent v2.")
+        stderr.contains("● gitagent v3.")
             && stderr.contains("lyra v1.0.0 · scripted:")
             && stderr.contains("skills: release-notes\n")
             && stderr.contains("● completed · 1 turn"),

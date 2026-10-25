@@ -11,18 +11,20 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Terminal--Bench_2.1-93.03%25-e05a44?style=flat-square" alt="Terminal-Bench 2.1: 93.0%" />
-  <img src="https://img.shields.io/badge/version-2.0.0-2a1f18?style=flat-square" alt="version 2.0.0" />
+  <img src="https://img.shields.io/badge/version-3.0.0-2a1f18?style=flat-square" alt="version 3.0.0" />
   <img src="https://img.shields.io/badge/built_with-Rust-2a1f18?style=flat-square" alt="Rust" />
   <img src="https://img.shields.io/github/license/open-gitagent/gitagent?style=flat-square&color=2a1f18" alt="license" />
 </p>
 
 <p align="center">
+  <a href="#why-gitagent">Why</a> &bull;
   <a href="#install">Install</a> &bull;
   <a href="#use">Use</a> &bull;
-  <a href="#how-gitagent-works">How it works</a> &bull;
   <a href="#results">Results</a> &bull;
-  <a href="#as-a-library">SDK</a> &bull;
-  <a href="#configuration">Configuration</a>
+  <a href="#how-gitagent-works">How it works</a> &bull;
+  <a href="#architecture">Architecture</a> &bull;
+  <a href="#sdks-any-language-over-ipc">SDKs</a> &bull;
+  <a href="#troubleshooting">Troubleshooting</a>
 </p>
 
 <p align="center">
@@ -31,7 +33,22 @@
 
 **Terminal-Bench 2.1: 93.03%** with Claude Opus 5.5, all 89 tasks, five runs each, code frozen at the published commit. The published harnesses on the same benchmark: Terminus 2 with the same model 87.6%, Codex CLI with GPT-6 Astra 87.4%, and the highest published entry, Artificial Analysis's own harness with Claude Fable 5.1 at maximum effort, 91.4%. The numbers are under [Results](#results); the reason is under [How gitagent works](#how-gitagent-works).
 
-This is gitagent 2, the Rust binary. Agents, hooks, schedules and client code written for gitagent 1.x run unchanged, and agent folders in the OpenGAP format load too. New in 2: the console (one `$` line per tool call, approvals inline, a task board), parallel tasks with a reconciling step, schedules, workflows, plugins, sub-agents, knowledge, the IPC protocol the Python and TypeScript clients speak, and the benchmark harness.
+## Why gitagent
+
+Most agent frameworks treat the agent as code scattered across your application. gitagent flips this: **your agent is a git repository**.
+
+- **`agent.yaml`**: model, tools, runtime settings, compliance
+- **`SOUL.md`**: who the agent is
+- **`RULES.md`**: what it must never do
+- **`memory/`**: what it remembers, committed to git with full history
+- **`skills/`**: instructions it can follow on demand
+- **`tools/`**: tools declared in YAML, backed by any script
+- **`hooks/`**: scripts that check or change every action
+- **`schedules/`**, **`workflows/`**, **`agents/`**: when it works on its own, step-by-step procedures, sub-agents it delegates to
+
+Fork an agent. Branch a personality. `git log` its memory. Diff its rules. Review a change to its behaviour like a code change. Every result traces back to a commit.
+
+**gitagent 3** is the Rust rewrite: one static binary with no runtime to install, the harness that scored 93.03% on Terminal-Bench 2.1, a console in your terminal, parallel sub-agents with a live task board, and SDKs for Python, TypeScript and any other language over a simple line protocol. Agents, hooks, schedules and SDK code written for the TypeScript gitagent (1.x and 2.x) run unchanged, and agent folders in the OpenGAP format load too. See [Coming from the TypeScript gitagent](#coming-from-the-typescript-gitagent).
 
 ## Install
 
@@ -144,7 +161,7 @@ The headline run's logs are public: every trial of it, with its trajectory and v
 
 | Harness | Model | Terminal-Bench 2.1 | Runs per task | Source |
 |---|---|---|---|---|
-| **gitagent 2** | Claude Opus 5.5 | **93.03%** (414/445; 75 of 89 tasks passed every run) | 5 | [job logs on the Harbor hub](#the-same-run-by-time-limit) |
+| **gitagent 3** | Claude Opus 5.5 | **93.03%** (414/445; 75 of 89 tasks passed every run) | 5 | [job logs on the Harbor hub](#the-same-run-by-time-limit) |
 | Terminus 2 | Claude Opus 5.5 | 87.6% | 1 | [Vals.ai](https://www.vals.ai/benchmarks/terminal-bench-2-1) |
 | Codex CLI | GPT-6 Astra | 87.4% ±0.9 | — | [Snorkel, the official leaderboard](https://snorkel.ai/leaderboard/terminal-bench-2-1/) |
 | Artificial Analysis's own harness | Claude Fable 5.1, max effort | 91.4% | — | [Artificial Analysis](https://artificialanalysis.ai/evaluations/terminalbench-2-1) |
@@ -211,9 +228,175 @@ The pieces are ordinary. What is unusual is that each one is a switch in a profi
 
 **Parallel work.** When a task has many similar pieces, the agent can write a plan of phases: every task in a phase runs at the same time as its own sub-agent, a later phase sees the earlier results, and one more sub-agent reconciles everything into the answer. The console shows it as a board that redraws as the tasks run. See [Parallel work](#parallel-work).
 
-## As a library
+## Architecture
 
-The `gitagent-sdk` crate offers a library interface over the same loop: `query(prompt, AgentOptions)` streams `system` / `assistant` / `user` / `result` messages, tools appear under the `.claude/` tool names (`Bash`, `Read`, `Edit`, …), and hooks are callbacks that receive `PreToolUse` / `PostToolUse` input and answer with `permissionDecision`, `updatedInput` or `updatedToolOutput`.
+```
+my-agent/
+├── agent.yaml          # model, tools, runtime, compliance, plugins
+├── SOUL.md             # identity
+├── RULES.md            # hard rules
+├── DUTIES.md           # role and responsibilities
+├── memory/
+│   ├── MEMORY.md       # working memory, committed on every save
+│   └── memory.yaml     # optional layers and line limits
+├── skills/
+│   └── <name>/SKILL.md # instructions with YAML frontmatter, plus any files
+├── tools/
+│   └── <name>.yaml     # declarative tools backed by a script or HTTP call
+├── hooks/
+│   ├── hooks.yaml      # scripts per lifecycle event
+│   ├── bootstrap.md    # what to do when a session starts
+│   └── teardown.md     # what to do when it ends
+├── agents/
+│   └── <name>/         # sub-agents, each a full agent folder
+├── workflows/
+│   └── <name>.yaml     # step-by-step procedures, run with @<name>
+├── schedules/
+│   └── <name>.yaml     # prompts on a timetable
+├── knowledge/
+│   └── index.yaml      # reference documents, some always loaded
+├── examples/
+│   └── *.md            # worked examples for the prompt
+├── plugins/
+│   └── <name>/         # local plugins: tools, skills, hooks, prompt text
+├── config/
+│   ├── default.yaml    # settings for every environment
+│   └── <env>.yaml      # overrides for --env <env>
+└── .gitagent/          # runtime state, not committed: sessions, audit, schedule logs
+```
+
+The binary reads this folder on every start, assembles one system prompt from it in a fixed order (identity, working method, skills, sub-agents, workflows, knowledge, examples, compliance, memory), and runs the loop described in [How gitagent works](#how-gitagent-works). `gitagent init <dir>` creates a minimal folder; `gitagent validate <dir>` checks one against the format.
+
+### The agent manifest (`agent.yaml`)
+
+```yaml
+spec_version: "0.1.0"
+name: lyra
+version: 1.0.0
+description: Keeps the billing service healthy.
+
+model:
+  preferred: anthropic:claude-sonnet-5-5
+  fallback: [openai:gpt-6-astra]
+  constraints: {temperature: 0.2, max_tokens: 8000}
+
+tools: [cli, read, write, memory, word-count]   # built-ins by their 1.x names, plus tools/*.yaml
+
+runtime:
+  max_turns: 50
+  timeout: 120            # seconds a command may run before it goes to the background
+  parallel_tasks: true    # the plan tool: phases of sub-agents, then a reconciling step
+  max_parallel: 4
+
+# Optional
+extends: https://github.com/org/base-agent.git    # inherit another agent's files
+dependencies: [{name: shared, source: https://github.com/org/shared-agent.git, version: main, mount: agents/shared}]   # gitagent install
+skills: [release-notes]
+agents: {reviewer: {description: Reviews a change for bugs.}}
+mcp_servers: {notes: {command: python3, args: [notes-server.py]}}
+plugins: {greeter: {enabled: true}}
+compliance:
+  risk_tier: high
+  supervision: {human_in_the_loop: conditional, escalation_triggers: [{action_type: cli}]}
+  recordkeeping: {audit_logging: true}
+```
+
+Built-in tools: `cli` (a persistent shell), `read`, `write`, `edit`, `memory`, and on request `skill`, `subagent`, `plan`, `workflow`. Tools from `tools/*.yaml`, plugins and MCP servers are added by name. The model sees the built-ins under their native names (`exec`, `read_file`, …); everything a person writes, hooks and SDK messages included, uses the 1.x names.
+
+## SDKs: any language over IPC
+
+The agent always runs in the binary. A client library starts `gitagent --ipc`, writes JSON lines to its stdin and reads JSON lines from its stdout. That is the whole interface, so any language that can start a process and read lines can drive an agent. The Python and TypeScript clients are thin wrappers over it.
+
+### Python
+
+```sh
+pip install ./clients/python        # from this repository; needs `gitagent` on PATH or GITAGENT_BIN
+```
+
+```python
+from gitagent import query, tool
+
+lookup = tool("lookup_order", "Looks up an order.",
+              {"properties": {"id": {"type": "string"}}},
+              lambda args: f"Order {args['id']} shipped on Monday.")
+
+q = query("Where is order 42?", dir="./my-agent", tools=[lookup],
+          hooks={"pre_tool_use": lambda ctx: {"action": "allow"}},
+          approver=lambda req: input(f"approve {req['toolName']}? [y/N] ") == "y")
+for message in q:
+    if message["type"] == "assistant" and message["content"]:
+        print(message["content"])
+print(q.result()["outcome"], q.costs())
+```
+
+`q.send(text)` adds a turn, `q.steer(text)` speaks to the running one, `q.abort()` stops it, `q.end()` ends the session. All options are listed in [clients/python/README.md](./clients/python/README.md).
+
+### TypeScript
+
+```sh
+npm install ./clients/typescript    # from this repository; needs `gitagent` on PATH or GITAGENT_BIN
+```
+
+```ts
+import { query, tool } from "@open-gitagent/gitagent";
+
+const lookup = tool("lookup_order", "Looks up an order.",
+  { properties: { id: { type: "string" } } },
+  async (args) => `Order ${args.id} shipped on Monday.`);
+
+const q = query({ prompt: "Where is order 42?", dir: "./my-agent", tools: [lookup],
+  hooks: { preToolUse: () => ({ action: "allow" }) } });
+for await (const message of q) {
+  if (message.type === "assistant" && message.content) console.log(message.content);
+}
+console.log(q.result()?.outcome, q.costs());
+```
+
+The API is the TypeScript gitagent's `query()`, so existing code keeps working: messages, hooks and options have the same names, and tools appear under their 1.x names (`cli`, `read`, …). See [clients/typescript/README.md](./clients/typescript/README.md).
+
+### Any other language
+
+Start `gitagent --ipc`, send `initialize`, then one `user` message per turn. This is a complete client in bash:
+
+```bash
+coproc GA { gitagent --ipc; }
+send() { printf '%s\n' "$1" >&"${GA[1]}"; }
+send '{"type":"initialize","protocol":1,"options":{"dir":"./my-agent","toolNames":"v1"}}'
+send '{"type":"user","content":"The billing tests fail on main. Find out why and fix it."}'
+while IFS= read -r line <&"${GA[0]}"; do
+  case "$(jq -r '.type + "/" + (.subtype // "")' <<<"$line")" in
+    tool_use/)          jq -r '"$ " + .toolName + " " + (.args | tostring)' <<<"$line" ;;
+    assistant/)         jq -r 'select(.content != "") | .content' <<<"$line" ;;
+    system/turn_end)    send '{"type":"end"}' ;;
+    system/session_end) break ;;
+  esac
+done
+```
+
+| You send | It means |
+|---|---|
+| `{"type":"initialize","protocol":1,"options":{…},"callbacks":[…],"tools":[…]}` | Start. Options: `dir`, `model`, `env`, `systemPrompt`, `allowedTools`, `maxTurns`, `sessionId`, `resume`, `mcpServers`, `repo`, `conversation`, `toolNames`, … `callbacks` names the hooks your code answers (`preToolUse`, `postToolUse`, `approval`, …); `tools` declares tools your code runs |
+| `{"type":"user","content":"…"}` | A turn |
+| `{"type":"steer","content":"…"}` | Words for the running turn |
+| `{"type":"abort"}` / `{"type":"kill"}` | Stop the turn / stop and end the session |
+| `{"type":"callback_response","id":"…","result":{…}}` | Your answer to a hook, tool or approval request |
+| `{"type":"end"}` | End the session after the current step |
+
+| You receive | When |
+|---|---|
+| `system/ready`, `system/session_start` | After `initialize`: the session id, the agent, the model, the tools |
+| `user`, `delta`, `assistant`, `tool_use`, `tool_result` | As the turn runs; `assistant` carries `usage` and `costUsd` |
+| `callback_request` (`kind`: `hook`, `tool` or `approval`) | The binary needs your answer; reply with `callback_response` and the same `id` |
+| `system/turn_end` | A turn finished, with its `outcome` and usage |
+| `system/warning`, `system/error`, `system/hook_blocked` | Something to show; the session goes on unless the error was fatal |
+| `system/session_end` | Last message, with the session's costs |
+
+With `resume: true` the conversation is stored after every turn under `.gitagent/sessions/<sessionId>/`, and a new process started with the same `sessionId` continues it.
+
+### Rust
+
+
+The `gitagent-sdk` crate runs the loop in your own process, without IPC: `query(prompt, AgentOptions)` streams `system` / `assistant` / `user` / `result` messages, tools appear under the `.claude/` tool names (`Bash`, `Read`, `Edit`, …), and hooks are callbacks that receive `PreToolUse` / `PostToolUse` input and answer with `permissionDecision`, `updatedInput` or `updatedToolOutput`.
 
 ```rust
 use gitagent_sdk::{query, AgentOptions, AgentDefinition, HookEvent, HookMatcher, HookOutput, Message};
@@ -239,6 +422,17 @@ while let Some(message) = q.next().await {
 ```
 
 The same shape is available from the command line: `gitagent -p "..." --output-format stream-json` prints one message per line, and `--max-turns`, `--allowed-tools`, `--disallowed-tools` and `--append-system-prompt` take the same values as `AgentOptions`.
+
+## Coming from the TypeScript gitagent
+
+gitagent 3 replaces the TypeScript packages (1.x and 2.x) with one binary. What carries over unchanged:
+
+- **Agent folders.** `agent.yaml`, `SOUL.md`, `RULES.md`, `memory/`, `skills/`, `tools/`, `hooks/`, `schedules/`, `workflows/`, `agents/`, `config/` and `.env` are read as they were. 1.x settings such as `tools: [cli, read, write, memory]`, `runtime.timeout` and the 1.x `compliance` shape are accepted; `gitagent validate` points out the newer spelling as a warning, never an error.
+- **Hook scripts.** They get the same JSON and answer the same way; output that is not an answer, or a script that crashes, allows the action with a warning, as before.
+- **The CLI.** `gitagent`, `-p`, `-d`, `-m`, `-e`, `--repo`, `--pat`, `--session` and the REPL's slash commands work as before.
+- **SDK code.** `query()`, `tool()`, hooks, `steer()`, `abort()`, the message types and the `repo` option are the same; the TypeScript package now needs the `gitagent` binary installed.
+
+What changed: the binary must be installed (one `curl` line, above); `--voice` and the remote `--sandbox` are not part of gitagent 3; a plugin's `entry` JavaScript is not run (plugins contribute tools, skills, hooks and prompt text through files); usage errors exit with 2, provider failures with 3 and interrupts with 130 instead of 1.
 
 ## Configuration
 
@@ -297,6 +491,28 @@ gitagent learn --model anthropic:claude-opus-5-5 --from bench/jobs/<job> [--from
 ```
 
 It learns only from tasks in the `dev` list of `bench/split.json`. Review the diff of `prompts/lessons.md` before committing it; set `lessons: false` in a profile to leave lessons out.
+
+## Troubleshooting
+
+**`gitagent: command not found`.** The installer puts the binary in `~/.local/bin`. Add it to your `PATH`, or run it by its full path.
+
+**The agent does not answer, or exits with code 3.** The call to the model provider failed. Check that the key for your provider is set: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `{NAME}_API_KEY` for an OpenAI-compatible endpoint. Keys can also live in the agent folder's `.env` or in `~/.gitagent/.env`. The line gitagent prints when it starts names the model it is using.
+
+**My files are not being used.** Run `gitagent validate <dir>`: it lists every problem with a file and line number. Warnings at startup (`gitagent: warning: …`) name files that were skipped.
+
+**A command or file write is refused.** On Linux the agent's shell runs in a sandbox that allows writes only under the working folder, the output folder, the temp folders and `~/.cache`. Set `sandbox: off` in `gitagent.yaml` if the agent must write elsewhere. A hook may also have blocked the action; the `$` line says so in its result.
+
+**The session pauses with `! approval needed`.** The agent's compliance settings ask a person for that action. Answer `y` or `n`. Without a terminal, for example in a pipe, such requests are denied.
+
+**Output looks garbled, or the prompt behaves oddly.** Set `NO_COLOR=1` to turn colour off. Piped input is read line by line without the line editor, which suits scripts.
+
+**A command's output was cut.** The model sees a shaped version; the full output is in the run's output folder (`/tmp/gitagent` by default, `--out-dir` to change it), under `out/<n>.log`.
+
+**How do I see what the agent did?** Every run writes `trajectory.json` (every prompt, reply, tool call and result) and `counters.json` to its output folder. `--events jsonl` prints each step as it happens, and `OTEL_EXPORTER_OTLP_ENDPOINT` exports traces and metrics.
+
+**A conversation was lost when the process ended.** Sessions are kept across processes over IPC with `resume: true` and a fixed `sessionId`. In the console, `/new` starts a fresh conversation on purpose; nothing else drops it.
+
+**Still stuck?** Open an issue at [github.com/open-gitagent/gitagent/issues](https://github.com/open-gitagent/gitagent/issues) with what you ran, `gitagent --version` and, if you can, the run's `trajectory.json`.
 
 ## Contributing
 

@@ -1,6 +1,6 @@
 # Contributing to gitagent
 
-Thanks for helping. This guide covers gitagent 2, the Rust binary on this branch.
+Thanks for helping. This guide covers gitagent 3, the Rust binary.
 
 ## Getting started
 
@@ -35,7 +35,7 @@ bash scripts/integrity-audit.sh
 
 - **The benchmark guard must pass.** `bench_prompt_and_tools_match_the_published_run` fails if the system prompt or the tool list sent to the model in `--bench` mode changes at all. Features for agent folders, the console or the SDKs must never reach benchmark mode. If a change to the benchmark setup is intended, say so in the pull request; it needs a measured run before it is merged.
 - **Behaviour that changes results is a profile switch.** Add it to `profiles/*.yaml`, off by default, and describe it in `docs/HOW-IT-WORKS.md`.
-- **Agents written for gitagent 1.x must keep working.** Tool names, hook scripts, `agent.yaml` fields and SDK options from 1.x are accepted; if you change how one is read, keep the 1.x form working and cover it with a test.
+- **Agents written for the TypeScript gitagent must keep working.** Tool names, hook scripts, `agent.yaml` fields and SDK options from 1.x and 2.x are accepted; if you change how one is read, keep the old form working and cover it with a test.
 
 ## Project structure
 
