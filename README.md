@@ -59,6 +59,22 @@ The agent's shell never sees these keys.
 - **Safety:** it never commits to or pushes the base branch, and never force-pushes.
 - **Token:** `GITAGENT_GIT_TOKEN` or `GITHUB_TOKEN` is passed to git through a helper. It is never written to the repository, the logs or the events.
 
+### Parallel work
+
+With `runtime: {parallel_tasks: true}` in agent.yaml, the agent gets a
+`plan` tool: it writes phases of tasks, every task in a phase runs at the
+same time as its own sub-agent (fresh context, own shell), a later phase
+sees the earlier results, and one more sub-agent reconciles everything into
+the answer. `runtime.max_parallel` (default 4) says how many run at once.
+Use it for work that splits into similar pieces: many files to read, many
+items to check. It costs tokens in proportion, so give it scoped tasks.
+
+```yaml
+runtime:
+  parallel_tasks: true
+  max_parallel: 8
+```
+
 ### Schedules
 
 `schedules/*.yaml` in the agent directory are prompts the agent runs on a
@@ -88,21 +104,6 @@ gitagent schedule disable nightly -d ./project           # also enable, remove
 Like 1.x's in-process scheduler, jobs fire only while `start` is running;
 for anything that must not be missed, have an external scheduler call
 `gitagent schedule run <id>`.
-
-### The web page
-
-```sh
-gitagent ui -d ./project            # serves http://127.0.0.1:3333/ and opens it
-gitagent ui -d ./project --port 0 --no-open -m anthropic:claude-opus-5-5
-```
-
-A local page for one agent, built on the same IPC protocol the SDKs use.
-Chat shows every tool call as a line you can unfold. Agent shows the
-files, the system prompt the model receives and the git history, with a
-revert for any commit. Approvals is the inbox for compliance requests.
-Schedules lists the agent's schedules and runs them while the page's
-server is up. Sessions keeps past conversations with their cost. The
-server listens on 127.0.0.1 only.
 
 ## As a library
 

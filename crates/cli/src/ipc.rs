@@ -438,6 +438,12 @@ impl Stream {
                     "args": self.cb.args_out(name, &args),
                 }));
             }
+            "plan" => {
+                let mut m = e.clone();
+                m["type"] = json!("plan");
+                m.as_object_mut().map(|o| o.remove("event"));
+                self.out.send(m);
+            }
             "tool_result" => {
                 let name = e["name"].as_str().unwrap_or_default();
                 let content = e.get("output").unwrap_or(&e["content"]);

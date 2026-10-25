@@ -2095,3 +2095,109 @@ async fn a_workflow_step_naming_a_missing_tool_fails_plainly() {
     );
     assert!(provider.requests().is_empty());
 }
+
+/// `plan`: each phase's tasks run at the same time as sub-agents, a later
+/// phase sees the earlier results, and a reconciling sub-agent's answer
+/// comes back as the tool's result.
+#[tokio::test]
+async fn a_plan_runs_phases_in_parallel_and_reconciles() {
+    let mut spec = spec();
+    spec.profile.tools.subagents = true;
+    spec.profile.tools.plan = true;
+    spec.profile.tools.max_concurrent_subagents = 2;
+    spec.agents = vec![agent("worker", 5)];
+    // The children draw from one script in the order they finish: three
+    // phase-1 tasks, one phase-2 task, then the reconciler.
+    let script = r#"
+- tool_calls:
+    - name: plan
+      arguments:
+        goal: Find every TODO.
+        phases:
+          - name: read
+            tasks:
+              - {description: read a.rs, prompt: "list the TODOs in a.rs", agent: worker}
+              - {description: read b.rs, prompt: "list the TODOs in b.rs", agent: worker}
+              - {description: read c.rs, prompt: "list the TODOs in c.rs", agent: worker}
+          - name: check
+            tasks:
+              - {description: check them, prompt: "confirm each TODO still applies", agent: worker}
+        reconcile: Combine the results into one list, no duplicates.
+        agent: worker
+- tool_calls: [{name: task_complete, arguments: {summary: "a.rs: 2 TODOs"}}]
+- tool_calls: [{name: task_complete, arguments: {summary: "b.rs: 1 TODO"}}]
+- tool_calls: [{name: task_complete, arguments: {summary: "c.rs: none"}}]
+- tool_calls: [{name: task_complete, arguments: {summary: "all 3 still apply"}}]
+- tool_calls: [{name: task_complete, arguments: {summary: "COMBINED: 3 TODOs in a.rs and b.rs"}}]
+- tool_calls: [{name: task_complete, arguments: {summary: "parent done"}}]
+"#;
+    let r = run_script_for(&spec, "x", script, 600).await;
+    assert_eq!(r.report.outcome, Outcome::Completed);
+    let c = r.counters();
+    assert_eq!(c["plan_runs"], 1);
+    assert_eq!(c["plan_tasks"], 4);
+    assert_eq!(c["plan_failed_tasks"], 0);
+    assert_eq!(c["subagent_turns"], 5);
+    let out = first_result(&r.trajectory());
+    assert!(out.starts_with("4 tasks in 2 phases ran."), "{out}");
+    assert!(out.contains("COMBINED: 3 TODOs"), "{out}");
+    // The phase-2 task and the reconciler were given the earlier results.
+    let texts = trajectories_under(&r.dir.path().join("out/plans"));
+    assert_eq!(texts.len(), 5, "one trajectory per task and the reconciler");
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.contains("Results of the earlier phases") && t.contains("read a.rs")),
+        "the phase-2 task saw phase 1"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.contains("Goal: Find every TODO.") && t.contains("# All results")),
+        "the reconciler saw everything"
+    );
+}
+
+#[tokio::test]
+async fn a_bad_plan_is_refused_without_running_anything() {
+    let mut spec = spec();
+    spec.profile.tools.subagents = true;
+    spec.profile.tools.plan = true;
+    spec.agents = vec![agent("worker", 5)];
+    let script = r#"
+- tool_calls: [{name: plan, arguments: {phases: [{tasks: []}], reconcile: x}}]
+- tool_calls: [{name: task_complete, arguments: {summary: done}}]
+"#;
+    let r = run_script_for(&spec, "x", script, 600).await;
+    let out = first_result(&r.trajectory());
+    assert!(out.contains("phase 1 has no tasks"), "{out}");
+    assert_eq!(r.counters()["plan_tasks"], 0);
+}
+
+/// The content of the first tool result in a trajectory.
+fn first_result(t: &serde_json::Value) -> String {
+    t["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|s| s["observation"]["results"][0]["content"].as_str())
+        .unwrap()
+        .to_string()
+}
+
+/// Every trajectory.json under `dir`, as text.
+fn trajectories_under(dir: &std::path::Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.file_name().is_some_and(|n| n == "trajectory.json") {
+                out.push(std::fs::read_to_string(&p).unwrap());
+            }
+        }
+    }
+    out
+}

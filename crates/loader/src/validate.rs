@@ -395,6 +395,8 @@ const MANIFEST: Ty = Ty::Obj(&[
         "runtime",
         Ty::Obj(&[
             ("max_turns", Ty::Int(1)),
+            ("parallel_tasks", Ty::Bool),
+            ("max_parallel", Ty::Int(1)),
             ("temperature", Ty::Num(0.0, 2.0)),
             ("timeout", Ty::Int(1)),
         ]),

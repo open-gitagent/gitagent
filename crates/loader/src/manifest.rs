@@ -110,6 +110,11 @@ pub struct Runtime {
     pub temperature: Option<f32>,
     /// Seconds.
     pub timeout: Option<u64>,
+    /// The agent may plan work as phases of tasks that run at the same
+    /// time as sub-agents, then reconcile the results (the `plan` tool).
+    pub parallel_tasks: Option<bool>,
+    /// How many tasks run at once.
+    pub max_parallel: Option<u32>,
 }
 
 /// Most generations of `extends` followed.

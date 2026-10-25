@@ -212,6 +212,10 @@ pub struct ToolsCfg {
     /// Sub-agents called in one reply run at the same time, this many at once.
     #[serde(default = "default_max_concurrent_subagents")]
     pub max_concurrent_subagents: u32,
+    /// `plan`: phases of tasks run at the same time as sub-agents, then a
+    /// reconciling step (agent.yaml `runtime.parallel_tasks`).
+    #[serde(default)]
+    pub plan: bool,
 }
 
 fn default_subagent_depth() -> u32 {

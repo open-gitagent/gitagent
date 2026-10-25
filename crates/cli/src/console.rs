@@ -191,6 +191,41 @@ pub(crate) fn event_line(st: &Style, e: &Value) -> Option<String> {
             ))
         }
         "steer" => Some(st.dim(&format!("↪ {}", e["text"].as_str().unwrap_or("")))),
+        "plan" => {
+            let s = |k: &str| e[k].as_str().unwrap_or("");
+            Some(match s("action") {
+                "phase_start" => format!(
+                    "{} {}",
+                    st.orange("⇶"),
+                    st.bold(&format!(
+                        "phase {}/{} {} · {} task{} at once",
+                        e["phase"],
+                        e["of"],
+                        s("name"),
+                        e["tasks"],
+                        if e["tasks"] == 1 { "" } else { "s" }
+                    ))
+                ),
+                "task_start" => format!("  {} {}", st.dim("◌"), st.dim(s("description"))),
+                "task_end" => format!(
+                    "  {} {} {}",
+                    if e["ok"] == true {
+                        st.orange("✓")
+                    } else {
+                        st.orange("✗")
+                    },
+                    s("description"),
+                    st.dim(&format!("— {}", cut(s("result"), 80)))
+                ),
+                "reconcile_start" => {
+                    format!("{} {}", st.orange("⇶"), st.bold("reconciling the results"))
+                }
+                "reconcile_end" => {
+                    format!("  {} {}", st.orange("●"), st.dim(&cut(s("result"), 100)))
+                }
+                _ => return None,
+            })
+        }
         "guard" if e["kind"] == "compaction" => Some(st.dim("· context compacted")),
         _ => None,
     }
@@ -399,6 +434,242 @@ fn join(rows: &mut [Vec<char>], glyph: &[&str; 6]) {
     }
 }
 
+/// Set while a task board owns the terminal, so the spinner stays quiet.
+static BOARD_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The live view of a `plan` run: one line per task, redrawn in place as
+/// tasks start and finish, with the phase and the reconciling step.
+#[derive(Clone)]
+pub(crate) struct Board {
+    st: Style,
+    inner: std::sync::Arc<std::sync::Mutex<BoardState>>,
+}
+
+#[derive(Default)]
+struct BoardState {
+    active: bool,
+    phase: usize,
+    of: usize,
+    phase_name: String,
+    /// Finished phases: (name, tasks, failed).
+    earlier: Vec<(String, usize, usize)>,
+    tasks: Vec<TaskRow>,
+    reconcile: Option<(bool, Option<bool>, String, std::time::Instant)>,
+    drawn: usize,
+    frame: usize,
+    started: Option<std::time::Instant>,
+}
+
+struct TaskRow {
+    id: String,
+    description: String,
+    agent: String,
+    ok: Option<bool>,
+    result: String,
+    started: std::time::Instant,
+    took: Option<Duration>,
+}
+
+const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+impl Board {
+    pub(crate) fn new(st: Style) -> Board {
+        Board {
+            st,
+            inner: std::sync::Arc::new(std::sync::Mutex::new(BoardState::default())),
+        }
+    }
+
+    /// Folds a `plan` event in and redraws. Returns false for other events.
+    pub(crate) fn on_event(&self, e: &Value) -> bool {
+        if e["event"] != "plan" {
+            return false;
+        }
+        let s = |k: &str| e[k].as_str().unwrap_or("").to_string();
+        let mut b = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let now = std::time::Instant::now();
+        match e["action"].as_str().unwrap_or("") {
+            "phase_start" => {
+                if !b.active {
+                    *b = BoardState::default();
+                    b.active = true;
+                    b.started = Some(now);
+                    BOARD_ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+                    clear_line(&self.st);
+                    self.tick();
+                }
+                if b.phase > 0 {
+                    let failed = b.tasks.iter().filter(|t| t.ok == Some(false)).count();
+                    let name = b.phase_name.clone();
+                    let n = b.tasks.len();
+                    b.earlier.push((name, n, failed));
+                    b.tasks.clear();
+                }
+                b.phase = e["phase"].as_u64().unwrap_or(0) as usize;
+                b.of = e["of"].as_u64().unwrap_or(0) as usize;
+                b.phase_name = s("name");
+            }
+            "task_start" => b.tasks.push(TaskRow {
+                id: s("id"),
+                description: s("description"),
+                agent: s("agent"),
+                ok: None,
+                result: String::new(),
+                started: now,
+                took: None,
+            }),
+            "task_end" => {
+                let id = s("id");
+                if let Some(t) = b.tasks.iter_mut().find(|t| t.id == id) {
+                    t.ok = Some(e["ok"] == true);
+                    t.result = s("result");
+                    t.took = Some(now.duration_since(t.started));
+                }
+            }
+            "reconcile_start" => b.reconcile = Some((true, None, String::new(), now)),
+            "reconcile_end" => {
+                b.reconcile = Some((false, Some(e["ok"] == true), s("result"), now));
+                b.active = false;
+                BOARD_ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+            }
+            _ => {}
+        }
+        drop(b);
+        self.draw();
+        let mut b = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        if !b.active {
+            // The final picture stays; later lines go under it.
+            b.drawn = 0;
+        }
+        true
+    }
+
+    fn tick(&self) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(140)).await;
+                {
+                    let mut b = me.inner.lock().unwrap_or_else(|p| p.into_inner());
+                    if !b.active {
+                        break;
+                    }
+                    b.frame += 1;
+                }
+                me.draw();
+            }
+        });
+    }
+
+    fn draw(&self) {
+        let mut b = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let lines = self.lines(&b);
+        let mut out = String::new();
+        if b.drawn > 0 {
+            out.push_str(&format!("\x1b[{}A", b.drawn));
+        }
+        out.push_str("\r\x1b[J");
+        for l in &lines {
+            out.push_str(l);
+            out.push('\n');
+        }
+        eprint!("{out}");
+        let _ = std::io::stderr().flush();
+        b.drawn = lines.len();
+    }
+
+    /// The board as lines, for the terminal.
+    fn lines(&self, b: &BoardState) -> Vec<String> {
+        let st = &self.st;
+        let frame = FRAMES[b.frame % FRAMES.len()];
+        let mut out = Vec::new();
+        for (name, n, failed) in &b.earlier {
+            out.push(format!(
+                "{} {}",
+                st.orange("✓"),
+                st.dim(&format!(
+                    "{name} · {n} task{}{}",
+                    if *n == 1 { "" } else { "s" },
+                    if *failed > 0 {
+                        format!(", {failed} failed")
+                    } else {
+                        String::new()
+                    }
+                ))
+            ));
+        }
+        let running = b.tasks.iter().filter(|t| t.ok.is_none()).count();
+        let elapsed = b.started.map(|s| s.elapsed().as_secs()).unwrap_or(0);
+        out.push(format!(
+            "{} {} {}",
+            st.orange("⇶"),
+            st.bold(&format!("phase {}/{} {}", b.phase, b.of, b.phase_name)),
+            st.dim(&format!(
+                "· {} of {} running · {elapsed}s",
+                running,
+                b.tasks.len()
+            ))
+        ));
+        const SHOW: usize = 14;
+        let hidden = b.tasks.len().saturating_sub(SHOW);
+        if hidden > 0 {
+            let done = b.tasks[..hidden].iter().filter(|t| t.ok.is_some()).count();
+            out.push(st.dim(&format!(
+                "  … {hidden} earlier task{} ({done} done)",
+                if hidden == 1 { "" } else { "s" }
+            )));
+        }
+        for t in b.tasks.iter().skip(hidden) {
+            let who = if t.agent.is_empty() || t.agent == "general" {
+                String::new()
+            } else {
+                format!(" ({})", t.agent)
+            };
+            out.push(match t.ok {
+                None => format!(
+                    "  {} {}{} {}",
+                    st.orange(frame),
+                    t.description,
+                    st.dim(&who),
+                    st.dim(&format!("{}s", t.started.elapsed().as_secs()))
+                ),
+                Some(true) => format!(
+                    "  {} {}{} {}",
+                    st.orange("✓"),
+                    t.description,
+                    st.dim(&who),
+                    st.dim(&format!("— {}", cut(&t.result, 70)))
+                ),
+                Some(false) => format!(
+                    "  {} {}{} {}",
+                    st.orange("✗"),
+                    st.bold(&t.description),
+                    st.dim(&who),
+                    st.dim(&format!("— {}", cut(&t.result, 70)))
+                ),
+            });
+        }
+        if let Some((running, ok, result, at)) = &b.reconcile {
+            out.push(if *running {
+                format!(
+                    "{} {} {}",
+                    st.orange(frame),
+                    st.bold("reconciling the results"),
+                    st.dim(&format!("{}s", at.elapsed().as_secs()))
+                )
+            } else {
+                format!(
+                    "{} {} {}",
+                    st.orange(if *ok == Some(true) { "●" } else { "✗" }),
+                    st.bold("reconciled"),
+                    st.dim(&format!("— {}", cut(result, 90)))
+                )
+            });
+        }
+        out
+    }
+}
+
 /// A line that redraws itself while the model works, on a terminal only.
 /// Dropping it clears the line.
 pub(crate) struct Spinner {
@@ -415,6 +686,10 @@ impl Spinner {
                 const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
                 let mut i = 0;
                 while !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    if BOARD_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) {
+                        tokio::time::sleep(Duration::from_millis(120)).await;
+                        continue;
+                    }
                     let secs = started.elapsed().as_secs();
                     let line = format!(
                         "\r\x1b[2K{} {}",
@@ -438,7 +713,9 @@ impl Spinner {
 
 impl Drop for Spinner {
     fn drop(&mut self) {
-        if !self.stop.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        if !self.stop.swap(true, std::sync::atomic::Ordering::Relaxed)
+            && !BOARD_ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
+        {
             eprint!("\r\x1b[2K");
             let _ = std::io::stderr().flush();
         }
@@ -523,6 +800,53 @@ mod tests {
             "{rows:#?}"
         );
         assert!(rows[5].starts_with(" |___/"), "{rows:#?}");
+    }
+
+    #[test]
+    fn the_board_lists_phases_and_tasks() {
+        let st = Style::plain();
+        let b = Board::new(st);
+        let now = std::time::Instant::now();
+        let mut state = BoardState {
+            active: true,
+            phase: 2,
+            of: 2,
+            phase_name: "check".into(),
+            earlier: vec![("read".into(), 3, 1)],
+            ..Default::default()
+        };
+        state.tasks.push(TaskRow {
+            id: "a".into(),
+            description: "check them".into(),
+            agent: "worker".into(),
+            ok: None,
+            result: String::new(),
+            started: now,
+            took: None,
+        });
+        state.tasks.push(TaskRow {
+            id: "b".into(),
+            description: "check more".into(),
+            agent: "general".into(),
+            ok: Some(true),
+            result: "all fine".into(),
+            started: now,
+            took: Some(Duration::from_secs(1)),
+        });
+        state.started = Some(now);
+        let lines = b.lines(&state);
+        assert_eq!(lines[0], "✓ read · 3 tasks, 1 failed");
+        assert!(
+            lines[1].starts_with("⇶ phase 2/2 check · 1 of 2 running"),
+            "{}",
+            lines[1]
+        );
+        assert!(
+            lines[2].starts_with("  ⠋ check them (worker)"),
+            "{}",
+            lines[2]
+        );
+        assert_eq!(lines[3], "  ✓ check more — all fine");
     }
 
     #[test]

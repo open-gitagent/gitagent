@@ -27,8 +27,13 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
         .agent
         .as_ref()
         .map_or_else(|| s.spec.config.name.clone(), |a| a.manifest.name.clone());
-    // Live lines for each tool call and result, on stderr.
+    // Live lines for each tool call and result, on stderr; a plan's tasks
+    // as a board that redraws in place on a terminal.
+    let board = console::Board::new(st);
     let events = s.events.clone().also(move |e| {
+        if st.is_color() && board.on_event(&e) {
+            return;
+        }
         if let Some(line) = console::event_line(&st, &e) {
             console::clear_line(&st);
             eprintln!("{line}");

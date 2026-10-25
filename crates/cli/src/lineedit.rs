@@ -36,7 +36,10 @@ pub(crate) async fn read_line(
             .ok()?;
         let mut ed = Editor::new(st, prompt, choices, history);
         ed.draw(&mut tty);
-        let mut bytes = std::io::BufReader::new(tty.try_clone().ok()?).bytes();
+        // One byte at a time, on purpose: a buffered reader would take the
+        // next line with it and drop it when this call returns.
+        #[allow(clippy::unbuffered_bytes)]
+        let mut bytes = tty.try_clone().ok()?.bytes();
         loop {
             let key = read_key(&mut bytes)?;
             match ed.key(key) {

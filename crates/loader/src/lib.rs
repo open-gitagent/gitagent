@@ -52,6 +52,9 @@ const DEFAULT_CONFIG: &str = include_str!("../../../gitagent.yaml");
 const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../../../prompts/system.md");
 const DEFAULT_CONVERSATION_PROMPT: &str = include_str!("../../../prompts/conversation.md");
 const DEFAULT_LESSONS: &str = include_str!("../../../prompts/lessons.md");
+
+/// What the agent is told when `runtime.parallel_tasks` is on.
+const PLAN_SECTION: &str = "# Parallel work\n\nWhen a task has many similar pieces (many files to read, many items to check, many questions to answer), do not work through them one at a time. Call the `plan` tool: give it phases of tasks, each task a complete self-contained prompt for a sub-agent, and a `reconcile` instruction that turns all the results into one answer. Tasks in a phase run at the same time; a later phase sees the results of the earlier ones. Keep each task small and specific, and keep the number of tasks to what the work needs.\n";
 const DEFAULT_PROFILES: &[(&str, &str)] = &[
     (
         "anthropic",
@@ -390,6 +393,14 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         {
             profile.exec_default_yield_ms = t.saturating_mul(1000).min(600_000);
         }
+        // Parallel work: phases of tasks as sub-agents, reconciled at the end.
+        if m.runtime.as_ref().and_then(|r| r.parallel_tasks) == Some(true) {
+            profile.tools.subagents = true;
+            profile.tools.plan = true;
+        }
+        if let Some(n) = m.runtime.as_ref().and_then(|r| r.max_parallel) {
+            profile.tools.max_concurrent_subagents = n.max(1);
+        }
         // Temperature: runtime, then model constraints.
         let constraints = m.model.as_ref().and_then(|s| s.constraints.as_ref());
         if let Some(t) = m
@@ -496,6 +507,13 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
                 system_prompt.push_str(&section);
             }
         }
+    }
+    if profile.tools.plan {
+        if agents.is_empty() {
+            agents.push(agents::general());
+        }
+        system_prompt.push('\n');
+        system_prompt.push_str(PLAN_SECTION);
     }
     // Workflows from the agent directory.
     let workflows = match &agent {

@@ -4,6 +4,7 @@
 mod approval;
 mod audit;
 mod fallback;
+mod plan;
 mod snapshot;
 pub mod workflow;
 
@@ -863,6 +864,32 @@ pub async fn run(
                                 kill: opts.kill.clone(),
                             };
                             workflow::run_as_tool(spec, provider, &run_call, child).await
+                        } else if run_call.name == gitagent_tools::PLAN && spec.profile.tools.plan {
+                            counters.inc("plan_runs");
+                            let at_once =
+                                spec.profile.tools.max_concurrent_subagents.max(1) as usize;
+                            let children = plan::Children {
+                                template: ChildRun {
+                                    cwd: terminal.cwd().to_path_buf(),
+                                    out_dir: opts.out_dir.join(format!("plans/{call_seq}")),
+                                    remaining: remaining(),
+                                    sandbox: opts.sandbox.clone(),
+                                    hooks: opts.hook_callbacks.clone(),
+                                    mcp: opts.mcp.clone(),
+                                    approver: opts.approver.clone(),
+                                    kill: opts.kill.clone(),
+                                },
+                            };
+                            let done =
+                                plan::run(spec, provider, &run_call, &children, &events, at_once)
+                                    .await;
+                            for rep in &done.reports {
+                                counters.add("subagent_turns", rep.turns.into());
+                                add_usage(&mut total, &rep.usage, &mut counters);
+                            }
+                            counters.add("plan_tasks", done.tasks.into());
+                            counters.add("plan_failed_tasks", done.failed.into());
+                            done.out
                         } else if let Some(ext) = external {
                             counters.inc_labelled("external_tool_calls", &run_call.name);
                             let (content, is_error) =
@@ -1209,6 +1236,9 @@ pub fn offered_tools(
     }
     if !spec.agents.is_empty() {
         tools.push(gitagent_tools::subagent_spec(&spec.agents));
+        if spec.profile.tools.plan {
+            tools.push(gitagent_tools::plan_spec(&spec.agents));
+        }
     }
     if let Some(memory) = &spec.memory {
         tools.push(gitagent_tools::memory_spec(memory));

@@ -111,6 +111,7 @@ mod tests {
             subagents: false,
             subagent_depth: 1,
             max_concurrent_subagents: 4,
+            plan: false,
         };
         let specs = sdk_specs(crate::specs(&cfg, EditTool::StrReplace));
         let names: Vec<&str> = specs.iter().map(|t| t.name.as_str()).collect();

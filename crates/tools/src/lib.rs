@@ -41,6 +41,7 @@ pub const TODO: &str = "todo";
 pub const TASK_COMPLETE: &str = "task_complete";
 pub const SKILL: &str = "skill";
 pub const SUBAGENT: &str = "subagent";
+pub const PLAN: &str = "plan";
 pub const MEMORY: &str = "memory";
 pub const WORKFLOW: &str = "workflow";
 
@@ -663,6 +664,54 @@ pub fn subagent_spec(agents: &[AgentDef]) -> ToolSpec {
     }
 }
 
+/// The `plan` tool: phases of tasks that run at the same time as
+/// sub-agents, then one reconciling step.
+pub fn plan_spec(agents: &[AgentDef]) -> ToolSpec {
+    let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
+    ToolSpec {
+        name: PLAN.into(),
+        description: "Run many pieces of work at the same time and combine the results. Give phases \
+             of tasks: every task in a phase runs at once as its own sub-agent with a fresh context \
+             and its own shell (so each `prompt` must carry every path and detail it needs), and a \
+             later phase is given the results of the earlier ones. When all phases are done, one \
+             more sub-agent runs `reconcile` with every result and its answer comes back to you. \
+             Use it when a task splits into similar independent pieces; keep each task small."
+            .into(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string", "description": "One line on what the whole plan is for."},
+                "phases": {
+                    "type": "array",
+                    "description": "The phases, in order.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "A few words naming the phase."},
+                            "tasks": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "description": {"type": "string", "description": "A few words on what this task does."},
+                                        "prompt": {"type": "string", "description": "The complete request for the sub-agent."},
+                                        "agent": {"type": "string", "enum": names, "description": "Which agent runs it (default: general)."}
+                                    },
+                                    "required": ["description", "prompt"]
+                                }
+                            }
+                        },
+                        "required": ["tasks"]
+                    }
+                },
+                "reconcile": {"type": "string", "description": "What to do with all the results to produce the final answer."},
+                "agent": {"type": "string", "enum": names, "description": "Which agent reconciles (default: general)."}
+            },
+            "required": ["phases", "reconcile"]
+        }),
+    }
+}
+
 /// Invalid tool arguments from the model.
 #[derive(Debug)]
 struct ArgError(String);
@@ -791,6 +840,7 @@ mod tests {
             subagents: true,
             subagent_depth: 1,
             max_concurrent_subagents: 4,
+            plan: false,
         };
         let off = ToolsCfg {
             write_stdin: false,
@@ -799,6 +849,7 @@ mod tests {
             subagents: false,
             subagent_depth: 1,
             max_concurrent_subagents: 4,
+            plan: false,
         };
         let sr = EditTool::StrReplace;
         let a = serde_json::to_string(&specs(&on, sr)).unwrap();

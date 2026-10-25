@@ -35,6 +35,7 @@ const RESERVED: &[&str] = &[
     "task_complete",
     "skill",
     "subagent",
+    "plan",
     "memory",
 ];
 
