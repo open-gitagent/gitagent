@@ -232,12 +232,49 @@ Two of the 89 tasks start a virtual machine inside the task container, which thi
 
 ### Why it scores higher than the other harnesses
 
-The model is the same, so the difference is what the harness does between calls. Four things account for most of it, each measured on its own on the benchmark before it stayed on (see [How gitagent works](#how-gitagent-works) and the detail in [docs/HOW-IT-WORKS.md](./docs/HOW-IT-WORKS.md)):
+On a benchmark like this one, a strong model solves most tasks with any reasonable harness. The gap between harnesses comes from a smaller set of hard tasks: long builds, services that must keep running, strict output formats, and tasks close to their time limit. On those, runs rarely fail because the model lacks the skill. They fail because the model stops too early, loses track in a long context, repeats itself, or runs out of time.
 
-1. **Completions need evidence.** `task_complete` is refused when nothing was verified after the last change, and the task is repeated. Other harnesses accept the model's word; the checker then disagrees on exactly the tasks where the model was confident and wrong.
-2. **The context stays small and the cache stays warm.** Every result is shaped to a budget, old results are cleared in batches through the provider's context editing, and reminders are appended rather than inserted, so the history is never rewritten. The model spends its attention on the task, and 92% of input tokens come from the cache.
-3. **Loops and time are handled by the harness, not the model.** A repeated call with the same result is called out after the third time; the time left is shown on every result, with a nudge at 70% of the budget and a final call at 90%. A run never ends in a timeout with unverified work, and never re-sends a growing conversation until the clock runs out.
-4. **The environment is read once, up front.** A fifteen-second probe puts the directory listing, the tool versions, the CPU and memory into the first message, so the first turns go to the task instead of to looking around.
+The model is the same across these comparisons, so the difference lies in what the harness does between model calls. gitagent addresses each of those failure modes directly. Four mechanisms account for most of the gain, and each was measured on its own on the benchmark before it was kept (see [How gitagent works](#how-gitagent-works) and the detail in [docs/HOW-IT-WORKS.md](./docs/HOW-IT-WORKS.md)).
+
+#### 1. A task is finished only when there is evidence that it works
+
+**The problem.** The most common way to lose a task is not failing to solve it, but believing it is solved when it is not. A model writes a fix, reads it back, finds it convincing, and declares the task complete without running anything. The hidden tests then disagree. Other harnesses at most ask the model to confirm, and a second "yes" from the same model adds little.
+
+**What gitagent does.** It records every change the agent makes, such as a file write, an in-place edit or a package install, and every check it runs, such as a test suite, the program itself, or a request to a running service. When the model calls `task_complete` and the last change was not followed by a finished check, the call is refused. The model is told which change it never checked and is shown the task again. A task is sent back at most twice, and the check steps aside near the end of the time budget, when another round could no longer help.
+
+**Why it helps.** The cost is one extra turn. On a run where the model was confident and wrong, that turn often turns a failure into a pass. The check never judges the work itself; it only asks that a verification actually ran, so it cannot make a correct run worse.
+
+#### 2. The model reads less, and most of what it reads is cached
+
+**The problem.** Two costs grow with every turn. The first is attention: a model searching a ten-thousand-line build log for the one line that matters does worse than a model shown the relevant part, and a long run accumulates many such logs. The second is cost and speed: every call re-sends the whole conversation, so without care the cost of a run grows much faster than its length.
+
+**What gitagent does.**
+
+- Every command result is cut to a budget of 8,000 tokens before the model sees it. The beginning, the end and the exit code are kept, and runs of similar lines are folded into one. The full output is saved to a file the model can open if it needs more.
+- Old tool results are cleared in batches through the provider's own context editing once the conversation grows past 50,000 tokens.
+- Reminders, such as the time left, are added at the end of the conversation and never written into earlier turns.
+
+**Why it helps.** The last rule matters more than it seems. Providers cache the start of a conversation, and any change to an earlier message invalidates the cache from that point on. Because gitagent never rewrites history, 92% of the input tokens in the published run were served from the cache, which makes each call faster and about ten times cheaper per token. The model's attention stays on recent, relevant output.
+
+#### 3. The harness keeps track of time and repetition
+
+**The problem.** In long runs, models are poor at two things: noticing that they are repeating themselves, and pacing their work against a clock they cannot see. A model can retry the same failing command until the time limit, and a run that times out scores zero even when the work was nearly done.
+
+**What gitagent does.** When the same command with the same arguments returns the same output three times, gitagent tells the model plainly that it is repeating itself and should change approach. Every tool result also shows the minutes remaining. At 70% of the budget the model is reminded to wrap up, and at 90% it is told to finish now.
+
+**Why it helps.** A loop is broken after three repetitions instead of running until the deadline. A finished and checked result, even a partial one, often passes, where an unfinished one never does. Runs rarely end in a timeout; none of the 445 trials in the published run did.
+
+#### 4. The environment is surveyed once, before the first step
+
+**The problem.** Without help, the first turns of almost every run go to orientation: listing directories, checking language versions, looking for a compiler, checking memory. Each of those is a full model call.
+
+**What gitagent does.** Before the first model call, gitagent runs a single probe of at most fifteen seconds, outside the agent's shell. It collects the working directory listing, the operating system, the CPU and memory, and the versions of common tools, and puts the result in the first message.
+
+**Why it helps.** The model starts on the task with the facts it would otherwise spend several turns gathering. On tasks with short time limits, those turns are real slack.
+
+#### How the four work together
+
+None of these makes the model more capable. Together they remove the ways a capable model loses a task it could have solved: stopping too early, losing focus in long output, repeating itself, running out of time, and spending its opening turns on orientation. They also reinforce each other. A smaller context makes loops easier to escape, the time reminders leave room for the completion check to send work back before the deadline, and the cache savings make the extra verification turns nearly free.
 
 **The rules behind the numbers** (`docs/INTEGRITY.md`, checked by `scripts/integrity-audit.sh`): the agent never reads a task's tests or verifier output, and a built-in guard refuses writes under `/tests`; the tasks used while developing were kept apart from the ones used to score; benchmark mode uses only the built-in configuration, with a test that fails if the prompt or tool list sent to the model ever changes.
 
