@@ -25,6 +25,10 @@ struct ScriptedTurn {
     /// Simulates a provider error: `transient`, `context_overflow` or `fatal`.
     #[serde(default)]
     error: Option<String>,
+    /// How long the reply takes, in milliseconds, so a demo shows the
+    /// model thinking.
+    #[serde(default)]
+    delay_ms: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -73,14 +77,21 @@ impl ScriptedProvider {
 #[async_trait]
 impl Provider for ScriptedProvider {
     async fn complete(&self, req: &ChatRequest) -> Result<ChatResponse, ProviderError> {
-        let mut state = self.state.lock().unwrap();
-        state.requests.push(req.clone());
-        let index = state.next;
-        let turn = self
-            .turns
-            .get(index)
-            .ok_or_else(|| ProviderError::Fatal(format!("script ended after {index} turns")))?;
-        state.next += 1;
+        let (index, turn) = {
+            let mut state = self.state.lock().unwrap();
+            state.requests.push(req.clone());
+            let index = state.next;
+            let turn = self
+                .turns
+                .get(index)
+                .ok_or_else(|| ProviderError::Fatal(format!("script ended after {index} turns")))?;
+            state.next += 1;
+            (index, turn)
+        };
+        // The lock is released, so other callers (parallel sub-agents) go on.
+        if turn.delay_ms > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(turn.delay_ms)).await;
+        }
         if let Some(kind) = &turn.error {
             return Err(match kind.as_str() {
                 "transient" => ProviderError::Transient("scripted".into()),
