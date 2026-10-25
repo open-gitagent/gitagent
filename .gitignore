@@ -7,3 +7,6 @@ bench/jobs/
 __pycache__/
 *.pyc
 dist/
+
+# The full run log stays on the benchmark machine; the public proof is the job logs on the Harbor hub.
+bench/RESULTS.md

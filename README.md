@@ -140,16 +140,18 @@ for anything that must not be missed, have an external scheduler call
   <img src="./docs/media/results.svg" alt="Terminal-Bench 2.1 results" width="760" />
 </p>
 
-Every run is in [bench/RESULTS.md](./bench/RESULTS.md) with its commit, profile, model, cost and what failed, and the headline run's logs are public: every trial of it, with its trajectory and verifier output, is on the Harbor hub, one job per time limit (links in the table below). The headline run and the published comparisons:
+The headline run's logs are public: every trial of it, with its trajectory and verifier output, is on the Harbor hub, one job per time limit (links in the table below). The headline run and the published comparisons:
 
 | Harness | Model | Terminal-Bench 2.1 | Runs per task | Source |
 |---|---|---|---|---|
-| **gitagent 2** | Claude Opus 5.5 | **93.03%** (414/445; 75 of 89 tasks passed every run) | 5 | [bench/RESULTS.md](./bench/RESULTS.md), round tb21-final |
+| **gitagent 2** | Claude Opus 5.5 | **93.03%** (414/445; 75 of 89 tasks passed every run) | 5 | [job logs on the Harbor hub](#the-same-run-by-time-limit) |
 | Terminus 2 | Claude Opus 5.5 | 87.6% | 1 | [Vals.ai](https://www.vals.ai/benchmarks/terminal-bench-2-1) |
 | Codex CLI | GPT-6 Astra | 87.4% ±0.9 | — | [Snorkel, the official leaderboard](https://snorkel.ai/leaderboard/terminal-bench-2-1/) |
 | Artificial Analysis's own harness | Claude Fable 5.1, max effort | 91.4% | — | [Artificial Analysis](https://artificialanalysis.ai/evaluations/terminalbench-2-1) |
 
-The same run by the tasks' time limits (pass@k is the chance that at least one of k runs passes):
+#### The same run by time limit
+
+Pass@k is the chance that at least one of k runs passes:
 
 | Time limit | Trials | Pass rate | pass@2 | pass@5 | Logs |
 |---|---|---|---|---|---|
@@ -282,7 +284,7 @@ The shim (`gitagent_harbor/agent.py`):
 - **After the run:** keeps the agent's shells open, so services it started are still up when the tests run, and returns once the agent is done.
 - **Shim settings** (via `--ak`): `profile=<name or path>`, `timeout_s=<seconds>`.
 
-`bench/RESULTS.md` records every run, and `docs/INTEGRITY.md` lists the rules that keep results honest. `scripts/integrity-audit.sh` checks them.
+`docs/INTEGRITY.md` lists the rules that keep results honest, and `scripts/integrity-audit.sh` checks them.
 
 `python3 scripts/dashboard.py` serves a local dashboard over `bench/jobs` at http://127.0.0.1:8731, refreshing live while runs are going: jobs and trials (agent, oracle and baseline runs kept apart), accuracy per task, why each trial failed, every counter with its meaning, the guard and loop events in a trajectory, each trial's commands, outputs and log, the lesson store, the task catalog with difficulty and limits, and the feature switches of every profile. It reads only gitagent's own files, each trial's reward and the tasks' task.toml metadata.
 
