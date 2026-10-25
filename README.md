@@ -4,6 +4,10 @@ A terminal agent in a single static binary. Its behavior lives in version-contro
 
 It works the same way in every mode. One loop calls the model, runs its tool calls in a persistent shell, and records every turn. It runs one task in a folder, an interactive session, a task in a fresh clone of a repository, or a Terminal-Bench task through Harbor.
 
+**Terminal-Bench 2.1: 93.0%** with Claude Opus 5.5, all 89 tasks, five runs each, code frozen at the published commit. The published harnesses on the same benchmark: Terminus 2 with the same model 87.6%, Codex CLI with GPT-6 Astra 87.4%, the top entry 91.4%. The numbers, the method and the rules that keep them honest are under [Results](#results).
+
+This is gitagent 2: the Rust binary. Agents, hooks, schedules and client code written for gitagent 1.x run unchanged, and agent folders written to the OpenGAP format load too. New in 2: the console (one `$` line per tool call, approvals inline, a task board), parallel tasks with a reconciling step, schedules, workflows, plugins, sub-agents, knowledge, the IPC protocol the Python and TypeScript clients speak, and the benchmark harness.
+
 ## Install
 
 ```sh
@@ -162,6 +166,35 @@ With `learning: online`, gitagent learns from each task it completes. The model 
 ### Sandbox
 
 On Linux, outside benchmark runs, the agent's shell runs under Landlock: it may write only to the working folder, the output folder, the temp folders and `~/.cache`. A seccomp filter blocks system calls such as `mount`, loading kernel modules and `reboot`. Set `sandbox: off` in `gitagent.yaml` to disable it, or `sandbox: on` to require it. Writing under `/tests` is refused in every mode.
+
+## Results
+
+Every run is in `bench/RESULTS.md` with its commit, profile, model, cost and what failed. The headline run and the published comparisons:
+
+| Harness | Model | Terminal-Bench 2.1 | Runs per task | Source |
+|---|---|---|---|---|
+| **gitagent 2** | Claude Opus 5.5 | **93.0%** (414/445; 75 of 89 tasks passed every run) | 5 | `bench/RESULTS.md`, round tb21-final |
+| Terminus 2 | Claude Opus 5.5 | 87.6% | 1 | Vals.ai |
+| Codex CLI | GPT-6 Astra | 87.4% ±0.9 | — | Snorkel |
+| top published entry | Fable 5.1, max effort | 91.4% | — | Artificial Analysis |
+
+Two of the 89 tasks start a virtual machine inside the task container, which this host cannot do, and no harness has passed them here; without those two the mean is 95.2%. The 95% interval for the headline run is 88.8–96.9%. It cost $112.85, about $0.25 per run, with 92% of the input tokens served from the prompt cache.
+
+**The rules behind the numbers** (`docs/INTEGRITY.md`, checked by `scripts/integrity-audit.sh`): the agent never reads a task's tests or verifier output, and a built-in guard refuses writes under `/tests`; the tasks used while developing were kept apart from the ones used to score; benchmark mode uses only the built-in configuration, with a test that fails if the prompt or tool list sent to the model ever changes.
+
+## How a run works, and why it scores well
+
+One loop. The model is called with the system prompt, the task and the history; it answers with text or tool calls; the tools run in one persistent shell; the results go back; repeat until the model calls `task_complete`. Everything else is about keeping that loop on course for an hour inside a context window, without wasting the model's attention or breaking its cache.
+
+- **A method, not a persona.** The prompt tells the model how to work: note every concrete requirement in the task, explore before changing anything, change in small steps and check each, then verify the final result by exercising it. Most lost runs on other harnesses are tasks declared done without that last step.
+- **A stop check with evidence.** `task_complete` is accepted only when the run shows a verification after the last edit: a test run, a program executed, a request sent. A completion with no evidence is sent back with the task repeated. It catches the case where the model is sure and wrong.
+- **Output that fits.** Command output is shaped before the model sees it: long outputs are spilled to a file and the model gets the head, the tail, a one-line status with the exit code and line count, and the file's path; runs of similar lines (progress bars, build logs) are collapsed to their first and last line. The model reads what matters and can ask for the rest.
+- **Reminders that never rewrite history.** The time left is shown on every command result, and a reminder fires when the budget runs low. They are appended after the turn's results, never injected into earlier turns, so the prompt cache and the model's thinking blocks stay valid. That is where the 92% cache hit rate and the low cost come from.
+- **A loop detector.** The same tool, arguments and output twice in a row is called out to the model with a warning, which stops the runaway loops that burn a time budget and a bill for nothing.
+- **Context that is managed, not truncated.** Old tool results are cleared in batches through the provider's own context editing, which does not count as a history edit; and near the window's end the history is replaced by a structured summary (done, pending, key files, last failure, ruled out) with the task repeated verbatim, so the model never loses the goal.
+- **Services stay up for the tests.** The agent's shells are kept open after it finishes, so a server it started is still running when the checker connects.
+- **Every run is a record.** Each run writes a trajectory in the ATIF format with every prompt, reply, tool call and result, plus counters for everything the loop decided (loops caught, completions rejected, context compacted, cache hits), so a failed run can be read step by step and a change can be measured task by task.
+- **One static binary.** No runtime to install in the task container: the binary is uploaded and runs. The same binary and the same loop serve the console, the SDKs and the benchmark.
 
 ## Terminal-Bench with Harbor
 
