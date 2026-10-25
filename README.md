@@ -140,29 +140,29 @@ for anything that must not be missed, have an external scheduler call
   <img src="./docs/media/results.svg" alt="Terminal-Bench 2.1 results" width="760" />
 </p>
 
-Every run is in `bench/RESULTS.md` with its commit, profile, model, cost and what failed. The headline run and the published comparisons:
+Every run is in [bench/RESULTS.md](./bench/RESULTS.md) with its commit, profile, model, cost and what failed, and the headline run's logs are public: every trial of it, with its trajectory and verifier output, is on the Harbor hub, one job per time limit (links in the table below). The headline run and the published comparisons:
 
 | Harness | Model | Terminal-Bench 2.1 | Runs per task | Source |
 |---|---|---|---|---|
-| **gitagent 2** | Claude Opus 5.5 | **93.03%** (414/445; 75 of 89 tasks passed every run) | 5 | `bench/RESULTS.md`, round tb21-final |
+| **gitagent 2** | Claude Opus 5.5 | **93.03%** (414/445; 75 of 89 tasks passed every run) | 5 | [bench/RESULTS.md](./bench/RESULTS.md), round tb21-final |
 | Terminus 2 | Claude Opus 5.5 | 87.6% | 1 | [Vals.ai](https://www.vals.ai/benchmarks/terminal-bench-2-1) |
 | Codex CLI | GPT-6 Astra | 87.4% ±0.9 | — | [Snorkel, the official leaderboard](https://snorkel.ai/leaderboard/terminal-bench-2-1/) |
 | Artificial Analysis's own harness | Claude Fable 5.1, max effort | 91.4% | — | [Artificial Analysis](https://artificialanalysis.ai/evaluations/terminalbench-2-1) |
 
 The same run by the tasks' time limits (pass@k is the chance that at least one of k runs passes):
 
-| Time limit | Trials | Pass rate | pass@2 | pass@5 |
-|---|---|---|---|---|
-| 10 min | 5 | 100.0% | 100.0% | 100.0% |
-| 12.5 min | 5 | 100.0% | 100.0% | 100.0% |
-| 15 min | 240 | 92.9% | 95.2% | 95.8% |
-| 20 min | 25 | 100.0% | 100.0% | 100.0% |
-| 30 min | 85 | 87.1% | 95.9% | 100.0% |
-| 40 min | 10 | 100.0% | 100.0% | 100.0% |
-| 60 min | 65 | 95.4% | 97.7% | 100.0% |
-| 2 h | 5 | 100.0% | 100.0% | 100.0% |
-| 3 h 20 min | 5 | 100.0% | 100.0% | 100.0% |
-| **all** | **445** | **93.03%** | | |
+| Time limit | Trials | Pass rate | pass@2 | pass@5 | Logs |
+|---|---|---|---|---|---|
+| 10 min | 5 | 100.0% | 100.0% | 100.0% | [job](https://hub.harborframework.com/jobs/c78a765b-7b37-41c8-b4b3-1b8c1d48ff44) |
+| 12.5 min | 5 | 100.0% | 100.0% | 100.0% | [job](https://hub.harborframework.com/jobs/80c531b4-cc07-4c31-9b17-c329e6ab8195) |
+| 15 min | 240 | 92.9% | 95.2% | 95.8% | [job](https://hub.harborframework.com/jobs/63bf2992-3fa9-464b-953d-e485576f7365) |
+| 20 min | 25 | 100.0% | 100.0% | 100.0% | [job](https://hub.harborframework.com/jobs/535aafbc-8f4a-4257-b0d1-48680c3ceb79) |
+| 30 min | 85 | 87.1% | 95.9% | 100.0% | [job](https://hub.harborframework.com/jobs/d2a97421-d057-4711-b8cc-0fefa35a84b0) |
+| 40 min | 10 | 100.0% | 100.0% | 100.0% | [job](https://hub.harborframework.com/jobs/6c57fec8-d434-4020-b208-1a0769c9cf0e) |
+| 60 min | 65 | 95.4% | 97.7% | 100.0% | [job](https://hub.harborframework.com/jobs/e1ea8dbd-7a55-4fa3-95de-b9338a3c1223) |
+| 2 h | 5 | 100.0% | 100.0% | 100.0% | [job](https://hub.harborframework.com/jobs/127445ee-63ec-44c7-8206-189eb22cd912) |
+| 3 h 20 min | 5 | 100.0% | 100.0% | 100.0% | [job](https://hub.harborframework.com/jobs/1d8e0bdb-7ae5-4ec7-8e54-329007590e9d) |
+| **all** | **445** | **93.03%** | | | |
 
 Two of the 89 tasks start a virtual machine inside the task container, which this host cannot do, and no harness has passed them here; without those two the mean is 95.2%. The 95% interval for the headline run is 88.8–96.9%. It cost $112.85, about $0.25 per run, with 92% of the input tokens served from the prompt cache.
 
