@@ -861,7 +861,7 @@ mod tests {
         assert_eq!(p.temperature, None);
         let o = p.openai.expect("openai section");
         assert_eq!(o.reasoning_summary, "auto");
-        assert_eq!(o.prompt_cache_key.as_deref(), Some("gitagent-v2"));
+        assert_eq!(o.prompt_cache_key.as_deref(), Some("gitagent"));
     }
 
     #[test]

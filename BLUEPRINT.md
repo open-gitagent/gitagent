@@ -1,329 +1,245 @@
-# gitagent 3 — Rust Engine Blueprint
+# gitagent 3 — Blueprint
 
-`BLUEPRINT.md` says **what** to build and **why**; `TASKS.md` says **in what order** and **how to know each step is done**.
+This document says **what** gitagent is built to do and **why** each part exists. The README says how to use it; [docs/HOW-IT-WORKS.md](./docs/HOW-IT-WORKS.md) gives the exact mechanics, with numbers and formats.
 
 ---
 
 ## 0. Goal in one paragraph
 
-Build gitagent v2 **from scratch** as a single static **Rust** binary. It keeps the gitagent name and one idea from v1 (all agent behavior lives in version-controlled files) but reuses no v1 code and keeps no v1 compatibility. Its core is an **evidence-gated minimal loop** proven to score well on Terminal-Bench 2.1: one agent, one append-only history, about seven tools, persistent PTY sessions, an environment snapshot, output shaping with spill files, batched observation masking, time and loop guards, and a stop check that refuses "done" until the agent has verified its work. Target: on the same model, beat Terminus 2 by 5+ points on a frozen held-out split, with median time at or below Terminus 2, timeouts under 10%, and ≥80% of input tokens served from the provider cache.
-
+gitagent 3 is a single static Rust binary that runs **agents defined as git repositories**. An agent is a folder of plain files (identity, rules, memory, skills, tools, hooks, schedules, sub-agents), so its behaviour is versioned, reviewed and diffed like code. One loop runs every agent, the same way in a terminal, behind an SDK, in a fresh clone of a repository, on a timetable, or inside a benchmark container. That loop is built to finish real work: it shapes what the model reads, keeps the provider's cache warm, guards against loops and running out of time, and refuses "done" until the work has been verified. The proof is public: 93.03% on Terminal-Bench 2.1 with Claude Opus 5.5, above every published harness on that benchmark.
 
 ---
 
 ## 1. Requirements (every design choice traces to one)
 
+**The agent**
+
 | ID | Requirement |
 |---|---|
-| R1 | Higher Terminal-Bench 2.1 pass rate than Terminus 2 on the same model (paired, held-out, ≥3 trials) |
-| R2 | Works with OpenAI, Anthropic, Google and OpenAI-compatible open-weight endpoints |
-| R3 | Median agent time ≤ Terminus 2; timeouts < 10% |
-| R4 | ≥80% of input tokens from provider cache on long tasks |
-| R5 | Handles REPLs, servers, long builds, Ctrl-C |
-| R6 | Never accepts "done" without verification after the last edit |
-| R7 | Runs in any Linux container with no dependencies (static musl binary) |
-| R8 | All tunable behavior in config (YAML), not code |
-| R9 | Every feature emits fired/consumed counters |
-| R10 | Trajectories exported in Harbor's ATIF format, written every turn |
-| R11 | Integrity: no internet solution lookup, no task-name routing, no writes to `/tests`, no reading verifier code |
-| R12 | All behavior lives in version-controlled files (config, prompts, profiles), so every score traces to a commit |
+| A1 | An agent is a folder of version-controlled files; every behaviour traces to a commit |
+| A2 | Agent folders written for the TypeScript gitagent (1.x and 2.x) and in the OpenGAP format run unchanged |
+| A3 | Usable from a terminal, from Python, TypeScript or any other language, from a repository clone, and on a schedule |
+| A4 | Safe to run on a real machine: a sandboxed shell, hooks that can block any action, approvals by a person, an audit log |
+| A5 | Large jobs can be split into parallel pieces and reconciled into one answer |
+| A6 | Works with Anthropic, OpenAI, Google and any OpenAI-compatible endpoint, with fallbacks |
+
+**The loop**
+
+| ID | Requirement |
+|---|---|
+| L1 | A higher Terminal-Bench 2.1 pass rate than any published harness on the same model |
+| L2 | Median time per task at or below other harnesses; timeouts rare |
+| L3 | Most input tokens served from the provider's cache on long tasks |
+| L4 | Handles REPLs, servers, long builds and interrupts |
+| L5 | Never accepts "done" without a verification after the last change |
+| L6 | Runs in any Linux container with no dependencies |
+| L7 | Every tunable behaviour is a switch in a YAML profile, measured on its own |
+| L8 | Every feature emits counters; every run writes a complete trajectory, every turn |
+| L9 | Benchmark integrity: no reading or writing of hidden tests, no routing on task names, no network but the model API, no learning during a scored run |
 
 ---
 
-## 2. Architecture
+## 2. Why Harbor
 
-```
-                         ┌───────────────────────────────┐
-  Harbor / CLI / TS SDK  │  gitagent (static Rust binary) │        Model APIs
-  ─────────────────────▶ │                               │ ◀────▶ OpenAI, Anthropic,
-   instruction + flags   │  loader ── config + profiles  │        Google, open-weight
-                         │  snapshot ─ env facts turn 0  │
-                         │  controller ── THE LOOP       │
-                         │    ├ provider (native tools)  │
-                         │    ├ tools: exec/stdin/read/  │
-                         │    │        edit/image/todo/  │
-                         │    │        complete + yaml   │
-                         │    ├ terminal (PTY sessions)  │
-                         │    ├ shaper (cap + spill)     │
-                         │    ├ guards (time, loops)     │
-                         │    ├ context (mask, compact)  │
-                         │    ├ stop check (evidence)    │
-                         │    └ hooks (optional gates)   │
-                         │  record ── ATIF + counters    │
-                         │  sandbox ── Landlock/seccomp  │
-                         └───────────────────────────────┘
-```
+gitagent is measured on Terminal-Bench 2.1, and Terminal-Bench runs through **Harbor**, an open framework for running agents against containerised tasks. Harbor matters for four reasons.
 
-### Run lifecycle (numbers are referenced throughout)
+1. **It is the same yardstick as the published results.** The leaderboards for Terminal-Bench 2.1 were produced with Harbor: the same task images, the same time limits, the same hidden tests, the same scoring. Running gitagent through it is what makes 93.03% comparable with the published 87.6% for Terminus 2 on the same model, rather than a number from a home-made runner.
+2. **Grading is independent of the agent.** Harbor starts each task's container, hands the agent the instruction and the time limit, and when the agent has finished it runs the task's hidden tests itself and records the reward. gitagent never sees, reads or writes the tests. The result is a pass or a fail decided outside the agent, which is the only kind worth publishing.
+3. **It fits a static binary.** Harbor's "installed agent" model uploads the agent into the task container and runs it there. gitagent is one binary with no runtime, so installing it is a single file copy, and nothing in the container has to change. The shim that does this, `gitagent_harbor/agent.py`, is about two hundred lines.
+4. **It produces evidence others can check.** Harbor runs many trials in parallel, resumes trials that failed for reasons outside the agent (a revoked key, a full Docker network), keeps every trajectory and verifier log, and uploads a job publicly. The headline run's nine jobs, one per time limit, are public, so anyone can read every trial behind the number.
 
-1. **Start** — CLI/Harbor/SDK starts the binary with an instruction.
-2. **Load** — read `gitagent.yaml` + model profile; build the system prompt from `prompts/system.md` (+ optional `prompts/rules.md` and the skill index). System prompt must be byte-identical across tasks (cache).
-3. **Snapshot** — one compound probe (≤15 s, fail-silent) → injected into the **first user message**, never the system prompt.
-4. **Model call** — provider adapter, native tools, effort from profile; text fallback + one-line repair request on malformed calls.
-5. **Dispatch** — run the tool; shell commands go to PTY sessions with end markers; `pre_tool_use` hooks run first.
-6. **Shape** — strip ANSI, keep last progress-bar frame, collapse similar lines, cap (~8K tokens, 30% head / 70% tail), save full output to a spill file, add footer.
-7. **Guards** — remaining time in footer; nudge at 70%, force stop check at 90%; 3 identical (command, normalized output) → change-approach message.
-8. **Context** — every ~50K tokens of growth, mask tool results older than the last 8 into stubs; structured compaction only near the limit.
-9. **Stop check** — `task_complete` accepted only if a verification ran after the last edit; else reject (max 2), re-show instruction.
-10. **Record** — append trajectory step + counters to disk **every turn**; final flush on exit.
-11. **Grade** (benchmark only) — Harbor runs hidden tests.
+Harbor also hosts other benchmarks with the same task shape, SWE-bench Verified and SWE-bench Pro among them, so the same shim can be pointed at them without changes to the agent.
 
-Steps 4–9 repeat until 9 accepts or a limit is hit.
+**How gitagent runs under Harbor.** The shim uploads the binary for the container's CPU to `/opt/gitagent/`, then runs `gitagent --bench --instruction-file … --model … --profile … --linger`. `--bench` makes the run depend only on files committed in the repository: no project or home configuration, no memory, no learning, no telemetry, repo mode refused, writes under `/tests` refused. `--linger` keeps the agent's shells open after it finishes, so a server it started is still up when the tests connect. The trajectory and counters are written to Harbor's log folder every turn, so even a timed-out trial keeps its record. A test, `bench_prompt_and_tools_match_the_published_run`, fails if the prompt or tool list sent to the model in `--bench` ever changes, so features built for agent folders can never leak into a scored run.
 
 ---
 
-## 3. Design decisions (short form)
+## 3. Architecture
+
+```
+   console · -p · --repo        Python · TypeScript · any language            Harbor
+   gitagent schedule start            (gitagent --ipc, JSON lines)        (gitagent --bench)
+              │                                  │                               │
+              └──────────────────┬───────────────┴───────────────┬───────────────┘
+                                 ▼                               ▼
+                 ┌──────────────────────────────────────────────────────────┐
+                 │  loader: agent folder + config layers ──▶ one AgentSpec   │
+                 │    agent.yaml · SOUL/RULES/DUTIES · skills · tools ·     │
+                 │    hooks · memory · knowledge · workflows · schedules ·  │
+                 │    agents · plugins · config/<env> · compliance          │
+                 ├──────────────────────────────────────────────────────────┤
+                 │  core: THE LOOP                                          │      Model APIs
+                 │    provider ── native tool calls, cache markers ─────────┼────▶ Anthropic, OpenAI,
+                 │    tools ── shell, files, edits, memory, skill,          │      Google, compatible
+                 │             subagent, plan, workflow, YAML, MCP          │
+                 │    terminal ── persistent PTY shells                     │
+                 │    shaper ── output to a budget, spill files             │
+                 │    guards ── stop check, time budget, loop detector      │
+                 │    context ── masking, compaction                        │
+                 │    hooks · approvals · audit                             │
+                 ├──────────────────────────────────────────────────────────┤
+                 │  record: trajectory + counters every turn, events        │
+                 │  sandbox: Landlock + seccomp around the agent's shell    │
+                 └──────────────────────────────────────────────────────────┘
+```
+
+### One run, start to finish
+
+1. **Start.** An entry point starts the loop with an instruction: the console, `-p`, repo mode, an IPC client, the scheduler, or Harbor.
+2. **Load.** The loader reads the agent folder and the configuration layers into one spec and assembles the system prompt in a fixed order: identity, working method, lessons, skills, sub-agents, workflows, knowledge, examples, compliance, memory, bootstrap. In `--bench` only the built-ins apply, and the prompt is byte-identical across tasks so the cache holds.
+3. **Snapshot.** One probe, at most 15 seconds, collects the working directory, the system, the tools present and the directory listing, and puts it in the first user message, never the system prompt.
+4. **Model call.** The provider adapter sends the request with native tool calls and cache markers; malformed calls get one repair request.
+5. **Dispatch.** Each tool call passes the hooks and, when the agent's rules require it, a person's approval, then runs. Shell commands run in a persistent shell with an end marker; sub-agent and plan calls run concurrently.
+6. **Shape.** Every result is cut to a token budget, with similar lines collapsed and the full output saved to a spill file.
+7. **Guard.** The time left is shown on every result, a reminder fires at 70% of the budget and a final call at 90%; a call repeated with the same result three times gets a change-approach warning.
+8. **Context.** Old results are cleared in batches, through the provider's context editing where it exists; near the window's end the history becomes a structured summary with the task repeated verbatim.
+9. **Stop check.** `task_complete` is accepted only when a verification ran after the last change.
+10. **Record.** The trajectory step and counters are written after every turn.
+
+Steps 4 to 9 repeat until the stop check accepts, the agent replies in conversation mode, or a limit is hit.
+
+---
+
+## 4. Design decisions
 
 | # | Decision | Why |
 |---|---|---|
-| D1 | Static Rust binary inside the container | No deps, ms startup, direct PTY, memory-safe, sandbox-ready |
-| D2 | Single agent, linear append-only history | Single loops are where the measurable gains are; caching needs it |
-| D3 | Native tool calling + text fallback + repair | Reliable calls on every provider, open-weight models included |
-| D4 | PTY sessions, end markers, background jobs | No guessed waits; REPLs/servers work |
-| D5 | ~7 tools | Small cached prefix; fewer bad choices |
-| D6 | Edit tool per model family | apply_patch for GPT, str_replace for Claude |
-| D7 | Environment snapshot in first user message | Saves 2–4 turns; cache-safe placement |
-| D8 | Shaper + spill files | Biggest token cost; nothing lost |
-| D9 | Batched observation masking + cache breakpoints | ~½ cost at same solve rate; keeps cache |
-| D10 | Structured compaction near limit only | Keeps requirements and failed approaches |
-| D11 | Evidence-based stop check, no answer rewriting | Premature "done" is a top failure; rewriting critics hurt |
-| D12 | Time budget + loop breaker | Timeouts are failures |
-| D13 | Per-model-family profiles in YAML | Profiles don't transfer across providers |
-| D14 | Own thin provider adapters (reqwest+serde) | Byte control for cache hits |
-| D15 | Counters + ATIF written every turn | Dead features show up; timeouts keep their record |
-| D16 | Landlock + seccomp sandbox, profile-switchable | Safe outside benchmarks |
+| D1 | One static Rust binary | No runtime to install anywhere; fast start; direct PTY access; memory safety; a sandbox from inside the process |
+| D2 | The agent is a folder of files | Behaviour is versioned and reviewable; forking, branching and diffing an agent are git operations (A1) |
+| D3 | Accept the TypeScript gitagent's and OpenGAP's formats, warn about old spellings | Existing agents run unchanged; `validate` points to the newer form instead of failing (A2) |
+| D4 | One loop for every entry point | A fix or a measurement applies everywhere; the benchmark result describes the product |
+| D5 | A single linear, append-only history | Keeps the provider's cache valid; the gains are in the loop, not in agent graphs |
+| D6 | Native tool calls with a text fallback and one repair | Reliable calls on every provider, open-weight models included |
+| D7 | Persistent PTY shells with end markers and background sessions | No guessed waits; REPLs and servers work; Ctrl-C reaches only the running job |
+| D8 | A small tool set, edit tool chosen per model family | A short cached prefix and fewer wrong choices; `apply_patch` for GPT, `str_replace` for Claude |
+| D9 | The environment snapshot in the first message | Saves the first turns of looking around without touching the cached system prompt |
+| D10 | An output shaper with spill files | The largest token cost, cut without losing anything |
+| D11 | Batched masking, server-side where possible, and structured compaction near the limit | About half the cost at the same solve rate, with the cache and thinking blocks intact |
+| D12 | An evidence-based stop check that never rewrites the answer | Premature "done" is the most common failure; critics that rewrite answers make results worse |
+| D13 | A time budget and a loop detector | Timeouts are failures; loops waste the budget |
+| D14 | Per-model-family profiles in YAML, every switch measured on its own | Settings do not transfer across providers; a switch that does not help is turned off |
+| D15 | Thin provider adapters of our own | Byte-level control of requests, which cache hits depend on |
+| D16 | Counters and a trajectory written every turn | A feature that never fires shows up; a timed-out run keeps its record |
+| D17 | Hooks fail open, compliance hooks fail closed | Existing hook scripts behave as before; rules that must hold always do |
+| D18 | Clients talk to the binary over JSON lines on stdin and stdout, one process per session | Any language can drive an agent; the agent logic exists once; a crash in a client cannot corrupt a run |
+| D19 | Parallel work as a `plan` tool over sub-agents, with a reconciling step, opt-in per agent | Large jobs finish faster and more consistently; bounded phases and tasks keep the cost predictable |
+| D20 | Schedules run in-process while `gitagent schedule start` runs | The same behaviour as before; anything that must not be missed calls `gitagent schedule run` from an external scheduler |
+| D21 | The terminal is the interface | One console with tool lines, approvals, a task board and command suggestions; no web server to secure |
+| D22 | Landlock and seccomp around the agent's shell, not around gitagent | The agent cannot write outside its folders, while gitagent can still record |
+| D23 | `--bench` reads only committed files, and a test pins its prompt and tools | Product features cannot change a scored run by accident |
 
-**Excluded on purpose:** critics that rewrite answers, semantic tool-result caches, cross-task memory during benchmarks, multi-agent by default, best-of-N on Terminal-Bench, automated harness rewriting, masking every turn, third-party multi-provider frameworks.
+**Left out on purpose:** critics that rewrite answers; best-of-N on benchmarks; memory or learning during a scored run; automated rewriting of the harness; masking every turn; third-party multi-provider frameworks; a web interface; voice; remote sandboxes.
 
 ---
 
-## 4. Product surface (from scratch)
+## 5. Product surface
 
-No code from the TypeScript gitagent is carried over. Its file formats, flags and SDK types are accepted for compatibility (see the README's "Coming from the TypeScript gitagent"), but the engine is new. The product grows in this order:
-
-| Capability | Design | Milestone |
+| Capability | How | Notes |
 |---|---|---|
-| Benchmark mode | `gitagent --bench --instruction-file … --model … --profile …`; no network except the model API, no memory, no git commits, `/tests` writes denied | M1 |
-| Single prompt | `gitagent -p "…" --dir <folder>`: runs the same loop on a local folder, prints a summary | M6 |
-| Interactive | `gitagent --dir <folder>`: REPL on top of the same loop; Ctrl-C interrupts the current turn | M6 |
-| Config as files | `gitagent.yaml`, `prompts/`, `profiles/`, optional `skills/` and `hooks/` in the project or `~/.gitagent/` | M6 |
-| Repo mode | `gitagent --repo <url> -p "…"`: clone the repo, create a new working branch, run the loop inside it, commit, and optionally push (§5 Repo mode) | M6 |
-| Hooks (optional) | `pre_tool_use` / `post_tool_use` scripts get JSON on stdin and return `allow`, `block` or `modify` | M6 |
-| Skills (optional) | `skills/<name>/SKILL.md`; index in the system prompt, full text loaded on demand by a `skill` tool | M6 |
-| Sandbox, telemetry | Landlock/seccomp on outside `--bench`; OpenTelemetry off unless configured | M7 |
-| Later, only if needed | Opening a pull request, MCP client, a TypeScript or Python SDK over `--events jsonl` | after M7 |
+| Console | `gitagent -d <agent>` | Welcome box, `$` tool lines, a thinking indicator, approvals inline, `/` command suggestions, a task board for plans, `/help` guide |
+| One task | `gitagent -p "…" -d <folder>` | Prints the agent's summary; exit 3 on a provider failure |
+| Repo mode | `gitagent --repo <url> -p "…" [--push]` | Clones (or reuses a clone), works on a new branch, commits when done; never pushes the base branch or force-pushes |
+| Agent folders | `agent.yaml`, `SOUL.md`, `RULES.md`, `DUTIES.md`, `memory/`, `skills/`, `tools/`, `hooks/`, `agents/`, `workflows/`, `schedules/`, `knowledge/`, `examples/`, `plugins/`, `config/` | `gitagent init` creates one; `gitagent validate` checks one; `extends` and `dependencies` compose them (`gitagent install`) |
+| Memory | `memory/` with layers and line limits | Each save is a git commit |
+| Hooks | `hooks/hooks.yaml`, eight events | Scripts answer allow, block or modify |
+| Compliance | `compliance:` in `agent.yaml` | Human in the loop, escalation triggers, kill switch, segregation of duties, spending limits, audit log |
+| Sub-agents and parallel work | `agents/`, the `subagent` tool, `runtime.parallel_tasks` | Phases of tasks run at the same time, then reconciled |
+| Workflows | `workflows/*.yaml`, `@<name>` | Ordered steps with conditions, retries and approvals |
+| Schedules | `schedules/*.yaml`, `gitagent schedule …` | Cron or a one-time moment; each job logged and recorded in its file |
+| MCP | `mcp_servers:` | stdio, streamable HTTP and SSE servers; their tools join the agent's |
+| Plugins | `plugins/`, `gitagent plugin …` | Tools, skills, hooks and prompt text from a folder or a git URL |
+| SDKs | Python, TypeScript, any language over `gitagent --ipc`; a Rust crate in-process | The TypeScript gitagent's `query()` API |
+| Benchmark | `gitagent --bench` under Harbor | §2 |
+| Learning | `gitagent learn`, `learning: online` | Lessons from finished runs, audited, shown only when two tasks agree; never during a scored run |
+| Telemetry | `OTEL_EXPORTER_OTLP_ENDPOINT` | Traces and metrics over OTLP; off by default |
 
 ---
 
-## 5. Crates and interfaces
+## 6. Code layout
 
-Cargo workspace, edition 2021, `#![forbid(unsafe_code)]` everywhere except `sandbox`.
+A Cargo workspace; `unsafe` is forbidden everywhere.
 
 ```
 gitagent/
 ├─ crates/
-│  ├─ cli/        binary: clap flags, modes (interactive, -p, --bench, --repo)
-│  ├─ loader/     gitagent.yaml + prompts + profiles → AgentSpec
-│  ├─ provider/   Provider trait; anthropic, openai, google, compat
-│  ├─ terminal/   PTY session manager, markers, background sessions
-│  ├─ tools/      tool registry, built-ins, yaml tools, edit tools
-│  ├─ shaper/     output shaping + spill
-│  ├─ context/    history, masking, compaction, token estimates
-│  ├─ guards/     time budget, loop detector, stop check
-│  ├─ hooks/      optional allow/block/modify script hooks
-│  ├─ record/     ATIF writer, counters, audit log, events (JSONL)
-│  ├─ repo/       clone, branch, commit, push via the git CLI
-│  ├─ sandbox/    landlock + seccomp (linux), no-op elsewhere
-│  └─ core/       controller loop wiring everything
-├─ profiles/      anthropic.yaml, openai.yaml, google.yaml, compat.yaml
-├─ prompts/       system.md, rules.md
-├─ harbor/        agent.py (Harbor installed-agent shim)
-└─ tests/         fake-provider integration tests, fixtures
+│  ├─ cli/        the binary: flags, console, line editor, IPC server, subcommands
+│  ├─ core/       the loop, sub-agents, plan, workflows, approvals, audit
+│  ├─ loader/     agent folders and config layers → AgentSpec; validate
+│  ├─ provider/   Anthropic, OpenAI, Google, compatible, scripted (tests)
+│  ├─ tools/      built-in tools, YAML tools, edit tools
+│  ├─ terminal/   persistent PTY shells, end markers, background sessions
+│  ├─ shaper/     output shaping and spill files
+│  ├─ context/    masking and compaction
+│  ├─ guards/     stop check, time budget, loop detector
+│  ├─ hooks/      hook scripts and their protocol
+│  ├─ mcp/        the MCP client
+│  ├─ record/     trajectory, counters, events
+│  ├─ repo/       clone, branch, commit, push
+│  ├─ sandbox/    Landlock and seccomp
+│  ├─ learn/      offline learning of lessons
+│  └─ sdk/        the in-process Rust library
+├─ clients/       python/ and typescript/: thin clients over --ipc
+├─ gitagent_harbor/  the Harbor shim
+├─ profiles/      anthropic, openai, google, compat
+├─ prompts/       system, conversation, lessons, learner
+├─ bench/         benchmark profiles, task split, job records
+├─ scripts/       install, release builds, integrity audit, benchmark runs, dashboard
+└─ docs/          how it works, integrity, learning
 ```
 
-### Key types (sketch — refine, don't treat as final)
+The Provider interface every adapter implements:
 
 ```rust
-// provider
 pub trait Provider: Send + Sync {
-    async fn complete(&self, req: &ChatRequest) -> Result<ChatResponse>;
-    fn family(&self) -> Family;               // Anthropic | OpenAI | Google | Compat
+    async fn complete(&self, req: &ChatRequest) -> Result<ChatResponse, ProviderError>;
+    fn family(&self) -> Family;   // Anthropic | OpenAI | Google | Compat
 }
-pub struct ChatRequest { pub system: String, pub messages: Vec<Message>, pub tools: Vec<ToolSpec>,
-                         pub effort: Effort, pub temperature: Option<f32>, pub cache: CachePlan }
-pub struct ChatResponse { pub text: String, pub tool_calls: Vec<ToolCall>, pub usage: Usage /* incl. cache_read/write */ }
-
-// terminal
-pub struct ExecResult { pub session: SessionId, pub output: Vec<u8>, pub exit: Option<i32>, pub finished: bool }
-pub trait Terminal {
-    async fn exec(&mut self, cmd: &str, yield_ms: u64, background: bool) -> Result<ExecResult>;
-    async fn write_stdin(&mut self, s: SessionId, keys: &str) -> Result<ExecResult>;
-    async fn poll(&mut self, s: SessionId, yield_ms: u64) -> Result<ExecResult>;
-    async fn kill(&mut self, s: SessionId) -> Result<()>;
-}
-
-// shaper
-pub struct Shaped { pub text: String, pub spill_path: PathBuf, pub total_lines: usize, pub hidden_lines: usize }
-pub fn shape(raw: &[u8], cfg: &ShapeCfg, spill_dir: &Path, seq: u64) -> Shaped;
-
-// guards
-pub enum StopVerdict { Accept, Reject { reason: String } }
-pub struct StopCheck { last_edit_turn: Option<u32>, last_verify_turn: Option<u32>, rejections: u8 }
 ```
 
-### Algorithms
-
-**Exec with end marker (terminal)**
-```
-seq += 1; marker = "__GA_END_{seq}__"
-write: "{cmd}\nprintf '\\n{marker} %s\\n' $?\n"
-read PTY until line starting with marker OR yield_ms elapsed
-if marker seen → finished=true, exit=parsed code, strip marker line
-else → finished=false, keep session alive, return partial output + session id
-```
-
-**Shaper**
-```
-write raw bytes to {spill_dir}/{seq}.log            (always, first)
-if binary (>10% non-text bytes) → "[binary output, N bytes, saved to {path}]"
-text = strip_ansi(raw); for each line keep text after last '\r'
-collapse runs ≥3 of lines equal after digits→'#' normalization → first line + "[N similar lines hidden]"
-if tokens(text) > cap: keep head 30% + "[… N lines hidden — see {path} …]" + tail 70%
-footer: "exit {code} · {total} lines · full log: {path} · {mins} min left"
-```
-
-**Batched masking (context)**
-```
-after each turn: if est_tokens(history) - tokens_at_last_checkpoint ≥ mask_batch_tokens:
-    for tool results older than the last keep_last: replace body with stub
-        "[output hidden: exit {code}, {lines} lines → {spill_path}]"
-    tokens_at_last_checkpoint = est_tokens(history)
-never mutate history between checkpoints (cache prefix must stay stable)
-if remaining_context < compact_at_tokens: replace history with structured summary:
-    REQUIREMENTS (original instruction verbatim) | DONE | PENDING | KEY FILES | LAST FAILURE | RULED OUT
-```
-
-**Stop check (guards)**
-```
-on edit tool call or exec matching edit_patterns (sed -i, >, >>, tee, mv, cp, patch, git apply, …): last_edit_turn = turn
-on exec matching verify_patterns (test runners, curl/wget, running a built binary, python -c, node -e,
-    git clone/push, psql -c, …) with finished=true: last_verify_turn = turn
-on task_complete:
-    if last_edit_turn.is_some() && last_verify_turn < last_edit_turn && rejections < max_rejections:
-        rejections += 1; return Reject("No verification since your last change. Original task: …")
-    return Accept
-patterns live in the profile (R8)
-```
-
-**Loop detector (guards)**
-```
-key = hash(tool name + normalized args + normalized first/last 20 output lines)
-if last 3 keys identical → append "You have repeated the same action with the same result. Change approach."
-    and raise effort one level for the next call if the provider supports it
-```
-
-**Repo mode (repo crate)**
-```
-inputs: --repo <url>, optional --base <branch> (default: remote default branch),
-        optional --branch <name> (resume), token from GITAGENT_GIT_TOKEN or GITHUB_TOKEN
-clone:  git clone --filter=blob:none <url> <workdir>   (token supplied via GIT_ASKPASS helper,
-        never embedded in the URL, never written to .git/config, never logged)
-branch: if --branch given and exists on remote → git checkout <branch>   (resume)
-        else → git checkout -b gitagent/<slug-of-task>-<6-char-id> origin/<base>
-run:    the normal loop with --dir <workdir>; the snapshot includes the branch name and git status
-commit: after the stop check accepts (and optionally every N turns, profile setting):
-        git add -A && git commit -m "gitagent: <one-line summary>" (author from config; skip if nothing changed)
-push:   only with --push: git push -u origin <branch>
-rules:  never commit to or push the base branch; never force-push; never rewrite history;
-        refuse to start if the working branch equals the base branch
-output: final event lists branch, commit SHAs, and push status
-```
-
-**Snapshot**
-```
-one sh -c with `timeout 15`: pwd; ls -la | head -40; uname -a;
-for t in python3 pip node npm go rustc cargo gcc g++ java make cmake git docker psql: version or "absent";
-free -m; nproc; git status --short | head -20 (if repo); ls of README*, Makefile, package.json, pyproject.toml
-→ "[Environment Snapshot]\n…" ; on any failure → omit silently, count `snapshot_failed`
-```
+Dependencies are kept few: `tokio`, `reqwest` with rustls, `serde`, `serde_json`, a YAML parser, `clap`, `regex`, `portable-pty`, `anyhow`, `thiserror`, `async-trait`, and `landlock` with a seccomp filter for the sandbox. Token counts are estimated at four bytes per token instead of linking a tokenizer. Release builds are static musl binaries for x86_64 and aarch64 Linux, plus macOS.
 
 ---
 
-## 6. Configuration
+## 7. Configuration surfaces
 
-### `gitagent.yaml`
-
-```yaml
-name: gitagent
-model: anthropic:<model-id>      # provider:model
-fallback_models: []              # optional
-max_turns: 200
-timeout_s: 1800                  # in --bench, Harbor's limit wins
-profile: auto                    # auto = pick by model family; or profiles/<file>.yaml
-sandbox: auto                    # auto = off in --bench (container isolates), on otherwise
-spill_dir: /tmp/gitagent/out
-skills: true
-hooks: true
-repo:                            # used only with --repo
-  branch_prefix: gitagent/
-  commit_every_turns: 0          # 0 = commit only when the stop check accepts
-  author: "gitagent <gitagent@localhost>"
-  push: false                    # --push on the CLI overrides
-```
-
-### Profile (`profiles/anthropic.yaml`)
-
-```yaml
-family: anthropic
-tool_calling: native            # native | native_with_text_fallback | text
-edit_tool: str_replace          # str_replace | apply_patch
-effort: high
-temperature: 1.0                # required by some providers when reasoning is on
-exec_default_yield_ms: 10000
-shape: { cap_tokens: 8000, head_ratio: 0.3, collapse_min_run: 3 }
-context: { mask_batch_tokens: 50000, keep_last: 8, compact_at_tokens: 16000 }
-guards: { nudge_at: 0.7, force_stop_at: 0.9, loop_repeats: 3 }
-stop: { max_rejections: 2, verify_patterns: [...], edit_patterns: [...] }
-cache: { breakpoints: [system, last_two_messages] }
-```
-`openai.yaml` uses `edit_tool: apply_patch`; `compat.yaml` uses `native_with_text_fallback` and a lower `cap_tokens`. Tune values **only on the dev split**.
+- **`agent.yaml`**, in the agent folder: what the agent is. Model with fallbacks and constraints, tools, runtime limits, parallel tasks, skills, sub-agents, MCP servers, plugins, compliance, `extends` and `dependencies`. The README's Architecture section shows a full example.
+- **`gitagent.yaml`**, in the project or `~/.gitagent/`: how the binary runs. Default model, turn and time limits, profile, sandbox, skills and hooks on or off, learning, memory, MCP servers, repo-mode settings.
+- **`profiles/<family>.yaml`**: how the loop behaves for one model family. Tool calling, edit tool, effort, output budget, context and cache settings, the guards, the stop check's patterns, and every optional feature as a switch. `profile: auto` picks the family from the model.
+- **`config/<env>.yaml`**, in the agent folder: per-environment overrides selected with `--env`: model, temperature, timeout, environment variables for tools and hooks.
 
 ---
 
-## 7. Interfaces to the outside
+## 8. Interfaces
 
-- **CLI**: `--bench`, `--instruction-file`, `-p/--prompt`, `--dir`, `--model provider:model`, `--profile`, `--events jsonl`, `--config`; repo mode: `--repo <url>`, `--base <branch>`, `--branch <name>` (resume), `--push`. Token from `GITAGENT_GIT_TOKEN` or `GITHUB_TOKEN`.
-- **Events (`--events jsonl`)**: one JSON object per line on stdout: `turn_start`, `model_text`, `tool_call`, `tool_result`, `stop_check`, `guard`, `turn_end`, `repo` (clone, branch, commit, push), `run_end` (with usage, counters, branch and commit SHAs). Designed for logs and a future SDK.
-- **Harbor shim (`harbor/agent.py`)**: installed agent; uploads binary to `/opt/gitagent/gitagent`, runs `gitagent --bench --instruction-file … --model … --profile …`, copies `/tmp/gitagent/trajectory.atif.json`, `out/` and counters back. Never writes to `/tests`.
-
----
-
-## 8. Observability
-
-Counters (written every turn to `/tmp/gitagent/counters.json`, plus OTel when enabled):
-`turns, tool_calls{name}, exec_timeouts, background_sessions, shaped_bytes_in, shaped_bytes_out, spill_reads, collapse_events, masks_applied, compactions, cache_read_tokens, cache_write_tokens, input_tokens, output_tokens, stop_rejections, stop_accepts, loop_triggers, nudges, snapshot_ok, snapshot_failed, malformed_calls, repairs, hook_blocks`.
-
-A feature whose counters stay at zero across a dev run is either broken or useless — investigate before keeping it.
+- **CLI.** `-p`, `-d`, `-m`, `-e`, `--repo`, `--push`, `--base`, `--branch`, `--bench`, `--instruction-file`, `--profile`, `--config`, `--out-dir`, `--events jsonl`, `--output-format stream-json`, `--ipc`, `--workflow`, and the subcommands `init`, `validate`, `install`, `plugin`, `schedule`, `learn`.
+- **Events** (`--events jsonl`): one JSON object per line: `turn_start`, `model_text`, `tool_call`, `tool_result`, `stop_check`, `guard`, `plan`, `turn_end`, `repo`, `run_end`.
+- **IPC** (`gitagent --ipc`): JSON lines on stdin and stdout. The client sends `initialize`, `user`, `steer`, `abort`, `kill`, `callback_response`, `end`; the binary sends `ready`, the conversation's messages, `callback_request` for hooks, client tools and approvals, `turn_end` and `session_end`. Sessions can be resumed across processes.
+- **Harbor shim** (`gitagent_harbor/agent.py`): installs the binary, runs `--bench --linger`, and returns the trajectory and counters to Harbor.
 
 ---
 
-## 9. Testing
+## 9. Observability
 
-- **Unit**: shaper (ANSI, `\r`, collapse, cap, binary), marker parsing, stop-check rules, loop hash, masking stubs, profile loading.
-- **Integration with a fake provider**: scripted model responses (YAML fixtures) drive the real loop against a real PTY in a temp dir. No network in CI.
-- **Prompt stability**: snapshot test that the built system prompt is byte-identical across two different tasks.
-- **Benchmark**: Harbor on the dev split, ≥3 trials, paired per-task comparison vs the previous milestone. Held-out only at M5 and release.
+Counters are written to `counters.json` after every turn and exported with telemetry when it is on. They cover the loop (`turns`, `tool_calls`, `malformed_calls`, `repairs`, `refusals`, `fallback_turns`), the shell (`exec_timeouts`, `background_sessions`, `interrupts`, `shell_restarts`), shaping and context (`shaped_bytes_in`, `spill_reads`, `masks_applied`, `mask_checkpoints`, `compactions`, `cache_read_tokens`, `cache_write_tokens`), the guards (`stop_accepts`, `stop_rejections`, `loop_triggers`, `protected_writes_blocked`), hooks and compliance (`hook_blocks`, `hook_modifies`, `approvals_granted`, `approvals_denied`, `compliance_blocks`), memory, sub-agents and plans (`subagent_calls`, `plan_tasks`, `plan_failed_tasks`), workflows and MCP.
+
+A feature whose counters stay at zero across a measurement run is either broken or useless, and is investigated before it is kept.
 
 ---
 
-## 10. Suggested crates
+## 10. Testing
 
-`tokio`, `portable-pty`, `reqwest` (rustls), `serde`, `serde_json`, a maintained YAML crate (check status — `serde_yaml` is archived), `clap`, `strip-ansi-escapes`, `regex`, `tiktoken-rs` (estimates), `sha2`, `uuid`, `tracing` + `tracing-subscriber`, `anyhow` + `thiserror`, `landlock`, `seccompiler`, `opentelemetry` + `opentelemetry-otlp` (M7); `rmcp` only if MCP is added later. Static build targets: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`.
+- **Unit tests** next to the code: shaping, end markers, the stop check, the loop hash, masking, profile and agent-folder loading, cron parsing, the line editor.
+- **End-to-end tests** with the scripted provider: model replies replayed from YAML drive the real loop against a real PTY in a temporary folder, covering every entry point, IPC, hooks, approvals, sub-agents, plans, schedules and repo mode. No network and no keys.
+- **The benchmark guard**: the prompt and tools sent in `--bench` must match the published fixtures byte for byte.
+- **Client tests**: the Python client's unit tests, the TypeScript client's type check.
+- **Benchmark measurement**: every change that can affect results is measured with Harbor, three or more trials per task, compared task by task with the previous version, on tasks kept apart from the ones used to score.
 
 ---
 
 ## 11. Open questions for the owner
 
-1. First two model families to optimize for?
-2. After M7, which comes first: opening pull requests, MCP, or an SDK?
-3. Public release plan: open source from day one, or after the first held-out result?
+1. A SWE-bench Verified entry: run it, and with which model?
+2. Publishing the clients: package names and registries for Python and TypeScript.
+3. Releasing 3.0.0: the squash-merge into `main`, the tag and the release notes.
+4. Token-by-token streaming over IPC, which version 1 of the protocol does not have.
+5. Running a plugin's `entry` JavaScript, which gitagent 3 does not do.

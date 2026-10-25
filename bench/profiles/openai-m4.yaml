@@ -60,4 +60,4 @@ cache: { breakpoints: [], ttl: 5m }
 tools: { write_stdin: true, image_read: true, todo: false, subagents: false, subagent_depth: 1, max_concurrent_subagents: 4 }
 openai:
   reasoning_summary: auto
-  prompt_cache_key: gitagent-v2
+  prompt_cache_key: gitagent

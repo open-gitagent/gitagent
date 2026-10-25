@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 fn cfg() -> OpenAiCfg {
     OpenAiCfg {
         reasoning_summary: "auto".into(),
-        prompt_cache_key: Some("gitagent-v2".into()),
+        prompt_cache_key: Some("gitagent".into()),
     }
 }
 
@@ -65,7 +65,7 @@ fn request_body_replays_output_items_and_converts_the_rest() {
         json!({"effort": "high", "summary": "auto"})
     );
     assert_eq!(body["include"], json!(["reasoning.encrypted_content"]));
-    assert_eq!(body["prompt_cache_key"], "gitagent-v2");
+    assert_eq!(body["prompt_cache_key"], "gitagent");
     assert_eq!(body["max_output_tokens"], 64000);
     assert!(body.get("temperature").is_none());
     assert_eq!(
