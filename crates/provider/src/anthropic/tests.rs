@@ -227,7 +227,7 @@ fn incomplete_streams_and_stream_errors_are_retryable() {
     let overloaded = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n";
     assert!(matches!(
         parse_in_chunks(overloaded, 64),
-        Err(ProviderError::Transient(_))
+        Err(ProviderError::RateLimited(_))
     ));
 }
 
@@ -260,11 +260,15 @@ fn classifies_http_errors() {
         |t: &str, m: &str| json!({"type": "error", "error": {"type": t, "message": m}}).to_string();
     assert!(matches!(
         classify_http_error(529, &body("overloaded_error", "Overloaded")),
+        ProviderError::RateLimited(_)
+    ));
+    assert!(matches!(
+        classify_http_error(503, &body("api_error", "down")),
         ProviderError::Transient(_)
     ));
     assert!(matches!(
         classify_http_error(429, &body("rate_limit_error", "slow down")),
-        ProviderError::Transient(_)
+        ProviderError::RateLimited(_)
     ));
     assert!(matches!(
         classify_http_error(

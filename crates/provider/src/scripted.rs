@@ -22,7 +22,8 @@ struct ScriptedTurn {
     /// Simulates a safety-classifier refusal.
     #[serde(default)]
     refusal: bool,
-    /// Simulates a provider error: `transient`, `context_overflow` or `fatal`.
+    /// Simulates a provider error: `transient`, `rate_limited`,
+    /// `context_overflow` or `fatal`.
     #[serde(default)]
     error: Option<String>,
     /// How long the reply takes, in milliseconds, so a demo shows the
@@ -95,6 +96,7 @@ impl Provider for ScriptedProvider {
         if let Some(kind) = &turn.error {
             return Err(match kind.as_str() {
                 "transient" => ProviderError::Transient("scripted".into()),
+                "rate_limited" => ProviderError::RateLimited("scripted".into()),
                 "context_overflow" => ProviderError::ContextOverflow("scripted".into()),
                 _ => ProviderError::Fatal("scripted".into()),
             });

@@ -99,6 +99,7 @@ async fn run_inner(cli: &mut Cli, url: String, task: String) -> Result<ExitCode>
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         },
     )
     .await?;

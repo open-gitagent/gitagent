@@ -1014,6 +1014,7 @@ async fn session(cli: Cli, out: Out) -> i32 {
             kill: Some(ctl.kill.clone()),
             steer: Some(ctl.steering.clone()),
             external_tools: external.clone(),
+            throttle: None,
         };
         let run = gitagent_core::run(&s.spec, s.provider.as_ref(), opts);
         tokio::pin!(run);
@@ -1142,6 +1143,7 @@ async fn session(cli: Cli, out: Out) -> i32 {
             kill: None,
             steer: None,
             external_tools: external.clone(),
+            throttle: None,
         };
         match gitagent_core::teardown(&s.spec, s.provider.as_ref(), opts).await {
             Some(Ok(done)) => out.system(

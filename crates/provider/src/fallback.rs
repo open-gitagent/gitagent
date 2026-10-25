@@ -71,7 +71,7 @@ impl Provider for FallbackProvider {
                 }
                 // A different model will not make the request smaller.
                 Err(e @ ProviderError::ContextOverflow(_)) => return Err(e),
-                Err(e @ ProviderError::Transient(_)) => {
+                Err(e @ (ProviderError::Transient(_) | ProviderError::RateLimited(_))) => {
                     let n = self.transient_in_a_row.fetch_add(1, Ordering::Relaxed) + 1;
                     if n < TRANSIENT_LIMIT || !self.advance(i, &e) {
                         // Let the caller back off and retry this model.

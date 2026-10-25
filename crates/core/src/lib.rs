@@ -6,9 +6,11 @@ mod audit;
 mod fallback;
 mod plan;
 mod snapshot;
+mod throttle;
 pub mod workflow;
 
 pub use approval::{Approval, ApprovalRequest, Approver, KillSwitch};
+pub use throttle::Throttle;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -91,6 +93,10 @@ pub struct RunOptions {
     pub steer: Option<Steering>,
     /// Tools the caller runs itself.
     pub external_tools: Option<std::sync::Arc<dyn ExternalTools>>,
+    /// The window for model calls made at the same time (see [`Throttle`]).
+    /// A run started by another run shares its parent's; `None` starts one
+    /// at `max_concurrent_subagents`.
+    pub throttle: Option<std::sync::Arc<Throttle>>,
 }
 
 /// What a follow-up task continues from.
@@ -306,6 +312,11 @@ pub async fn run(
         opts.mcp.as_deref(),
         opts.kill.as_ref(),
     );
+    let throttle = opts.throttle.clone().unwrap_or_else(|| {
+        std::sync::Arc::new(Throttle::new(
+            spec.profile.tools.max_concurrent_subagents.max(1) as usize,
+        ))
+    });
     let snapshot = if spec.profile.snapshot {
         let snap = snapshot::probe(&opts.work_dir, SECRET_ENV).await;
         counters.inc(if snap.is_some() {
@@ -467,6 +478,7 @@ pub async fn run(
                 cache: cache_plan,
                 deadline,
                 events: &events,
+                throttle: &throttle,
             };
             prompt_tokens = base_tokens
                 + c.run(&mut messages, &mut counters, &mut traj, &mut total)
@@ -501,10 +513,21 @@ pub async fn run(
                 None => std::future::pending().await,
             }
         };
+        let mut retries = Retries::default();
         let answer = tokio::select! {
-            r = complete_with_retry(provider, &req, deadline) => r,
+            r = complete_with_retry(provider, &req, deadline, &throttle, &mut retries) => r,
             reason = halted => break Outcome::Killed(reason),
         };
+        if retries.transient + retries.rate_limited > 0 {
+            counters.add("provider_retries", retries.transient.into());
+            counters.add("rate_limit_retries", retries.rate_limited.into());
+            if retries.rate_limited > 0 {
+                events.emit(
+                    "guard",
+                    json!({"turn": turns, "kind": "rate_limited", "retries": retries.rate_limited, "window": throttle.window()}),
+                );
+            }
+        }
         let mut resp = match answer {
             Ok(Some(r)) => r,
             Ok(None) => break Outcome::TimeUp,
@@ -522,6 +545,7 @@ pub async fn run(
                     cache: cache_plan,
                     deadline,
                     events: &events,
+                    throttle: &throttle,
                 };
                 prompt_tokens = base_tokens
                     + c.run(&mut messages, &mut counters, &mut traj, &mut total)
@@ -706,8 +730,8 @@ pub async fn run(
             if pending.len() > 1 {
                 counters.inc("subagent_parallel_turns");
             }
-            let at_once = spec.profile.tools.max_concurrent_subagents.max(1) as usize;
-            // Up to `at_once` run together; the next starts when one ends.
+            // Up to the throttle's window run together; the next starts
+            // when one ends.
             {
                 let mut futures = Vec::new();
                 for (_, run_call) in &pending {
@@ -729,10 +753,12 @@ pub async fn run(
                             mcp: opts.mcp.clone(),
                             approver: opts.approver.clone(),
                             kill: opts.kill.clone(),
+                            throttle: throttle.clone(),
                         },
                     ));
                 }
-                for ((id, _), result) in pending.iter().zip(join_limited(futures, at_once).await) {
+                for ((id, _), result) in pending.iter().zip(join_limited(futures, &throttle).await)
+                {
                     subagent_results.insert(id.clone(), result);
                 }
             }
@@ -863,12 +889,11 @@ pub async fn run(
                                 mcp: opts.mcp.clone(),
                                 approver: opts.approver.clone(),
                                 kill: opts.kill.clone(),
+                                throttle: throttle.clone(),
                             };
                             workflow::run_as_tool(spec, provider, &run_call, child).await
                         } else if run_call.name == gitagent_tools::PLAN && spec.profile.tools.plan {
                             counters.inc("plan_runs");
-                            let at_once =
-                                spec.profile.tools.max_concurrent_subagents.max(1) as usize;
                             let children = plan::Children {
                                 template: ChildRun {
                                     cwd: terminal.cwd().to_path_buf(),
@@ -879,12 +904,12 @@ pub async fn run(
                                     mcp: opts.mcp.clone(),
                                     approver: opts.approver.clone(),
                                     kill: opts.kill.clone(),
+                                    throttle: throttle.clone(),
                                 },
                                 started: Instant::now(),
                             };
                             let done =
-                                plan::run(spec, provider, &run_call, &children, &events, at_once)
-                                    .await;
+                                plan::run(spec, provider, &run_call, &children, &events).await;
                             for rep in &done.reports {
                                 counters.add("subagent_turns", rep.turns.into());
                                 add_usage(&mut total, &rep.usage, &mut counters);
@@ -1295,6 +1320,11 @@ pub async fn run_workflow(
         mcp: opts.mcp.clone(),
         approver: opts.approver.clone(),
         kill: opts.kill.clone(),
+        throttle: opts.throttle.clone().unwrap_or_else(|| {
+            std::sync::Arc::new(Throttle::new(
+                spec.profile.tools.max_concurrent_subagents.max(1) as usize,
+            ))
+        }),
     };
     workflow::run_workflow(spec, provider, name, inputs, child)
         .await
@@ -1571,17 +1601,21 @@ async fn pre_hooks(
     }
 }
 
-/// Polls the futures with at most `limit` in progress at once, starting the
-/// next as soon as one finishes; gives the results in the original order.
+/// Polls the futures with at most the throttle's window in progress at
+/// once, starting the next as soon as one finishes or the window grows;
+/// gives the results in the original order.
 async fn join_limited<'a, T>(
     mut futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>>,
-    limit: usize,
+    throttle: &Throttle,
 ) -> Vec<T> {
-    let limit = limit.max(1);
     let mut done: Vec<Option<T>> = futures.iter().map(|_| None).collect();
-    let mut started = limit.min(futures.len());
+    let mut started = 0;
     std::future::poll_fn(|cx| {
         loop {
+            // Fill the free places, then poll everything started once.
+            let active = done[..started].iter().filter(|d| d.is_none()).count();
+            let room = throttle.window().max(1).saturating_sub(active);
+            started = (started + room).min(futures.len());
             let mut finished_now = 0;
             for (slot, fut) in done.iter_mut().zip(futures.iter_mut()).take(started) {
                 if slot.is_none() {
@@ -1594,8 +1628,6 @@ async fn join_limited<'a, T>(
             if finished_now == 0 || started == futures.len() {
                 break;
             }
-            // Fill the freed places, and poll the new ones at once.
-            started = (started + finished_now).min(futures.len());
         }
         if done.iter().all(Option::is_some) {
             std::task::Poll::Ready(())
@@ -1619,6 +1651,8 @@ struct ChildRun {
     mcp: Option<std::sync::Arc<gitagent_mcp::Servers>>,
     approver: Option<std::sync::Arc<dyn Approver>>,
     kill: Option<KillSwitch>,
+    /// The session's window for calls made at the same time.
+    throttle: std::sync::Arc<Throttle>,
 }
 
 /// What one sub-agent run came to.
@@ -1664,6 +1698,7 @@ fn run_subagent<'a>(
             mcp,
             approver,
             kill,
+            throttle,
         } = child_run;
         let arg = |k: &str| call.arguments.get(k).and_then(Value::as_str);
         let name = arg("agent").unwrap_or(gitagent_loader::GENERAL_AGENT);
@@ -1865,6 +1900,7 @@ fn run_subagent<'a>(
             kill,
             steer: None,
             external_tools: None,
+            throttle: Some(throttle),
         };
         let nested: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Finished>> + Send + '_>,
@@ -1975,6 +2011,7 @@ struct Compaction<'a> {
     cache: CachePlan,
     deadline: Option<Instant>,
     events: &'a Events,
+    throttle: &'a Throttle,
 }
 
 impl Compaction<'_> {
@@ -2006,7 +2043,15 @@ impl Compaction<'_> {
             cache: self.cache,
             server_masking: None,
         };
-        let summary = match complete_with_retry(self.provider, &req, self.deadline).await {
+        let summary = match complete_with_retry(
+            self.provider,
+            &req,
+            self.deadline,
+            self.throttle,
+            &mut Retries::default(),
+        )
+        .await
+        {
             Ok(Some(r)) if !r.text.trim().is_empty() => {
                 add_usage(total, &r.usage, counters);
                 let mut step = Step::agent(r.text.clone());
@@ -2034,12 +2079,23 @@ impl Compaction<'_> {
     }
 }
 
-/// Calls the model, retrying transient errors with backoff. Returns `None`
-/// when the time budget runs out first.
+/// How many times one model call was retried, and why.
+#[derive(Default)]
+struct Retries {
+    transient: u32,
+    rate_limited: u32,
+}
+
+/// Calls the model, retrying transient errors and rate limits with backoff.
+/// A rate limit narrows the throttle's window; a call that goes through
+/// widens it again over time. Returns `None` when the time budget runs out
+/// first.
 async fn complete_with_retry(
     provider: &dyn Provider,
     req: &ChatRequest,
     deadline: Option<Instant>,
+    throttle: &Throttle,
+    retries: &mut Retries,
 ) -> Result<Option<ChatResponse>, ProviderError> {
     let mut delay = Duration::from_secs(2);
     let mut attempt = 0;
@@ -2053,17 +2109,29 @@ async fn complete_with_retry(
             None => call.await,
         };
         match result {
-            Err(ProviderError::Transient(msg)) if attempt < PROVIDER_RETRIES => {
+            Ok(r) => {
+                throttle.clean();
+                return Ok(Some(r));
+            }
+            Err(e @ (ProviderError::Transient(_) | ProviderError::RateLimited(_)))
+                if attempt < PROVIDER_RETRIES =>
+            {
+                if matches!(e, ProviderError::RateLimited(_)) {
+                    throttle.hit();
+                    retries.rate_limited += 1;
+                } else {
+                    retries.transient += 1;
+                }
                 let left = deadline.map(|d| d.saturating_duration_since(Instant::now()));
                 if left.is_some_and(|l| l < delay + MIN_TIME_FOR_TURN) {
-                    return Err(ProviderError::Transient(msg));
+                    return Err(e);
                 }
-                eprintln!("gitagent: provider error, retrying in {delay:?}: {msg}");
+                eprintln!("gitagent: provider error, retrying in {delay:?}: {e}");
                 tokio::time::sleep(delay).await;
                 delay *= 2;
                 attempt += 1;
             }
-            other => return other.map(Some),
+            Err(e) => return Err(e),
         }
     }
 }

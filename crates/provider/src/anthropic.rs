@@ -262,9 +262,9 @@ pub(crate) fn classify_http_error(status: u16, body: &str) -> ProviderError {
 
 fn classify(status: u16, kind: &str, message: &str, detail: String) -> ProviderError {
     let lower = message.to_lowercase();
-    if matches!(status, 408 | 429 | 500 | 502 | 503 | 504 | 529)
-        || matches!(kind, "rate_limit_error" | "api_error" | "overloaded_error")
-    {
+    if matches!(status, 429 | 529) || matches!(kind, "rate_limit_error" | "overloaded_error") {
+        ProviderError::RateLimited(detail)
+    } else if matches!(status, 408 | 500 | 502 | 503 | 504) || kind == "api_error" {
         ProviderError::Transient(detail)
     } else if kind == "request_too_large"
         || lower.contains("prompt is too long")

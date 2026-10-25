@@ -108,6 +108,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
                 kill: None,
                 steer: None,
                 external_tools: None,
+                throttle: None,
             };
             match gitagent_core::run_workflow(&s.spec, s.provider.as_ref(), &name, &inputs, opts)
                 .await
@@ -160,6 +161,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         };
         let spinner = console::Spinner::start(st, "thinking");
         tokio::select! {
@@ -203,6 +205,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         };
         match gitagent_core::teardown(&s.spec, s.provider.as_ref(), opts).await {
             Some(Ok(done)) => eprintln!(

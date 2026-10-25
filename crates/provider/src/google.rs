@@ -206,11 +206,10 @@ pub(crate) fn classify_http_error(status: u16, body: &str) -> ProviderError {
     let lower = message.to_lowercase();
     if lower.contains("exceeds the maximum number of tokens") || lower.contains("too long") {
         ProviderError::ContextOverflow(detail)
-    } else if matches!(status, 408 | 429 | 500 | 502 | 503 | 504)
-        || matches!(
-            state,
-            "RESOURCE_EXHAUSTED" | "UNAVAILABLE" | "INTERNAL" | "DEADLINE_EXCEEDED"
-        )
+    } else if status == 429 || state == "RESOURCE_EXHAUSTED" {
+        ProviderError::RateLimited(detail)
+    } else if matches!(status, 408 | 500 | 502 | 503 | 504)
+        || matches!(state, "UNAVAILABLE" | "INTERNAL" | "DEADLINE_EXCEEDED")
     {
         ProviderError::Transient(detail)
     } else {

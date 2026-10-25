@@ -33,9 +33,13 @@ pub trait Provider: Send + Sync {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProviderError {
-    /// Worth retrying after a backoff: rate limits, overload, 5xx, network errors.
+    /// Worth retrying after a backoff: overload, 5xx, network errors.
     #[error("transient provider error: {0}")]
     Transient(String),
+    /// Refused for rate or capacity reasons (HTTP 429, overloaded): worth
+    /// retrying after a backoff, and a reason to make fewer calls at once.
+    #[error("rate limited: {0}")]
+    RateLimited(String),
     /// The request does not fit the model's context window.
     #[error("context window exceeded: {0}")]
     ContextOverflow(String),

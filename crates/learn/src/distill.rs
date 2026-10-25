@@ -71,7 +71,9 @@ pub async fn propose(
         attempt += 1;
         match provider.complete(&req).await {
             Ok(r) => break r,
-            Err(ProviderError::Transient(e)) if attempt < RETRIES => {
+            Err(ProviderError::Transient(e) | ProviderError::RateLimited(e))
+                if attempt < RETRIES =>
+            {
                 eprintln!("gitagent learn: retrying after a provider error: {e}");
                 tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
             }

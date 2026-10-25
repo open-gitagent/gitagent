@@ -229,7 +229,7 @@ fn classifies_http_errors() {
             429,
             &body("rate_limit_error", "rate_limit_exceeded", "slow down")
         ),
-        ProviderError::Transient(_)
+        ProviderError::RateLimited(_)
     ));
     assert!(matches!(
         classify_http_error(

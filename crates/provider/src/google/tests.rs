@@ -147,7 +147,7 @@ fn safety_blocks_errors_and_truncation() {
     };
     assert!(matches!(
         err(429, "RESOURCE_EXHAUSTED", "quota"),
-        ProviderError::Transient(_)
+        ProviderError::RateLimited(_)
     ));
     assert!(matches!(
         err(

@@ -226,15 +226,14 @@ fn classify(status: u16, kind: &str, code: &str, message: &str, detail: String) 
         || lower.contains("maximum context length")
     {
         ProviderError::ContextOverflow(detail)
-    } else if matches!(status, 408 | 409 | 429 | 500 | 502 | 503 | 504)
-        || matches!(
-            kind,
-            "server_error" | "rate_limit_error" | "service_unavailable_error"
-        )
-        || matches!(
-            code,
-            "server_error" | "rate_limit_exceeded" | "server_is_overloaded"
-        )
+    } else if status == 429
+        || kind == "rate_limit_error"
+        || matches!(code, "rate_limit_exceeded" | "server_is_overloaded")
+    {
+        ProviderError::RateLimited(detail)
+    } else if matches!(status, 408 | 409 | 500 | 502 | 503 | 504)
+        || matches!(kind, "server_error" | "service_unavailable_error")
+        || code == "server_error"
     {
         ProviderError::Transient(detail)
     } else {

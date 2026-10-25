@@ -467,6 +467,7 @@ async fn run_step(
                 mcp: child.mcp.clone(),
                 approver: child.approver.clone(),
                 kill: child.kill.clone(),
+                throttle: child.throttle.clone(),
             },
         )
         .await;
@@ -565,6 +566,7 @@ async fn model_step(
         kill: child.kill.clone(),
         steer: None,
         external_tools: None,
+        throttle: None,
     };
     let nested: std::pin::Pin<
         Box<dyn std::future::Future<Output = anyhow::Result<crate::Finished>> + Send + '_>,

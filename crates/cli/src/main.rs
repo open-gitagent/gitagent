@@ -542,6 +542,7 @@ async fn single(cli: Cli, instruction: String) -> ExitCode {
                 kill: None,
                 steer: None,
                 external_tools: None,
+                throttle: None,
             },
         )
         .await?;
@@ -620,6 +621,7 @@ async fn run_workflow(cli: Cli, name: String) -> ExitCode {
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         };
         let report =
             gitagent_core::run_workflow(&s.spec, s.provider.as_ref(), &name, &inputs, opts).await?;
@@ -666,6 +668,7 @@ pub(crate) async fn teardown(
         kill: None,
         steer: None,
         external_tools: None,
+        throttle: None,
     };
     match gitagent_core::teardown(&s.spec, s.provider.as_ref(), opts).await {
         Some(Ok(mut done)) => {

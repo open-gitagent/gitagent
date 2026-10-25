@@ -1011,6 +1011,7 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
         kill: Some(kill.clone()),
         steer: None,
         external_tools: None,
+        throttle: None,
     };
     let spec = p.spec;
     let (work_dir, session_id) = (p.work_dir.clone(), p.session_id.clone());
@@ -1031,6 +1032,7 @@ pub async fn query(prompt: impl Into<String>, options: AgentOptions) -> Result<Q
         kill: None,
         steer: None,
         external_tools: None,
+        throttle: None,
     };
     let handle = tokio::spawn(async move {
         let finished = gitagent_core::run(&spec, provider.as_ref(), run_opts).await?;

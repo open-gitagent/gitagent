@@ -463,6 +463,9 @@ struct BoardState {
     phase_total: usize,
     /// Columns to draw in; longer lines are cut so each takes one row.
     width: usize,
+    /// (running at once, ceiling, rate limits so far), once a rate limit
+    /// has narrowed the window.
+    window: Option<(usize, usize, u64)>,
     tasks: Vec<TaskRow>,
     reconcile: Option<(bool, Option<bool>, String, std::time::Instant)>,
     drawn: usize,
@@ -542,6 +545,13 @@ impl Board {
                     t.result = s("result");
                     t.took = Some(now.duration_since(t.started));
                 }
+            }
+            "window" => {
+                b.window = Some((
+                    e["at_once"].as_u64().unwrap_or(0) as usize,
+                    e["ceiling"].as_u64().unwrap_or(0) as usize,
+                    e["rate_limited"].as_u64().unwrap_or(0),
+                ));
             }
             "reconcile_start" => b.reconcile = Some((true, None, String::new(), now)),
             "reconcile_end" => {
@@ -624,12 +634,23 @@ impl Board {
         let finished = b.tasks.len() - running;
         let total = b.phase_total.max(b.tasks.len());
         let elapsed = b.started.map(|s| s.elapsed().as_secs()).unwrap_or(0);
+        let slowed = match b.window {
+            Some((w, c, hits)) if w < c => format!(
+                " · slowed to {w} at a time after {hits} rate limit{}",
+                if hits == 1 { "" } else { "s" }
+            ),
+            Some((_, c, hits)) => format!(
+                " · {hits} rate limit{}, back to {c} at a time",
+                if hits == 1 { "" } else { "s" }
+            ),
+            None => String::new(),
+        };
         out.push(format!(
             "{} {} {}",
             st.orange("⇶"),
             st.bold(&format!("phase {}/{} {}", b.phase, b.of, b.phase_name)),
             st.dim(&format!(
-                "· {running} running · {finished} of {total} done · {elapsed}s"
+                "· {running} running · {finished} of {total} done · {elapsed}s{slowed}"
             ))
         ));
         const SHOW: usize = 14;

@@ -6,7 +6,8 @@
 //! the earlier phases' results after the first phase). A phase's tasks run
 //! `at_once` at a time; the next phase starts when the whole phase is done.
 //! Events `plan` (phase_start, task_start, task_end, phase_end,
-//! reconcile_start, reconcile_end) let the console draw the task board.
+//! reconcile_start, reconcile_end, and window once rate limits have
+//! narrowed the number running at once) let the console draw the task board.
 
 use gitagent_provider::ToolCall;
 use gitagent_record::Events;
@@ -42,6 +43,7 @@ impl Children {
             mcp: t.mcp.clone(),
             approver: t.approver.clone(),
             kill: t.kill.clone(),
+            throttle: t.throttle.clone(),
         }
     }
 }
@@ -169,7 +171,6 @@ pub(crate) async fn run(
     call: &ToolCall,
     children: &Children,
     events: &Events,
-    at_once: usize,
 ) -> Done {
     let (phases, reconcile, reconcile_agent) = match parse(call) {
         Ok(p) => p,
@@ -209,8 +210,9 @@ pub(crate) async fn run(
                 results.join("\n\n")
             )
         };
-        // Up to `at_once` tasks run at a time; the next starts as soon as
-        // one finishes. Each reports its start and end as they happen.
+        // Up to the throttle's window of tasks run at a time; the next starts
+        // as soon as one finishes. Each reports its start and end as they
+        // happen, and the window when rate limits have narrowed it.
         let mut jobs: Vec<Job<'_>> = Vec::new();
         for t in &phase.tasks {
             seq += 1;
@@ -223,6 +225,7 @@ pub(crate) async fn run(
                 t.max_turns,
             );
             let child = children.child(seq);
+            let throttle = child.throttle.clone();
             let agent = t
                 .agent
                 .clone()
@@ -239,11 +242,18 @@ pub(crate) async fn run(
                     "plan",
                     json!({"action": "task_end", "phase": phase_no, "id": call.id, "description": description, "ok": !r.out.is_error, "partial": r.partial, "result": preview(&r.answer)}),
                 );
+                let (window, ceiling, hits) = throttle.state();
+                if hits > 0 {
+                    events.emit(
+                        "plan",
+                        json!({"action": "window", "at_once": window, "ceiling": ceiling, "rate_limited": hits}),
+                    );
+                }
                 (call, r)
             }));
         }
         let mut phase_results = Vec::new();
-        for (c, r) in crate::join_limited(jobs, at_once.max(1)).await {
+        for (c, r) in crate::join_limited(jobs, &children.template.throttle).await {
             tasks_run += 1;
             let ok = !r.out.is_error;
             if !ok {

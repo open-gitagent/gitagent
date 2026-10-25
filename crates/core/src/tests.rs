@@ -65,6 +65,7 @@ async fn run_script_for(spec: &AgentSpec, instruction: &str, script: &str, secs:
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         },
     )
     .await
@@ -110,6 +111,7 @@ async fn a_tool_denylist_removes_tools_but_never_task_complete() {
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         },
     )
     .await
@@ -1003,6 +1005,7 @@ async fn events_describe_the_run_as_json_lines() {
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         },
     )
     .await
@@ -1064,6 +1067,7 @@ async fn a_follow_up_task_continues_the_conversation_and_shell() {
         kill: None,
         steer: None,
         external_tools: None,
+        throttle: None,
     };
     let first = run(&spec(), &provider, opts("First task.", "t1", None))
         .await
@@ -1294,6 +1298,7 @@ async fn run_supervised(
             kill,
             steer: None,
             external_tools: None,
+            throttle: None,
         },
     )
     .await
@@ -1548,6 +1553,7 @@ async fn the_kill_switch_cancels_a_model_call_in_progress() {
             kill: Some(kill),
             steer: None,
             external_tools: None,
+            throttle: None,
         },
     )
     .await
@@ -1674,6 +1680,7 @@ async fn teardown_runs_one_last_turn_on_the_sessions_history() {
         kill: None,
         steer: None,
         external_tools: None,
+        throttle: None,
     };
     let finished = run(&spec, &provider, opts("out", None)).await.unwrap();
     assert_eq!(finished.report.outcome, Outcome::Completed);
@@ -1787,6 +1794,7 @@ async fn workflows_run_their_steps_in_order() {
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         },
     )
     .await
@@ -1857,6 +1865,7 @@ async fn workflows_run_their_steps_in_order() {
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         },
     )
     .await
@@ -2114,6 +2123,7 @@ async fn a_workflow_step_naming_a_missing_tool_fails_plainly() {
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         },
     )
     .await
@@ -2192,6 +2202,7 @@ async fn a_workflow_tool_step_needs_the_same_approval_as_the_model() {
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         },
     )
     .await
@@ -2349,9 +2360,52 @@ async fn at_most_the_limit_runs_at_once_and_results_keep_their_order() {
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = usize> + Send>>
         })
         .collect();
-    let out = join_limited(futures, 2).await;
+    // A ceiling of 4, halved by one rate limit before the work starts.
+    let throttle = Throttle::new(4);
+    throttle.hit();
+    let out = join_limited(futures, &throttle).await;
     assert_eq!(out, vec![0, 1, 2, 3, 4]);
     assert_eq!(most.load(Ordering::SeqCst), 2);
+}
+
+/// A rate-limited call is retried, counted, and narrows the window the
+/// plan's tasks share.
+#[tokio::test]
+async fn a_rate_limit_is_retried_counted_and_narrows_the_window() {
+    let mut spec = spec();
+    spec.profile.tools.subagents = true;
+    spec.profile.tools.plan = true;
+    spec.profile.tools.max_concurrent_subagents = 4;
+    spec.agents = vec![agent("worker", 5)];
+    let script = r#"
+- tool_calls:
+    - name: plan
+      arguments:
+        phases:
+          - tasks:
+              - {description: look, prompt: "look around", agent: worker}
+        reconcile: Combine.
+        agent: worker
+- error: rate_limited
+- tool_calls: [{name: task_complete, arguments: {summary: "looked"}}]
+- tool_calls: [{name: task_complete, arguments: {summary: "COMBINED"}}]
+- tool_calls: [{name: task_complete, arguments: {summary: "parent done"}}]
+"#;
+    let r = run_script_for(&spec, "x", script, 600).await;
+    assert_eq!(r.report.outcome, Outcome::Completed);
+    let plan_dir = std::fs::read_dir(r.dir.path().join("out/plans"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let child: Value =
+        serde_json::from_slice(&std::fs::read(plan_dir.join("tasks/1/counters.json")).unwrap())
+            .unwrap();
+    assert_eq!(child["rate_limit_retries"], 1, "{child}");
+    assert!(child.get("provider_retries").is_none_or(|v| v == 0));
+    let t = r.trajectory().to_string();
+    assert!(t.contains("COMBINED"), "the plan still finished: {t}");
 }
 
 /// A plan task can be given its own turn limit; one that runs out is warned

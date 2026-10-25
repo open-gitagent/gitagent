@@ -343,6 +343,7 @@ impl Runner {
             kill: None,
             steer: None,
             external_tools: None,
+            throttle: None,
         };
         let (success, result) =
             match gitagent_core::run(&self.setup.spec, self.setup.provider.as_ref(), opts).await {
