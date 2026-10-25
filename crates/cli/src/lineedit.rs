@@ -85,6 +85,15 @@ impl Drop for RawMode {
     }
 }
 
+/// The terminal's width in columns: `stty size`, else `COLUMNS`, else 100.
+pub(crate) fn terminal_width() -> usize {
+    stty(&["size"])
+        .and_then(|s| s.split_whitespace().nth(1)?.parse().ok())
+        .or_else(|| std::env::var("COLUMNS").ok()?.trim().parse().ok())
+        .filter(|w: &usize| *w > 0)
+        .unwrap_or(100)
+}
+
 /// Runs `stty` on the controlling terminal; its stdout, or `None` when
 /// there is no terminal or no stty.
 fn stty(args: &[&str]) -> Option<String> {

@@ -2312,3 +2312,109 @@ fn trajectories_under(dir: &std::path::Path) -> Vec<String> {
     }
     out
 }
+
+#[test]
+fn the_turn_warning_comes_at_80_percent_and_before_the_last_call() {
+    assert_eq!(turn_warning(10, 30, false), None);
+    let wrap = turn_warning(24, 30, false).expect("at 80%");
+    assert!(
+        wrap.contains("24 of your 30 model calls; 6 are left") && wrap.contains("task_complete")
+    );
+    assert_eq!(turn_warning(25, 30, false), None);
+    let last = turn_warning(29, 30, true).expect("before the last call");
+    assert!(last.contains("last model call") && last.contains("reply without calling a tool"));
+    // Small limits: only the last-call warning.
+    assert!(turn_warning(1, 2, false)
+        .unwrap()
+        .contains("last model call"));
+    assert_eq!(turn_warning(2, 2, false), None);
+}
+
+#[tokio::test]
+async fn at_most_the_limit_runs_at_once_and_results_keep_their_order() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let running = std::sync::Arc::new(AtomicUsize::new(0));
+    let most = std::sync::Arc::new(AtomicUsize::new(0));
+    let futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = usize> + Send>>> = (0..5)
+        .map(|i: usize| {
+            let running = running.clone();
+            let most = most.clone();
+            Box::pin(async move {
+                let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                most.fetch_max(now, Ordering::SeqCst);
+                // Later ones finish first, so a slot frees before the batch ends.
+                tokio::time::sleep(Duration::from_millis(20 * (5 - i) as u64)).await;
+                running.fetch_sub(1, Ordering::SeqCst);
+                i
+            }) as std::pin::Pin<Box<dyn std::future::Future<Output = usize> + Send>>
+        })
+        .collect();
+    let out = join_limited(futures, 2).await;
+    assert_eq!(out, vec![0, 1, 2, 3, 4]);
+    assert_eq!(most.load(Ordering::SeqCst), 2);
+}
+
+/// A plan task can be given its own turn limit; one that runs out is warned
+/// before its last call and comes back marked as partial.
+#[tokio::test]
+async fn a_plan_task_out_of_turns_is_warned_and_marked_partial() {
+    let mut spec = spec();
+    spec.profile.tools.subagents = true;
+    spec.profile.tools.plan = true;
+    spec.agents = vec![agent("worker", 5)];
+    let script = r#"
+- tool_calls:
+    - name: plan
+      arguments:
+        phases:
+          - tasks:
+              - {description: big review, prompt: "review everything", agent: worker, max_turns: 2}
+        reconcile: Combine.
+        agent: worker
+- tool_calls: [{name: exec, arguments: {cmd: "echo looking"}}]
+- tool_calls: [{name: exec, arguments: {cmd: "echo still looking"}}]
+- tool_calls: [{name: task_complete, arguments: {summary: "COMBINED"}}]
+- tool_calls: [{name: task_complete, arguments: {summary: "parent done"}}]
+"#;
+    let r = run_script_for(&spec, "x", script, 600).await;
+    assert_eq!(r.report.outcome, Outcome::Completed);
+    let c = r.counters();
+    assert_eq!(c["plan_partial_tasks"], 1);
+    let out = first_result(&r.trajectory());
+    assert!(
+        out.starts_with("1 task in 1 phase ran, 1 stopped at its turn limit with partial results."),
+        "{out}"
+    );
+    let texts = trajectories_under(&r.dir.path().join("out/plans"));
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.contains("This is your last model call")),
+        "the task was warned before its last call"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.contains("big review (stopped at its turn limit: partial results)")),
+        "the reconciler was told the task is partial"
+    );
+}
+
+/// Outside benchmark runs `/tests` is an ordinary path: a command that only
+/// mentions it in a pattern is not refused.
+#[tokio::test]
+async fn the_tests_guard_applies_to_benchmark_runs_only() {
+    let script = "- tool_calls: [{name: exec, arguments: {cmd: \"mkdir -p out && echo a | grep -vE '/tests/|x' > out/list.txt; echo ok\"}}]\n\
+                  - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n";
+    let mut everyday = spec();
+    everyday.benchmark = false;
+    let r = run_script(&everyday, "x", script).await;
+    assert!(!first_result(&r.trajectory()).contains("Refused"));
+    let bench = spec();
+    assert!(
+        bench.benchmark,
+        "no project or home directory: a benchmark run"
+    );
+    let r = run_script(&bench, "x", script).await;
+    assert!(first_result(&r.trajectory()).contains("Refused: nothing may be written under /tests"));
+}

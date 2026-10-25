@@ -156,9 +156,17 @@ With `runtime: {parallel_tasks: true}` in agent.yaml, the agent gets a
 `plan` tool: it writes phases of tasks, every task in a phase runs at the
 same time as its own sub-agent (fresh context, own shell), a later phase
 sees the earlier results, and one more sub-agent reconciles everything into
-the answer. `runtime.max_parallel` (default 4) says how many run at once.
-Use it for work that splits into similar pieces: many files to read, many
-items to check. It costs tokens in proportion, so give it scoped tasks.
+the answer. `runtime.max_parallel` (default 4) says how many run at once;
+the next task starts as soon as one finishes. Use it for work that splits
+into similar pieces: many files to read, many items to check. It costs
+tokens in proportion, so give it scoped tasks.
+
+Each task gets 30 model calls unless the agent gives it its own
+`max_turns` (up to 100), which it can size to the task: more for a large
+review, fewer for a quick look-up. A task is warned when 80% of its calls
+are used and again before its last one, so it hands back a summary rather
+than stopping mid-step. One that still runs out shows as "out of turns,
+partial" on the task board and is marked so in the results the agent sees.
 
 ```yaml
 runtime:
@@ -535,7 +543,7 @@ gitagent reads `gitagent.yaml` from `--config`, else the project folder (`gitage
 
 `profile: auto` picks `anthropic`, `openai`, `google` or `compat` from the model's provider. Every behavior that changes results is a switch in the profile. The defaults for everyday work:
 
-- **On:** output shaping, context compaction, the loop detector, and the stop check for runs that end with `task_complete` (`-p` and SDK task mode; a reply ends a console turn, so it never fires there).
+- **On:** output shaping, context compaction, the loop detector, the turn warning (at 80% of `max_turns` and before the last model call), and the stop check for runs that end with `task_complete` (`-p` and SDK task mode; a reply ends a console turn, so it never fires there).
 - **On for Claude models:** old tool results are cleared by the provider once the conversation passes 50,000 tokens.
 - **On when the run has a time limit:** the minutes left on every result, a reminder at 70% of the limit and a final call at 90%.
 - **Benchmark profiles only:** the environment snapshot, which adds up to 15 seconds to each start.
@@ -552,7 +560,7 @@ With `learning: online`, gitagent learns from each task it completes. The model 
 
 ### Sandbox
 
-On Linux, outside benchmark runs, the agent's shell runs under Landlock: it may write only to the working folder, the output folder, the temp folders and `~/.cache`. A seccomp filter blocks system calls such as `mount`, loading kernel modules and `reboot`. Set `sandbox: off` in `gitagent.yaml` to disable it, or `sandbox: on` to require it. Writing under `/tests` is refused in every mode.
+On Linux, outside benchmark runs, the agent's shell runs under Landlock: it may write only to the working folder, the output folder, the temp folders and `~/.cache`. A seccomp filter blocks system calls such as `mount`, loading kernel modules and `reboot`. Set `sandbox: off` in `gitagent.yaml` to disable it, or `sandbox: on` to require it. In benchmark runs, writing under `/tests` is refused; elsewhere `/tests` is an ordinary path.
 
 ## Terminal-Bench with Harbor
 

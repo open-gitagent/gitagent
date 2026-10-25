@@ -304,6 +304,9 @@ pub struct ToolContext<'a> {
     /// The model sees `.claude/` tool names (`tool_naming: sdk`): error messages
     /// name tools and arguments the way the model knows them.
     pub sdk_names: bool,
+    /// Refuse writes under `/tests` (benchmark runs, where graders put their
+    /// tests there; elsewhere `/tests` is an ordinary path).
+    pub protect_tests: bool,
 }
 
 /// Longest wait for an MCP tool call.
@@ -330,7 +333,7 @@ fn mcp_output(out: gitagent_mcp::CallOutput) -> ToolOutput {
 pub const PROTECTED_DIR: &str = "/tests";
 
 pub async fn dispatch(call: &ToolCall, ctx: &mut ToolContext<'_>) -> ToolOutput {
-    if writes_protected_dir(call, ctx.terminal.cwd()) {
+    if ctx.protect_tests && writes_protected_dir(call, ctx.terminal.cwd()) {
         ctx.counters.inc("protected_writes_blocked");
         return ToolOutput::error(format!(
             "Refused: nothing may be written under {PROTECTED_DIR}."
@@ -625,6 +628,24 @@ fn contains_word(text: &str, word: &str) -> bool {
         .any(|w| w == word)
 }
 
+/// The most turns (model calls) a caller may give one sub-agent.
+pub const MAX_SUBAGENT_TURNS: u32 = 100;
+
+/// The `max_turns` property of the `subagent` tool and of a plan's tasks.
+fn max_turns_property() -> Value {
+    json!({
+        "type": "integer",
+        "minimum": 1,
+        "maximum": MAX_SUBAGENT_TURNS,
+        "description": format!(
+            "Model calls this sub-agent may make (default: the agent's own limit, 30 unless it sets \
+             one; at most {MAX_SUBAGENT_TURNS}). Give more to large reviews or builds and fewer to \
+             quick look-ups. It is warned when its calls run low and returns partial results if it \
+             runs out."
+        )
+    })
+}
+
 /// The `subagent` tool, offered when the profile enables sub-agents.
 pub fn subagent_spec(agents: &[AgentDef]) -> ToolSpec {
     let names: Vec<&str> = agents.iter().map(|a| a.name.as_str()).collect();
@@ -657,7 +678,8 @@ pub fn subagent_spec(agents: &[AgentDef]) -> ToolSpec {
             "properties": {
                 "description": {"type": "string", "description": "A few words on what the sub-agent will do."},
                 "prompt": {"type": "string", "description": "The complete request for the sub-agent."},
-                "agent": {"type": "string", "enum": names, "description": "Which agent to use (default: general)."}
+                "agent": {"type": "string", "enum": names, "description": "Which agent to use (default: general)."},
+                "max_turns": max_turns_property()
             },
             "required": ["description", "prompt"]
         }),
@@ -675,7 +697,10 @@ pub fn plan_spec(agents: &[AgentDef]) -> ToolSpec {
              and its own shell (so each `prompt` must carry every path and detail it needs), and a \
              later phase is given the results of the earlier ones. When all phases are done, one \
              more sub-agent runs `reconcile` with every result and its answer comes back to you. \
-             Use it when a task splits into similar independent pieces; keep each task small."
+             Use it when a task splits into similar independent pieces. Size each task to finish \
+             within its `max_turns` (30 by default): split large work, such as reviewing many \
+             files, into more tasks, or give a task more turns. A task that runs out returns partial \
+             results and is marked so."
             .into(),
         input_schema: json!({
             "type": "object",
@@ -695,7 +720,8 @@ pub fn plan_spec(agents: &[AgentDef]) -> ToolSpec {
                                     "properties": {
                                         "description": {"type": "string", "description": "A few words on what this task does."},
                                         "prompt": {"type": "string", "description": "The complete request for the sub-agent."},
-                                        "agent": {"type": "string", "enum": names, "description": "Which agent runs it (default: general)."}
+                                        "agent": {"type": "string", "enum": names, "description": "Which agent runs it (default: general)."},
+                                        "max_turns": max_turns_property()
                                     },
                                     "required": ["description", "prompt"]
                                 }

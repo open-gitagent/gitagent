@@ -139,6 +139,11 @@ pub struct GuardsCfg {
     pub loop_repeats: u32,
     /// After a loop warning, use the next effort level for one call.
     pub loop_effort_bump: bool,
+    /// Tell the model when 80% of its turns (model calls) are used, and
+    /// again before the last one, so a run that runs out still ends with an
+    /// answer. Always on for sub-agents.
+    #[serde(default)]
+    pub turn_warning: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

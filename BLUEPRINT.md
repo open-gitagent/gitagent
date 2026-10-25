@@ -128,6 +128,8 @@ Steps 4 to 9 repeat until the stop check accepts, the agent replies in conversat
 | D22 | Landlock and seccomp around the agent's shell, not around gitagent | The agent cannot write outside its folders, while gitagent can still record |
 | D23 | `--bench` reads only committed files, and a test pins its prompt and tools | Product features cannot change a scored run by accident |
 | D24 | Everyday defaults keep the benchmark's guards, except the snapshot; the console has no time limit unless one is set | The loop detector, stop check and context clearing help in any repository; a person at the console stops a turn with Ctrl-C, while runs nobody watches keep a 30-minute ceiling; the snapshot costs up to 15 seconds per start in a project the user already knows |
+| D25 | Sub-agents are warned as their turns run low, may be given their own turn limit (up to 100), and come back marked partial when they run out | A review cut off mid-step wastes its whole cost; a warned one hands back what it found, and the lead re-runs only what is marked partial |
+| D26 | The `/tests` write guard applies to benchmark runs only | It protects graders' tests; in a user's project `/tests` is an ordinary path and a pattern such as `grep -v /tests/` must not be refused |
 
 **Left out on purpose:** critics that rewrite answers; best-of-N on benchmarks; memory or learning during a scored run; automated rewriting of the harness; masking every turn; third-party multi-provider frameworks; a web interface; voice; remote sandboxes.
 

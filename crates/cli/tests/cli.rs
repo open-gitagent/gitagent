@@ -1700,7 +1700,7 @@ fn interactive_commands() {
         stderr.contains("● gitagent v3.")
             && stderr.contains("lyra v1.0.0 · scripted:")
             && stderr.contains("skills: release-notes\n")
-            && stderr.contains("● completed · 1 turn"),
+            && stderr.contains("● completed · 1 model call"),
         "{stderr}"
     );
     let t = std::fs::read_to_string(dir.path().join("out/task-1/trajectory.json")).unwrap();

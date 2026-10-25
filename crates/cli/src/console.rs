@@ -119,6 +119,12 @@ pub(crate) fn banner(
         .max()
         .unwrap_or(0)
         .min(100);
+    // Narrow terminals: the box (its text plus six columns of frame) fits.
+    let width = if st.color {
+        width.min(crate::lineedit::terminal_width().saturating_sub(6).max(20))
+    } else {
+        width
+    };
     let bar = "─".repeat(width + 4);
     let mut box_lines = vec![st.dim(&format!("╭{bar}╮"))];
     for (text, kind) in rows {
@@ -339,7 +345,7 @@ pub(crate) fn status(
     eprintln!(
         "{mark} {}",
         st.dim(&format!(
-            "{outcome} · {turns} turn{} · {:.1}s · {} in · {} out",
+            "{outcome} · {turns} model call{} · {:.1}s · {} in · {} out",
             if turns == 1 { "" } else { "s" },
             took.as_secs_f64(),
             group(input),
@@ -451,8 +457,12 @@ struct BoardState {
     phase: usize,
     of: usize,
     phase_name: String,
-    /// Finished phases: (name, tasks, failed).
-    earlier: Vec<(String, usize, usize)>,
+    /// Finished phases: (name, tasks, failed, stopped at the turn limit).
+    earlier: Vec<(String, usize, usize, usize)>,
+    /// Tasks in the current phase, started or not.
+    phase_total: usize,
+    /// Columns to draw in; longer lines are cut so each takes one row.
+    width: usize,
     tasks: Vec<TaskRow>,
     reconcile: Option<(bool, Option<bool>, String, std::time::Instant)>,
     drawn: usize,
@@ -465,6 +475,8 @@ struct TaskRow {
     description: String,
     agent: String,
     ok: Option<bool>,
+    /// It ran out of turns; its result is partial.
+    partial: bool,
     result: String,
     started: std::time::Instant,
     took: Option<Duration>,
@@ -494,26 +506,30 @@ impl Board {
                     *b = BoardState::default();
                     b.active = true;
                     b.started = Some(now);
+                    b.width = crate::lineedit::terminal_width();
                     BOARD_ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
                     clear_line(&self.st);
                     self.tick();
                 }
                 if b.phase > 0 {
                     let failed = b.tasks.iter().filter(|t| t.ok == Some(false)).count();
+                    let partial = b.tasks.iter().filter(|t| t.partial).count();
                     let name = b.phase_name.clone();
                     let n = b.tasks.len();
-                    b.earlier.push((name, n, failed));
+                    b.earlier.push((name, n, failed, partial));
                     b.tasks.clear();
                 }
                 b.phase = e["phase"].as_u64().unwrap_or(0) as usize;
                 b.of = e["of"].as_u64().unwrap_or(0) as usize;
                 b.phase_name = s("name");
+                b.phase_total = e["tasks"].as_u64().unwrap_or(0) as usize;
             }
             "task_start" => b.tasks.push(TaskRow {
                 id: s("id"),
                 description: s("description"),
                 agent: s("agent"),
                 ok: None,
+                partial: false,
                 result: String::new(),
                 started: now,
                 took: None,
@@ -522,6 +538,7 @@ impl Board {
                 let id = s("id");
                 if let Some(t) = b.tasks.iter_mut().find(|t| t.id == id) {
                     t.ok = Some(e["ok"] == true);
+                    t.partial = e["partial"] == true;
                     t.result = s("result");
                     t.took = Some(now.duration_since(t.started));
                 }
@@ -583,15 +600,20 @@ impl Board {
         let st = &self.st;
         let frame = FRAMES[b.frame % FRAMES.len()];
         let mut out = Vec::new();
-        for (name, n, failed) in &b.earlier {
+        for (name, n, failed, partial) in &b.earlier {
             out.push(format!(
                 "{} {}",
                 st.orange("✓"),
                 st.dim(&format!(
-                    "{name} · {n} task{}{}",
+                    "{name} · {n} task{}{}{}",
                     if *n == 1 { "" } else { "s" },
                     if *failed > 0 {
                         format!(", {failed} failed")
+                    } else {
+                        String::new()
+                    },
+                    if *partial > 0 {
+                        format!(", {partial} out of turns")
                     } else {
                         String::new()
                     }
@@ -599,15 +621,15 @@ impl Board {
             ));
         }
         let running = b.tasks.iter().filter(|t| t.ok.is_none()).count();
+        let finished = b.tasks.len() - running;
+        let total = b.phase_total.max(b.tasks.len());
         let elapsed = b.started.map(|s| s.elapsed().as_secs()).unwrap_or(0);
         out.push(format!(
             "{} {} {}",
             st.orange("⇶"),
             st.bold(&format!("phase {}/{} {}", b.phase, b.of, b.phase_name)),
             st.dim(&format!(
-                "· {} of {} running · {elapsed}s",
-                running,
-                b.tasks.len()
+                "· {running} running · {finished} of {total} done · {elapsed}s"
             ))
         ));
         const SHOW: usize = 14;
@@ -632,6 +654,13 @@ impl Board {
                     t.description,
                     st.dim(&who),
                     st.dim(&format!("{}s", t.started.elapsed().as_secs()))
+                ),
+                Some(true) if t.partial => format!(
+                    "  {} {}{} {}",
+                    st.orange("◐"),
+                    t.description,
+                    st.dim(&who),
+                    st.dim(&format!("— out of turns, partial: {}", cut(&t.result, 60)))
                 ),
                 Some(true) => format!(
                     "  {} {}{} {}",
@@ -666,8 +695,48 @@ impl Board {
                 )
             });
         }
-        out
+        // One row per line, or the redraw would lose count of the rows.
+        let width = if b.width == 0 { 100 } else { b.width };
+        out.into_iter().map(|l| clip_visible(&l, width)).collect()
     }
+}
+
+/// `line` cut to fit in `width` columns, not counting colour codes, so it
+/// never wraps onto a second row.
+fn clip_visible(line: &str, width: usize) -> String {
+    let room = width.saturating_sub(1).max(10);
+    let mut visible = 0;
+    let mut in_escape = false;
+    for c in line.chars() {
+        if in_escape {
+            in_escape = c != 'm';
+        } else if c == '\x1b' {
+            in_escape = true;
+        } else {
+            visible += 1;
+        }
+    }
+    if visible <= room {
+        return line.to_string();
+    }
+    let mut out = String::new();
+    let mut shown = 0;
+    let mut in_escape = false;
+    for c in line.chars() {
+        if in_escape {
+            out.push(c);
+            in_escape = c != 'm';
+        } else if c == '\x1b' {
+            out.push(c);
+            in_escape = true;
+        } else if shown + 1 < room {
+            out.push(c);
+            shown += 1;
+        }
+    }
+    out.push('…');
+    out.push_str("\x1b[0m");
+    out
 }
 
 /// A line that redraws itself while the model works, on a terminal only.
@@ -742,6 +811,35 @@ pub(crate) fn cut(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn board_lines_are_cut_to_the_terminal_without_counting_colour() {
+        let st = Style {
+            color: true,
+            ..Style::plain()
+        };
+        let line = format!("  {} {}", st.orange("✓"), "x".repeat(200));
+        let cut = clip_visible(&line, 40);
+        let visible: String = {
+            let mut out = String::new();
+            let mut esc = false;
+            for c in cut.chars() {
+                if esc {
+                    esc = c != 'm';
+                } else if c == '\x1b' {
+                    esc = true;
+                } else {
+                    out.push(c);
+                }
+            }
+            out
+        };
+        assert_eq!(visible.chars().count(), 39, "{visible}");
+        assert!(visible.ends_with('…'));
+        assert!(cut.ends_with("\x1b[0m"));
+        let short = format!("  {} done", st.orange("✓"));
+        assert_eq!(clip_visible(&short, 40), short);
+    }
     use serde_json::json;
 
     #[test]
@@ -812,7 +910,8 @@ mod tests {
             phase: 2,
             of: 2,
             phase_name: "check".into(),
-            earlier: vec![("read".into(), 3, 1)],
+            earlier: vec![("read".into(), 3, 1, 0)],
+            phase_total: 3,
             ..Default::default()
         };
         state.tasks.push(TaskRow {
@@ -820,6 +919,7 @@ mod tests {
             description: "check them".into(),
             agent: "worker".into(),
             ok: None,
+            partial: false,
             result: String::new(),
             started: now,
             took: None,
@@ -829,15 +929,26 @@ mod tests {
             description: "check more".into(),
             agent: "general".into(),
             ok: Some(true),
+            partial: false,
             result: "all fine".into(),
             started: now,
             took: Some(Duration::from_secs(1)),
+        });
+        state.tasks.push(TaskRow {
+            id: "c".into(),
+            description: "big review".into(),
+            agent: "general".into(),
+            ok: Some(true),
+            partial: true,
+            result: "Now lines 400-640".into(),
+            started: now,
+            took: Some(Duration::from_secs(9)),
         });
         state.started = Some(now);
         let lines = b.lines(&state);
         assert_eq!(lines[0], "✓ read · 3 tasks, 1 failed");
         assert!(
-            lines[1].starts_with("⇶ phase 2/2 check · 1 of 2 running"),
+            lines[1].starts_with("⇶ phase 2/2 check · 1 running · 2 of 3 done"),
             "{}",
             lines[1]
         );
@@ -847,6 +958,10 @@ mod tests {
             lines[2]
         );
         assert_eq!(lines[3], "  ✓ check more — all fine");
+        assert_eq!(
+            lines[4],
+            "  ◐ big review — out of turns, partial: Now lines 400-640"
+        );
     }
 
     #[test]

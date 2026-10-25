@@ -724,7 +724,7 @@ pub(crate) async fn export_telemetry(f: &Finished, spec: &AgentSpec) {
 pub(crate) fn report(f: &Finished, summary_to_stdout: bool) {
     let r = &f.report;
     eprintln!(
-        "gitagent: {} after {} turns · tokens in {} (cached {}) out {} · {}",
+        "gitagent: {} after {} model calls · tokens in {} (cached {}) out {} · {}",
         r.outcome,
         r.turns,
         r.usage.input_tokens,

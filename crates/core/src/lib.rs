@@ -707,9 +707,10 @@ pub async fn run(
                 counters.inc("subagent_parallel_turns");
             }
             let at_once = spec.profile.tools.max_concurrent_subagents.max(1) as usize;
-            for batch in pending.chunks(at_once) {
+            // Up to `at_once` run together; the next starts when one ends.
+            {
                 let mut futures = Vec::new();
-                for (_, run_call) in batch {
+                for (_, run_call) in &pending {
                     subagent_runs += 1;
                     events.emit(
                         "guard",
@@ -731,7 +732,7 @@ pub async fn run(
                         },
                     ));
                 }
-                for ((id, _), result) in batch.iter().zip(join_all(futures).await) {
+                for ((id, _), result) in pending.iter().zip(join_limited(futures, at_once).await) {
                     subagent_results.insert(id.clone(), result);
                 }
             }
@@ -890,6 +891,7 @@ pub async fn run(
                             }
                             counters.add("plan_tasks", done.tasks.into());
                             counters.add("plan_failed_tasks", done.failed.into());
+                            counters.add("plan_partial_tasks", done.partial.into());
                             done.out
                         } else if let Some(ext) = external {
                             counters.inc_labelled("external_tool_calls", &run_call.name);
@@ -917,6 +919,7 @@ pub async fn run(
                                     .as_ref()
                                     .map(|t| t.minutes_left(Instant::now())),
                                 sdk_names,
+                                protect_tests: spec.benchmark,
                             };
                             gitagent_tools::dispatch(&run_call, &mut ctx).await
                         };
@@ -1108,6 +1111,13 @@ pub async fn run(
                     counters.inc(kind);
                     events.emit("guard", json!({"turn": turns, "kind": kind}));
                     notes.push(tb.message(event, now));
+                }
+            }
+            if spec.profile.guards.turn_warning {
+                if let Some(note) = turn_warning(turns, spec.config.max_turns, spec.conversation) {
+                    counters.inc("turn_warnings");
+                    events.emit("guard", json!({"turn": turns, "kind": "turn_warning"}));
+                    notes.push(note);
                 }
             }
         }
@@ -1485,6 +1495,32 @@ impl FinalCheck<'_, '_> {
     }
 }
 
+/// The reminder after `turns` of `max` model calls, if one is due: once at
+/// 80%, and again before the last call, so a run that runs out of turns still
+/// ends with an answer instead of stopping mid-step.
+fn turn_warning(turns: u32, max: u32, conversation: bool) -> Option<String> {
+    let left = max.saturating_sub(turns);
+    let finish = if conversation {
+        "reply without calling a tool"
+    } else {
+        "call task_complete"
+    };
+    if left == 1 {
+        return Some(format!(
+            "This is your last model call before this run stops. Do not start anything new: \
+             {finish} now with everything you found or did, and say plainly what you did not get to."
+        ));
+    }
+    let warn_at = (u64::from(max) * 4).div_ceil(5) as u32;
+    (turns == warn_at && left > 1).then(|| {
+        format!(
+            "You have used {turns} of your {max} model calls; {left} are left. Start wrapping up: \
+             finish the step you are on, then {finish} with what you have so far, and list what is \
+             still open."
+        )
+    })
+}
+
 /// What the hooks decided about a call before it runs.
 enum PreHooks {
     Run {
@@ -1535,22 +1571,33 @@ async fn pre_hooks(
     }
 }
 
-/// Polls every future until all are done, keeping their order.
-async fn join_all<'a, T>(
+/// Polls the futures with at most `limit` in progress at once, starting the
+/// next as soon as one finishes; gives the results in the original order.
+async fn join_limited<'a, T>(
     mut futures: Vec<std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>>,
+    limit: usize,
 ) -> Vec<T> {
+    let limit = limit.max(1);
     let mut done: Vec<Option<T>> = futures.iter().map(|_| None).collect();
+    let mut started = limit.min(futures.len());
     std::future::poll_fn(|cx| {
-        let mut all_done = true;
-        for (slot, fut) in done.iter_mut().zip(futures.iter_mut()) {
-            if slot.is_none() {
-                match fut.as_mut().poll(cx) {
-                    std::task::Poll::Ready(v) => *slot = Some(v),
-                    std::task::Poll::Pending => all_done = false,
+        loop {
+            let mut finished_now = 0;
+            for (slot, fut) in done.iter_mut().zip(futures.iter_mut()).take(started) {
+                if slot.is_none() {
+                    if let std::task::Poll::Ready(v) = fut.as_mut().poll(cx) {
+                        *slot = Some(v);
+                        finished_now += 1;
+                    }
                 }
             }
+            if finished_now == 0 || started == futures.len() {
+                break;
+            }
+            // Fill the freed places, and poll the new ones at once.
+            started = (started + finished_now).min(futures.len());
         }
-        if all_done {
+        if done.iter().all(Option::is_some) {
             std::task::Poll::Ready(())
         } else {
             std::task::Poll::Pending
@@ -1718,6 +1765,14 @@ fn run_subagent<'a>(
         };
         let full = def.root.is_some();
         child.profile.snapshot = false;
+        // A sub-agent is told when its turns run low, so one that runs out
+        // still hands back a usable summary.
+        child.profile.guards.turn_warning = true;
+        // The caller may size the turn limit to the task.
+        if let Some(n) = call.arguments.get("max_turns").and_then(Value::as_u64) {
+            child.config.max_turns =
+                n.clamp(1, u64::from(gitagent_tools::MAX_SUBAGENT_TURNS)) as u32;
+        }
         // Nesting: one level less for the child; at the last level it has no
         // sub-agents of its own.
         let depth = spec.profile.tools.subagent_depth;

@@ -203,6 +203,9 @@ pub struct AgentSpec {
     pub warnings: Vec<String>,
     /// Conversation mode (see [`LoadOptions::conversation`]).
     pub conversation: bool,
+    /// A benchmark run: loaded with no project or home directory. The
+    /// guard against writing under `/tests` applies only here.
+    pub benchmark: bool,
     /// The agent's `config/` settings for the environment. Never read in
     /// benchmark runs.
     pub env_config: EnvConfig,
@@ -695,6 +698,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         supervision,
         warnings,
         conversation: opts.conversation,
+        benchmark: !outside_bench,
         env_config,
         audit,
         knowledge,

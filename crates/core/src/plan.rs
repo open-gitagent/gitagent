@@ -13,7 +13,7 @@ use gitagent_record::Events;
 use gitagent_tools::ToolOutput;
 use serde_json::{json, Map, Value};
 
-use crate::{error_output, run_subagent, ChildRun, RunReport};
+use crate::{error_output, run_subagent, ChildRun, RunReport, SubagentRun};
 
 /// Most tasks one plan may hold, and most phases.
 const MAX_TASKS: usize = 100;
@@ -46,17 +46,25 @@ impl Children {
     }
 }
 
+/// One task of a phase: its call and how its sub-agent run went.
+type Job<'a> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = (ToolCall, SubagentRun)> + Send + 'a>>;
+
 pub(crate) struct Done {
     pub out: ToolOutput,
     pub reports: Vec<RunReport>,
     pub tasks: u32,
     pub failed: u32,
+    /// Tasks that ran out of turns and gave partial results.
+    pub partial: u32,
 }
 
 struct Task {
     description: String,
     prompt: String,
     agent: Option<String>,
+    /// The task's own turn limit, when the lead set one.
+    max_turns: Option<u64>,
 }
 
 struct Phase {
@@ -102,6 +110,7 @@ fn parse(call: &ToolCall) -> Result<(Vec<Phase>, String, Option<String>), String
                 description: s(t, "description").unwrap_or_else(|| format!("task {}", j + 1)),
                 prompt,
                 agent: s(t, "agent"),
+                max_turns: t["max_turns"].as_u64(),
             });
         }
         count += tasks.len();
@@ -122,12 +131,21 @@ fn parse(call: &ToolCall) -> Result<(Vec<Phase>, String, Option<String>), String
     ))
 }
 
-fn subagent_call(id: String, agent: Option<&str>, description: &str, prompt: String) -> ToolCall {
+fn subagent_call(
+    id: String,
+    agent: Option<&str>,
+    description: &str,
+    prompt: String,
+    max_turns: Option<u64>,
+) -> ToolCall {
     let mut arguments = Map::new();
     arguments.insert("description".into(), json!(description));
     arguments.insert("prompt".into(), json!(prompt));
     if let Some(a) = agent {
         arguments.insert("agent".into(), json!(a));
+    }
+    if let Some(n) = max_turns {
+        arguments.insert("max_turns".into(), json!(n));
     }
     ToolCall {
         id,
@@ -161,6 +179,7 @@ pub(crate) async fn run(
                 reports: Vec::new(),
                 tasks: 0,
                 failed: 0,
+                partial: 0,
             }
         }
     };
@@ -175,6 +194,7 @@ pub(crate) async fn run(
     let mut results: Vec<String> = Vec::new();
     let mut tasks_run: u32 = 0;
     let mut failed: u32 = 0;
+    let mut partial: u32 = 0;
     let mut seq: u32 = 0;
     for (pi, phase) in phases.iter().enumerate() {
         events.emit(
@@ -189,48 +209,64 @@ pub(crate) async fn run(
                 results.join("\n\n")
             )
         };
+        // Up to `at_once` tasks run at a time; the next starts as soon as
+        // one finishes. Each reports its start and end as they happen.
+        let mut jobs: Vec<Job<'_>> = Vec::new();
+        for t in &phase.tasks {
+            seq += 1;
+            let id = format!("plan-{}-{seq}", pi + 1);
+            let call = subagent_call(
+                id,
+                t.agent.as_deref(),
+                &t.description,
+                format!("{}{earlier}", t.prompt),
+                t.max_turns,
+            );
+            let child = children.child(seq);
+            let agent = t
+                .agent
+                .clone()
+                .unwrap_or_else(|| gitagent_loader::GENERAL_AGENT.into());
+            let description = t.description.clone();
+            let phase_no = pi + 1;
+            jobs.push(Box::pin(async move {
+                events.emit(
+                    "plan",
+                    json!({"action": "task_start", "phase": phase_no, "id": call.id, "description": description, "agent": agent}),
+                );
+                let r = run_subagent(spec, provider, &call, child).await;
+                events.emit(
+                    "plan",
+                    json!({"action": "task_end", "phase": phase_no, "id": call.id, "description": description, "ok": !r.out.is_error, "partial": r.partial, "result": preview(&r.answer)}),
+                );
+                (call, r)
+            }));
+        }
         let mut phase_results = Vec::new();
-        for batch in phase.tasks.chunks(at_once.max(1)) {
-            let mut calls = Vec::new();
-            for t in batch {
-                seq += 1;
-                let id = format!("plan-{}-{seq}", pi + 1);
-                events.emit(
-                    "plan",
-                    json!({"action": "task_start", "phase": pi + 1, "id": id, "description": t.description, "agent": t.agent.clone().unwrap_or_else(|| gitagent_loader::GENERAL_AGENT.into())}),
-                );
-                calls.push(subagent_call(
-                    id,
-                    t.agent.as_deref(),
-                    &t.description,
-                    format!("{}{earlier}", t.prompt),
-                ));
+        for (c, r) in crate::join_limited(jobs, at_once.max(1)).await {
+            tasks_run += 1;
+            let ok = !r.out.is_error;
+            if !ok {
+                failed += 1;
             }
-            let futures: Vec<_> = calls
-                .iter()
-                .map(|c| run_subagent(spec, provider, c, children.child(seq_of(&c.id))))
-                .collect();
-            let outs = crate::join_all(futures).await;
-            for (c, r) in calls.iter().zip(outs) {
-                tasks_run += 1;
-                let ok = !r.out.is_error;
+            if r.partial {
+                partial += 1;
+            }
+            if let Some(rep) = r.report {
+                reports.push(rep);
+            }
+            let desc = c.arguments["description"].as_str().unwrap_or("");
+            phase_results.push(format!(
+                "### {desc}{}\n{}",
                 if !ok {
-                    failed += 1;
-                }
-                if let Some(rep) = r.report {
-                    reports.push(rep);
-                }
-                let desc = c.arguments["description"].as_str().unwrap_or("");
-                events.emit(
-                    "plan",
-                    json!({"action": "task_end", "phase": pi + 1, "id": c.id, "description": desc, "ok": ok, "partial": r.partial, "result": preview(&r.answer)}),
-                );
-                phase_results.push(format!(
-                    "### {desc}{}\n{}",
-                    if ok { "" } else { " (failed)" },
-                    r.answer.trim()
-                ));
-            }
+                    " (failed)"
+                } else if r.partial {
+                    " (stopped at its turn limit: partial results)"
+                } else {
+                    ""
+                },
+                r.answer.trim()
+            ));
         }
         events.emit(
             "plan",
@@ -258,6 +294,7 @@ pub(crate) async fn run(
         reconcile_agent.as_deref(),
         "reconcile",
         prompt,
+        None,
     );
     let r = run_subagent(spec, provider, &rc, children.child(seq)).await;
     if let Some(rep) = r.report {
@@ -271,10 +308,14 @@ pub(crate) async fn run(
         "{tasks_run} task{} in {n_phases} phase{} ran{}.",
         if tasks_run == 1 { "" } else { "s" },
         if n_phases == 1 { "" } else { "s" },
-        if failed > 0 {
-            format!(", {failed} failed")
-        } else {
-            String::new()
+        match (failed, partial) {
+            (0, 0) => String::new(),
+            (f, 0) => format!(", {f} failed"),
+            (0, p) => format!(
+                ", {p} stopped at {} turn limit with partial results",
+                if p == 1 { "its" } else { "their" }
+            ),
+            (f, p) => format!(", {f} failed, {p} stopped at their turn limit with partial results"),
         }
     );
     let out = if r.out.is_error {
@@ -294,12 +335,6 @@ pub(crate) async fn run(
         reports,
         tasks: tasks_run,
         failed,
+        partial,
     }
-}
-
-fn seq_of(id: &str) -> u32 {
-    id.rsplit('-')
-        .next()
-        .and_then(|n| n.parse().ok())
-        .unwrap_or(0)
 }
