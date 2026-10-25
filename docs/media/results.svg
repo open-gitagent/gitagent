@@ -1,26 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="860" height="260" viewBox="0 0 860 260" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="15">
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="260" viewBox="0 0 980 260" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="15">
 <rect width="100%" height="100%" fill="#17130f" rx="12"/>
-<text x="250" y="26" fill="#b8a899" font-size="13">Terminal-Bench 2.1 · all 89 tasks · pass rate (axis from 80%)</text>
-<line x1="250.0" y1="40" x2="250.0" y2="232" stroke="#332b25" stroke-width="1"/>
-<text x="250.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">80%</text>
-<line x1="380.0" y1="40" x2="380.0" y2="232" stroke="#332b25" stroke-width="1"/>
-<text x="380.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">85%</text>
-<line x1="510.0" y1="40" x2="510.0" y2="232" stroke="#332b25" stroke-width="1"/>
-<text x="510.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">90%</text>
-<line x1="640.0" y1="40" x2="640.0" y2="232" stroke="#332b25" stroke-width="1"/>
-<text x="640.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">95%</text>
-<line x1="770.0" y1="40" x2="770.0" y2="232" stroke="#332b25" stroke-width="1"/>
-<text x="770.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">100%</text>
-<text x="236" y="74" fill="#f1e9df" text-anchor="end" font-weight="600">gitagent 3 · Opus 5.5</text>
-<rect x="250.0" y="55" width="338.8" height="28" rx="5" fill="#e05a44"/>
-<text x="598.8" y="74" fill="#f1e9df" font-weight="600">93.03%</text>
-<text x="236" y="120" fill="#b8a899" text-anchor="end" font-weight="400">Artificial Analysis harness · Fable 5.1</text>
-<rect x="250.0" y="101" width="296.4" height="28" rx="5" fill="#4a3f36"/>
-<text x="556.4" y="120" fill="#b8a899" font-weight="600">91.4%</text>
-<text x="236" y="166" fill="#b8a899" text-anchor="end" font-weight="400">Terminus 2 · Opus 5.5</text>
-<rect x="250.0" y="147" width="197.6" height="28" rx="5" fill="#4a3f36"/>
-<text x="457.6" y="166" fill="#b8a899" font-weight="600">87.6%</text>
-<text x="236" y="212" fill="#b8a899" text-anchor="end" font-weight="400">Codex CLI · GPT-6 Astra</text>
-<rect x="250.0" y="193" width="192.4" height="28" rx="5" fill="#4a3f36"/>
-<text x="452.4" y="212" fill="#b8a899" font-weight="600">87.4%</text>
+<text x="370" y="26" fill="#b8a899" font-size="13">Terminal-Bench 2.1 · all 89 tasks · pass rate (axis from 80%)</text>
+<line x1="370.0" y1="40" x2="370.0" y2="232" stroke="#332b25" stroke-width="1"/>
+<text x="370.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">80%</text>
+<line x1="500.0" y1="40" x2="500.0" y2="232" stroke="#332b25" stroke-width="1"/>
+<text x="500.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">85%</text>
+<line x1="630.0" y1="40" x2="630.0" y2="232" stroke="#332b25" stroke-width="1"/>
+<text x="630.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">90%</text>
+<line x1="760.0" y1="40" x2="760.0" y2="232" stroke="#332b25" stroke-width="1"/>
+<text x="760.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">95%</text>
+<line x1="890.0" y1="40" x2="890.0" y2="232" stroke="#332b25" stroke-width="1"/>
+<text x="890.0" y="250" fill="#7d6f63" font-size="12" text-anchor="middle">100%</text>
+<text x="352" y="74" fill="#f1e9df" text-anchor="end" font-weight="600">gitagent 3 · Opus 5.5</text>
+<rect x="370.0" y="55" width="338.8" height="28" rx="5" fill="#e05a44"/>
+<text x="718.8" y="74" fill="#f1e9df" font-weight="600">93.03%</text>
+<text x="352" y="120" fill="#b8a899" text-anchor="end" font-weight="400">Artificial Analysis harness · Fable 5.1</text>
+<rect x="370.0" y="101" width="296.4" height="28" rx="5" fill="#4a3f36"/>
+<text x="676.4" y="120" fill="#b8a899" font-weight="600">91.4%</text>
+<text x="352" y="166" fill="#b8a899" text-anchor="end" font-weight="400">Terminus 2 · Opus 5.5</text>
+<rect x="370.0" y="147" width="197.6" height="28" rx="5" fill="#4a3f36"/>
+<text x="577.6" y="166" fill="#b8a899" font-weight="600">87.6%</text>
+<text x="352" y="212" fill="#b8a899" text-anchor="end" font-weight="400">Codex CLI · GPT-6 Astra</text>
+<rect x="370.0" y="193" width="192.4" height="28" rx="5" fill="#4a3f36"/>
+<text x="572.4" y="212" fill="#b8a899" font-weight="600">87.4%</text>
 </svg>

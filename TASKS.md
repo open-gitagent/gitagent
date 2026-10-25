@@ -1,4 +1,4 @@
-# gitagent v2 — Tasks and Milestones
+# gitagent 3 — Tasks and Milestones
 
 Work top to bottom. Do not start a milestone until the previous one's **Done when** checks pass. Section numbers refer to `BLUEPRINT.md`.
 

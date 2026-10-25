@@ -1,4 +1,4 @@
-# gitagent v2 — Rust Engine Blueprint
+# gitagent 3 — Rust Engine Blueprint
 
 `BLUEPRINT.md` says **what** to build and **why**; `TASKS.md` says **in what order** and **how to know each step is done**.
 
@@ -97,11 +97,11 @@ Steps 4–9 repeat until 9 accepts or a limit is hit.
 
 ---
 
-## 4. Product surface (v2, from scratch)
+## 4. Product surface (from scratch)
 
-No v1 code, flags, file formats or SDK types are carried over. The product grows in this order:
+No code from the TypeScript gitagent is carried over. Its file formats, flags and SDK types are accepted for compatibility (see the README's "Coming from the TypeScript gitagent"), but the engine is new. The product grows in this order:
 
-| Capability | v2 design | Milestone |
+| Capability | Design | Milestone |
 |---|---|---|
 | Benchmark mode | `gitagent --bench --instruction-file … --model … --profile …`; no network except the model API, no memory, no git commits, `/tests` writes denied | M1 |
 | Single prompt | `gitagent -p "…" --dir <folder>`: runs the same loop on a local folder, prints a summary | M6 |

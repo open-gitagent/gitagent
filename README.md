@@ -154,7 +154,7 @@ for anything that must not be missed, have an external scheduler call
 ## Results
 
 <p align="center">
-  <img src="./docs/media/results.svg" alt="Terminal-Bench 2.1 results" width="760" />
+  <img src="./docs/media/results.svg" alt="Terminal-Bench 2.1 results" width="900" />
 </p>
 
 The headline run's logs are public: every trial of it, with its trajectory and verifier output, is on the Harbor hub, one job per time limit (links in the table below). The headline run and the published comparisons:
