@@ -32,7 +32,7 @@
   <img src="./docs/media/console.gif" alt="A gitagent session in the terminal" width="820" />
 </p>
 
-**Terminal-Bench 2.1: 93.03% ±0.8** with Claude Opus 5.5, all 89 tasks, five runs each, code frozen at the published commit; the ± is the run-to-run variation, as on the official leaderboard. The published harnesses on the same benchmark: Terminus 2 with the same model 87.6%, Codex CLI with GPT-6 Astra 87.4%, and the highest published entry, Artificial Analysis's own harness with Claude Fable 5.1 at maximum effort, 91.4%. The numbers are under [Results](#results); the reason is under [How gitagent works](#how-gitagent-works).
+**Terminal-Bench 2.1: 93.03% ±0.8** with Claude Opus 5.5, all 89 tasks, five runs each, code frozen at the published commit; the ± is the run-to-run variation, as on the official leaderboard. The published harnesses on the same benchmark: Terminus 2 with the same model 87.6%, Codex CLI with GPT-6 Astra 87.4%, Claude Code with Claude Fable 5 83.8%, and the highest published entry, Artificial Analysis's own harness with Claude Fable 5.1 at maximum effort, 91.4%. The numbers are under [Results](#results); the reason is under [How gitagent works](#how-gitagent-works).
 
 ## Why gitagent
 
@@ -226,6 +226,9 @@ The headline run's logs are public: every trial of it, with its trajectory and v
 | Terminus 2 | Claude Opus 5.5 | 87.6% | 1 | [Vals.ai](https://www.vals.ai/benchmarks/terminal-bench-2-1) |
 | Codex CLI | GPT-6 Astra | 87.4% ±0.9 | — | [Snorkel, the official leaderboard](https://snorkel.ai/leaderboard/terminal-bench-2-1/) |
 | Artificial Analysis's own harness | Claude Fable 5.1, max effort | 91.4% | — | [Artificial Analysis](https://artificialanalysis.ai/evaluations/terminalbench-2-1) |
+| Claude Code | Claude Fable 5 | 83.8% ±1.2 | — | [Snorkel, the official leaderboard](https://snorkel.ai/leaderboard/terminal-bench-2-1/) |
+
+Claude Code has no published Terminal-Bench 2.1 entry with Opus 5.5; the table shows its best published entry.
 
 #### The same run by time limit
 
