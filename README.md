@@ -20,6 +20,7 @@
   <a href="#why-gitagent">Why</a> &bull;
   <a href="#install">Install</a> &bull;
   <a href="#use">Use</a> &bull;
+  <a href="#cli-options">CLI</a> &bull;
   <a href="#results">Results</a> &bull;
   <a href="#how-gitagent-works">How it works</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
@@ -81,6 +82,50 @@ GITHUB_TOKEN=... gitagent --repo https://github.com/org/app.git -p "fix the fail
 ```
 
 In interactive mode, Ctrl-C stops the current task and Ctrl-D or `exit` quits.
+
+### CLI options
+
+`gitagent [OPTIONS] [PROMPT]`. Without a prompt it opens the console in `--dir`.
+
+| Option | What it does |
+|---|---|
+| `[PROMPT]`, `-p, --prompt <text>` | The task, as plain words; runs it once and exits |
+| `--instruction-file <file>` | Read the task from a file |
+| `-d, --dir <dir>` | The agent folder to work in (default: the current directory) |
+| `-m, --model <provider:model>` | The model; overrides `gitagent.yaml` |
+| `-e, --env <name>` | Apply the agent's `config/<name>.yaml` (default: `GITAGENT_ENV`) |
+| `--profile <name or path>` | `auto`, a built-in profile, or a profile file |
+| `--config <file>` | A `gitagent.yaml` to use; its `prompts/` and `profiles/` override the built-ins |
+| `--conversation` | A plain reply ends the run, instead of `task_complete` (always on in the console) |
+| `--max-turns <n>` | Stop after this many model calls |
+| `--timeout-s <seconds>` | Time budget for the run |
+| `--allowed-tools <a,b>`, `--disallowed-tools <a,b>` | Offer only these tools, or never these |
+| `--append-system-prompt <text>` | Text added after the system prompt |
+| `--workflow <name>`, `--input key=value` | Run one of the agent's workflows instead of a task |
+| `-r, --repo <url>` | Work in a clone of the repository on a new branch, and commit the result |
+| `--base <branch>`, `--branch <name>`, `--session <name>` | Repo mode: the branch to start from, or an existing branch to resume |
+| `--push`, `--pat <token>` | Repo mode: push the branch after committing; the token to use (default: `GITAGENT_GIT_TOKEN`, `GITHUB_TOKEN` or `GIT_TOKEN`) |
+| `--out-dir <dir>` | Where the trajectory, counters and logs go (default: `/tmp/gitagent`) |
+| `--session-id <id>` | Session id recorded in the trajectory |
+| `--events jsonl` | Print every step as a JSON object per line |
+| `--output-format text \| stream-json` | Print the summary, or the SDK's messages one per line |
+| `--ipc` | Serve the IPC protocol for a client library (see [SDKs](#sdks-any-language-over-ipc)) |
+| `--bench` | Benchmark mode: built-in configuration only, no memory, no git commits |
+| `--linger` | Keep the shells, and anything running in them, open after the run |
+| `-V, --version`, `-h, --help` | Version and help |
+
+Subcommands, each with its own `--help`:
+
+| Command | What it does |
+|---|---|
+| `gitagent init [dir]` | Create an agent folder: `agent.yaml`, `SOUL.md`, `memory/`, a git repository |
+| `gitagent validate [dir] [--compliance]` | Check an agent folder against the format, with file and line for every problem |
+| `gitagent install [dir]` | Fetch the agent's `extends` parent and its `dependencies` |
+| `gitagent plugin install\|list\|enable\|disable\|remove\|init` | Manage the agent's plugins |
+| `gitagent schedule list\|add\|run\|start\|enable\|disable\|remove` | Manage and run the agent's schedules |
+| `gitagent learn --from <runs>` | Learn lessons from finished runs |
+
+In the console, `/help` lists the session's commands, and typing `/` shows them as you type.
 
 ### Models
 
