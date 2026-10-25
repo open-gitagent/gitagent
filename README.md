@@ -600,7 +600,7 @@ The shim (`gitagent_harbor/agent.py`):
 gitagent learn --model anthropic:claude-opus-5-5 --from bench/jobs/<job> [--from …] [--dry-run]
 ```
 
-It learns only from tasks in the `dev` list of `bench/split.json`. Review the diff of `prompts/lessons.md` before committing it; set `lessons: false` in a profile to leave lessons out.
+It learns only from tasks listed under `dev` in a split file (`--split`, default `bench/split.json`); the split used for the benchmark stays on the benchmark machine, outside the repository. Review the diff of `prompts/lessons.md` before committing it; set `lessons: false` in a profile to leave lessons out.
 
 ## Troubleshooting
 

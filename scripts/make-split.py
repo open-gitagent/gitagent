@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Creates bench/split.json: the permanent dev / held-out split of Terminal-Bench 2.1.
+The file stays on the benchmark machine; it is not committed.
 
 Stratified by category and difficulty from each task's task.toml metadata
 (the only task file read), with a fixed seed. Tasks named in --force-dev go

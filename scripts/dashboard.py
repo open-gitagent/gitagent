@@ -1711,7 +1711,7 @@ details > pre, details > div, details > ol { margin-top:var(--s1); }
 
   <section class="view" id="v-rounds" hidden>
     <div class="panel"><h2>Our rounds against the public leaderboards</h2>
-      <p class="muted">Published Terminal-Bench 2.1 results (all 89 tasks) from <code>bench/leaderboard.json</code>, next to our rounds. Our gitagent rounds cover the 45 dev tasks we tune on, so they read high until the held-out run; the Terminus row was measured here on the same model and lines up with the public Opus 5.5 + Terminus 2 figure, which shows this machine reproduces leaderboard conditions. Highlighted rows are ours; click one to open the round.</p>
+      <p class="muted">Published Terminal-Bench 2.1 results (all 89 tasks) from <code>bench/leaderboard.json</code>, next to our rounds. Our gitagent rounds cover the dev tasks we tune on, so they read high until the held-out run; the Terminus row was measured here on the same model and lines up with the public Opus 5.5 + Terminus 2 figure, which shows this machine reproduces leaderboard conditions. Highlighted rows are ours; click one to open the round.</p>
       <div class="scroll"><table id="lb-table" class="sortable"></table></div></div>
     <div id="round-cards" class="view"></div>
   </section>

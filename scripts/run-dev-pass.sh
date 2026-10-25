@@ -5,6 +5,7 @@
 #
 # Jobs are named <job-prefix>-t<seconds> and written to bench/jobs. Only tasks
 # listed under "dev" in bench/split.json are run; held-out tasks never are.
+# The split file is kept on the benchmark machine, not in the repository.
 # gitagent's --timeout-s is the task's agent timeout minus 60 s, so it stops
 # cleanly before Harbor does. Concurrency per job: N_900 (default 6) for the
 # large 900 s group, N_OTHER (default 3) for the rest. K (default 1) runs each
