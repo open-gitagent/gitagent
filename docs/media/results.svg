@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="250" viewBox="0 0 760 250" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="15">
+<rect width="100%%" height="100%%" fill="#17130f" rx="12"/>
+<text x="230" y="24" fill="#b8a899" font-size="13">Terminal-Bench 2.1 · all 89 tasks · pass rate</text>
+<line x1="622.0" y1="34" x2="622.0" y2="216" stroke="#332b25" stroke-width="1"/>
+<text x="622.0" y="234" fill="#7d6f63" font-size="12" text-anchor="middle">80%</text>
+<line x1="646.5" y1="34" x2="646.5" y2="216" stroke="#332b25" stroke-width="1"/>
+<text x="646.5" y="234" fill="#7d6f63" font-size="12" text-anchor="middle">85%</text>
+<line x1="671.0" y1="34" x2="671.0" y2="216" stroke="#332b25" stroke-width="1"/>
+<text x="671.0" y="234" fill="#7d6f63" font-size="12" text-anchor="middle">90%</text>
+<line x1="695.5" y1="34" x2="695.5" y2="216" stroke="#332b25" stroke-width="1"/>
+<text x="695.5" y="234" fill="#7d6f63" font-size="12" text-anchor="middle">95%</text>
+<line x1="720.0" y1="34" x2="720.0" y2="216" stroke="#332b25" stroke-width="1"/>
+<text x="720.0" y="234" fill="#7d6f63" font-size="12" text-anchor="middle">100%</text>
+<text x="218" y="67" fill="#f1e9df" text-anchor="end" font-weight="600">gitagent 2 · Opus 5.5</text>
+<rect x="622.0" y="48" width="63.7" height="28" rx="6" fill="#e05a44"/>
+<text x="693.7" y="67" fill="#f1e9df" font-weight="600">93.0%</text>
+<text x="218" y="111" fill="#b8a899" text-anchor="end" font-weight="400">top published entry</text>
+<rect x="622.0" y="92" width="55.9" height="28" rx="6" fill="#4a3f36"/>
+<text x="685.9" y="111" fill="#b8a899" font-weight="600">91.4%</text>
+<text x="218" y="155" fill="#b8a899" text-anchor="end" font-weight="400">Terminus 2 · Opus 5.5</text>
+<rect x="622.0" y="136" width="37.2" height="28" rx="6" fill="#4a3f36"/>
+<text x="667.2" y="155" fill="#b8a899" font-weight="600">87.6%</text>
+<text x="218" y="199" fill="#b8a899" text-anchor="end" font-weight="400">Codex CLI · GPT-6 Astra</text>
+<rect x="622.0" y="180" width="36.3" height="28" rx="6" fill="#4a3f36"/>
+<text x="666.3" y="199" fill="#b8a899" font-weight="600">87.4%</text>
+</svg>

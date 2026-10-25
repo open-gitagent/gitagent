@@ -1,12 +1,37 @@
-# gitagent
+<p align="center">
+  <img src="./gitagent-logo.png" alt="gitagent" width="180" />
+</p>
 
-A terminal agent in a single static binary. Its behavior lives in version-controlled files: `gitagent.yaml`, prompts, model profiles, skills and hooks. Any result can be traced to a commit.
+<h1 align="center">gitagent</h1>
 
-It works the same way in every mode. One loop calls the model, runs its tool calls in a persistent shell, and records every turn. It runs one task in a folder, an interactive session, a task in a fresh clone of a repository, or a Terminal-Bench task through Harbor.
+<p align="center">
+  <strong>The agent that lives in a git repository.</strong><br/>
+  One static binary. Its identity, rules, memory, skills, tools and schedules are files you commit.
+</p>
 
-**Terminal-Bench 2.1: 93.0%** with Claude Opus 5.5, all 89 tasks, five runs each, code frozen at the published commit. The published harnesses on the same benchmark: Terminus 2 with the same model 87.6%, Codex CLI with GPT-6 Astra 87.4%, the top entry 91.4%. The numbers, the method and the rules that keep them honest are under [Results](#results).
+<p align="center">
+  <img src="https://img.shields.io/badge/Terminal--Bench_2.1-93.0%25-e05a44?style=flat-square" alt="Terminal-Bench 2.1: 93.0%" />
+  <img src="https://img.shields.io/badge/version-2.0.0-2a1f18?style=flat-square" alt="version 2.0.0" />
+  <img src="https://img.shields.io/badge/built_with-Rust-2a1f18?style=flat-square" alt="Rust" />
+  <img src="https://img.shields.io/github/license/open-gitagent/gitagent?style=flat-square&color=2a1f18" alt="license" />
+</p>
 
-This is gitagent 2: the Rust binary. Agents, hooks, schedules and client code written for gitagent 1.x run unchanged, and agent folders written to the OpenGAP format load too. New in 2: the console (one `$` line per tool call, approvals inline, a task board), parallel tasks with a reconciling step, schedules, workflows, plugins, sub-agents, knowledge, the IPC protocol the Python and TypeScript clients speak, and the benchmark harness.
+<p align="center">
+  <a href="#install">Install</a> &bull;
+  <a href="#use">Use</a> &bull;
+  <a href="#how-gitagent-works">How it works</a> &bull;
+  <a href="#results">Results</a> &bull;
+  <a href="#as-a-library">SDK</a> &bull;
+  <a href="#configuration">Configuration</a>
+</p>
+
+<p align="center">
+  <img src="./docs/media/console.gif" alt="A gitagent session in the terminal" width="820" />
+</p>
+
+**Terminal-Bench 2.1: 93.0%** with Claude Opus 5.5, all 89 tasks, five runs each, code frozen at the published commit. The published harnesses on the same benchmark: Terminus 2 with the same model 87.6%, Codex CLI with GPT-6 Astra 87.4%, the top entry 91.4%. The numbers are under [Results](#results); the reason is under [How gitagent works](#how-gitagent-works).
+
+This is gitagent 2, the Rust binary. Agents, hooks, schedules and client code written for gitagent 1.x run unchanged, and agent folders in the OpenGAP format load too. New in 2: the console (one `$` line per tool call, approvals inline, a task board), parallel tasks with a reconciling step, schedules, workflows, plugins, sub-agents, knowledge, the IPC protocol the Python and TypeScript clients speak, and the benchmark harness.
 
 ## Install
 
@@ -109,6 +134,72 @@ Like 1.x's in-process scheduler, jobs fire only while `start` is running;
 for anything that must not be missed, have an external scheduler call
 `gitagent schedule run <id>`.
 
+## How gitagent works
+
+Most agents are a prompt, a model and a bag of tools, and the interesting part is what happens in between: how the agent is kept on course for an hour of work inside a context window, without wasting the model's attention and without breaking its cache. That in-between is what gitagent is. Here is one run, start to finish.
+
+**The agent is a folder.** Before anything runs, the loader reads the agent directory: `agent.yaml` for the model and the tools, `SOUL.md` for who it is, `RULES.md` for what it must never do, `memory/` for what it remembers, `skills/`, `hooks/`, `schedules/`, `agents/` for the rest. All of it is assembled into one system prompt in a fixed order, and all of it is in git, so the agent that produced a result is a commit you can check out. The same loader runs the benchmark, the console and the SDKs; only the files differ.
+
+**The prompt is a method.** It does not describe a character. It says how to work: note every concrete requirement in the task before touching anything, explore the environment, change things in small steps and check each one, and at the end verify the result by exercising it, running the tests, the program or the request. That last instruction is where most harnesses lose tasks: the model finishes without proof, and the checker disagrees.
+
+**One loop, one shell.** The model is called with the prompt, the task and the history. It answers with text or tool calls. The tools run in one persistent shell, so working directory, environment and background processes carry from turn to turn like a person's terminal. The results go back; the loop repeats until the model calls `task_complete`.
+
+**Output is shaped before the model sees it.** A build log is ten thousand lines; the model needs the head, the tail and the exit code. Every command result is cut to a budget: long output is spilled to a file, runs of similar lines (progress bars, repeated warnings) collapse to their first and last line, and a one-line status carries the exit code, the line count and the path of the spill file, so the model can ask for the rest if it matters. Fewer tokens per turn means more turns before the context is full, and more of each turn spent on the task.
+
+**Reminders are appended, never injected.** The time left is shown on every result, and a reminder fires when the budget runs low. These go after the turn's results, never into earlier turns. Changing an earlier turn would invalidate the provider's prompt cache and the model's thinking blocks, so the whole history stays byte-identical and 92% of the input is served from cache. That is where the cost per run comes from.
+
+**The loop detector.** If the model issues the same tool call with the same arguments and gets the same output twice, it is told so, with a nudge to change approach. Runaway loops are where other harnesses burn a time budget and a bill: a model that returns empty replies can be re-sent the whole growing conversation until the clock runs out. gitagent stops after the second repeat.
+
+**Context is managed, not truncated.** Old tool results are cleared in batches through the provider's own context editing, which does not count as a history edit. Near the end of the window the history is replaced by a structured summary, done, pending, key files, last failure, ruled out, with the original task repeated verbatim by the harness rather than paraphrased by the model, so the goal never drifts.
+
+**Done means verified.** `task_complete` is accepted only when the run shows a verification after the last edit. A completion without evidence is sent back with the task repeated. It is a small rule with a large effect: it catches the case where the model is confident and wrong.
+
+**Services stay up for the checker.** The agent's shells are kept open after it finishes, so a server it started is still running when the tests connect to it.
+
+**Every run is a record.** Each run writes a trajectory in the ATIF format, every prompt, reply, tool call and result, plus counters for every decision the loop made: loops caught, completions rejected, context compacted, cache hits. A failed run can be read step by step, and a change to the harness can be measured task by task against the previous one.
+
+The pieces are ordinary. What is unusual is that each one is a switch in a profile file, measured on its own against the benchmark before it stayed on, and that the whole thing ships as one static binary that runs the same way in a task container, in your terminal and behind the SDK.
+
+<p align="center">
+  <img src="./docs/media/parallel.gif" alt="Parallel tasks on the task board" width="820" />
+</p>
+
+**Parallel work.** When a task has many similar pieces, the agent can write a plan of phases: every task in a phase runs at the same time as its own sub-agent, a later phase sees the earlier results, and one more sub-agent reconciles everything into the answer. The console shows it as a board that redraws as the tasks run. See [Parallel work](#parallel-work).
+
+## Results
+
+<p align="center">
+  <img src="./docs/media/results.svg" alt="Terminal-Bench 2.1 results" width="760" />
+</p>
+
+Every run is in `bench/RESULTS.md` with its commit, profile, model, cost and what failed. The headline run and the published comparisons:
+
+| Harness | Model | Terminal-Bench 2.1 | Runs per task | Source |
+|---|---|---|---|---|
+| **gitagent 2** | Claude Opus 5.5 | **93.0%** (414/445; 75 of 89 tasks passed every run) | 5 | `bench/RESULTS.md`, round tb21-final |
+| Terminus 2 | Claude Opus 5.5 | 87.6% | 1 | Vals.ai |
+| Codex CLI | GPT-6 Astra | 87.4% ±0.9 | — | Snorkel |
+| top published entry | Fable 5.1, max effort | 91.4% | — | Artificial Analysis |
+
+The same run by the tasks' time limits (Harbor's summary; pass@k is the chance that at least one of k runs passes):
+
+| Time limit | Trials | Pass rate | pass@2 | pass@5 |
+|---|---|---|---|---|
+| 10 min | 5 | 100.0% | 100.0% | 100.0% |
+| 12.5 min | 5 | 100.0% | 100.0% | 100.0% |
+| 15 min | 240 | 92.9% | 95.2% | 95.8% |
+| 20 min | 25 | 100.0% | 100.0% | 100.0% |
+| 30 min | 85 | 87.1% | 95.9% | 100.0% |
+| 40 min | 10 | 100.0% | 100.0% | 100.0% |
+| 60 min | 65 | 95.4% | 97.7% | 100.0% |
+| 2 h | 5 | 100.0% | 100.0% | 100.0% |
+| 3 h 20 min | 5 | 100.0% | 100.0% | 100.0% |
+| **all** | **445** | **93.03%** | | |
+
+Two of the 89 tasks start a virtual machine inside the task container, which this host cannot do, and no harness has passed them here; without those two the mean is 95.2%. The 95% interval for the headline run is 88.8–96.9%. It cost $112.85, about $0.25 per run, with 92% of the input tokens served from the prompt cache.
+
+**The rules behind the numbers** (`docs/INTEGRITY.md`, checked by `scripts/integrity-audit.sh`): the agent never reads a task's tests or verifier output, and a built-in guard refuses writes under `/tests`; the tasks used while developing were kept apart from the ones used to score; benchmark mode uses only the built-in configuration, with a test that fails if the prompt or tool list sent to the model ever changes.
+
 ## As a library
 
 The `gitagent-sdk` crate offers a library interface over the same loop: `query(prompt, AgentOptions)` streams `system` / `assistant` / `user` / `result` messages, tools appear under the `.claude/` tool names (`Bash`, `Read`, `Edit`, …), and hooks are callbacks that receive `PreToolUse` / `PostToolUse` input and answer with `permissionDecision`, `updatedInput` or `updatedToolOutput`.
@@ -166,35 +257,6 @@ With `learning: online`, gitagent learns from each task it completes. The model 
 ### Sandbox
 
 On Linux, outside benchmark runs, the agent's shell runs under Landlock: it may write only to the working folder, the output folder, the temp folders and `~/.cache`. A seccomp filter blocks system calls such as `mount`, loading kernel modules and `reboot`. Set `sandbox: off` in `gitagent.yaml` to disable it, or `sandbox: on` to require it. Writing under `/tests` is refused in every mode.
-
-## Results
-
-Every run is in `bench/RESULTS.md` with its commit, profile, model, cost and what failed. The headline run and the published comparisons:
-
-| Harness | Model | Terminal-Bench 2.1 | Runs per task | Source |
-|---|---|---|---|---|
-| **gitagent 2** | Claude Opus 5.5 | **93.0%** (414/445; 75 of 89 tasks passed every run) | 5 | `bench/RESULTS.md`, round tb21-final |
-| Terminus 2 | Claude Opus 5.5 | 87.6% | 1 | Vals.ai |
-| Codex CLI | GPT-6 Astra | 87.4% ±0.9 | — | Snorkel |
-| top published entry | Fable 5.1, max effort | 91.4% | — | Artificial Analysis |
-
-Two of the 89 tasks start a virtual machine inside the task container, which this host cannot do, and no harness has passed them here; without those two the mean is 95.2%. The 95% interval for the headline run is 88.8–96.9%. It cost $112.85, about $0.25 per run, with 92% of the input tokens served from the prompt cache.
-
-**The rules behind the numbers** (`docs/INTEGRITY.md`, checked by `scripts/integrity-audit.sh`): the agent never reads a task's tests or verifier output, and a built-in guard refuses writes under `/tests`; the tasks used while developing were kept apart from the ones used to score; benchmark mode uses only the built-in configuration, with a test that fails if the prompt or tool list sent to the model ever changes.
-
-## How a run works, and why it scores well
-
-One loop. The model is called with the system prompt, the task and the history; it answers with text or tool calls; the tools run in one persistent shell; the results go back; repeat until the model calls `task_complete`. Everything else is about keeping that loop on course for an hour inside a context window, without wasting the model's attention or breaking its cache.
-
-- **A method, not a persona.** The prompt tells the model how to work: note every concrete requirement in the task, explore before changing anything, change in small steps and check each, then verify the final result by exercising it. Most lost runs on other harnesses are tasks declared done without that last step.
-- **A stop check with evidence.** `task_complete` is accepted only when the run shows a verification after the last edit: a test run, a program executed, a request sent. A completion with no evidence is sent back with the task repeated. It catches the case where the model is sure and wrong.
-- **Output that fits.** Command output is shaped before the model sees it: long outputs are spilled to a file and the model gets the head, the tail, a one-line status with the exit code and line count, and the file's path; runs of similar lines (progress bars, build logs) are collapsed to their first and last line. The model reads what matters and can ask for the rest.
-- **Reminders that never rewrite history.** The time left is shown on every command result, and a reminder fires when the budget runs low. They are appended after the turn's results, never injected into earlier turns, so the prompt cache and the model's thinking blocks stay valid. That is where the 92% cache hit rate and the low cost come from.
-- **A loop detector.** The same tool, arguments and output twice in a row is called out to the model with a warning, which stops the runaway loops that burn a time budget and a bill for nothing.
-- **Context that is managed, not truncated.** Old tool results are cleared in batches through the provider's own context editing, which does not count as a history edit; and near the window's end the history is replaced by a structured summary (done, pending, key files, last failure, ruled out) with the task repeated verbatim, so the model never loses the goal.
-- **Services stay up for the tests.** The agent's shells are kept open after it finishes, so a server it started is still running when the checker connects.
-- **Every run is a record.** Each run writes a trajectory in the ATIF format with every prompt, reply, tool call and result, plus counters for everything the loop decided (loops caught, completions rejected, context compacted, cache hits), so a failed run can be read step by step and a change can be measured task by task.
-- **One static binary.** No runtime to install in the task container: the binary is uploaded and runs. The same binary and the same loop serve the console, the SDKs and the benchmark.
 
 ## Terminal-Bench with Harbor
 
