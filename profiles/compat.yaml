@@ -9,10 +9,10 @@ context_window: 128000
 exec_default_yield_ms: 10000
 shape: { cap_tokens: 6000, head_ratio: 0.3, collapse_min_run: 3 }
 guards:
-  time_budget: false             # minutes-left footer, nudge, final call (M4; off until measured)
+  time_budget: true              # minutes-left footer, nudge, final call; only when the run has a time limit
   nudge_at: 0.7
   force_stop_at: 0.9
-  loop_detector: false           # warn after loop_repeats identical calls and results (M4)
+  loop_detector: true            # warn after loop_repeats identical calls and results
   loop_repeats: 3
   loop_effort_bump: false        # raise effort for one call after a loop warning
 context:
@@ -22,9 +22,9 @@ context:
   compaction: true               # summarize the history when it nears the context window
   compact_at_tokens: 16000
 lessons: true                    # append prompts/lessons.md (learned from dev runs)
-snapshot: false                  # environment snapshot in the first message (M3; off until measured)
-stop:                            # stop check (M3; off until measured)
-  enabled: false
+snapshot: false                  # environment snapshot in the first message (on in the benchmark profiles)
+stop:                            # stop check: task_complete needs a check after the last change (task mode only)
+  enabled: true
   max_rejections: 2
   # A command matching one of these changed something (after removing
   # redirections to /dev/null and between file descriptors).

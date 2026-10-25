@@ -6,12 +6,18 @@ use gitagent_loader::Masking;
 use gitagent_loader::{load, LoadOptions};
 use gitagent_provider::{Role, ScriptedProvider};
 
+/// The built-in configuration with the guards off; each guard's own tests
+/// switch it on, so the other tests see the bare loop.
 fn spec() -> AgentSpec {
-    load(&LoadOptions {
+    let mut spec = load(&LoadOptions {
         model: Some("scripted:test".into()),
         ..Default::default()
     })
-    .unwrap()
+    .unwrap();
+    spec.profile.stop.enabled = false;
+    spec.profile.guards.time_budget = false;
+    spec.profile.guards.loop_detector = false;
+    spec
 }
 
 struct Run {
@@ -705,10 +711,14 @@ fn built_in_stop_patterns_compile() {
         .unwrap();
         let s = &spec.profile.stop;
         StopCheck::new(&s.edit_patterns, &s.verify_patterns, s.max_rejections).unwrap();
-        assert!(!s.enabled, "the stop check stays off until measured");
+        assert!(
+            s.enabled,
+            "the stop check is on by default (task mode only)"
+        );
+        assert!(spec.profile.guards.loop_detector && spec.profile.guards.time_budget);
         assert!(
             !spec.profile.snapshot,
-            "the snapshot stays off until measured"
+            "the snapshot is on only in the benchmark profiles"
         );
     }
 }
@@ -1168,6 +1178,7 @@ async fn subagents_run_with_a_fresh_context_and_return_only_a_summary() {
     .unwrap();
     assert!(spec.agents.is_empty(), "sub-agents are off by default");
     spec.profile.tools.subagents = true;
+    spec.profile.stop.enabled = false;
     spec.agents = vec![gitagent_loader::AgentDef {
         name: "checker".into(),
         description: "Runs checks.".into(),

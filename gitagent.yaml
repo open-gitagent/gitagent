@@ -2,7 +2,7 @@ name: gitagent
 # model: anthropic:<model-id>      # provider:model; --model overrides
 fallback_models: []
 max_turns: 200
-timeout_s: 1800                    # in --bench, --timeout-s from the Harbor shim wins
+# timeout_s: 1800                  # seconds; unset: 30 minutes for -p, schedules and the SDKs, no limit in the console
 profile: auto                      # auto = pick by model family, or a profile name/path
 sandbox: auto                      # auto | on | off; auto = on outside --bench on Linux
 skills: true

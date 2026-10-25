@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+/// The time limit of an unattended run when none is set: 30 minutes.
+pub const DEFAULT_TIMEOUT_S: u64 = 1800;
+
 /// `gitagent.yaml` (BLUEPRINT §6).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -10,7 +13,10 @@ pub struct Config {
     pub model: Option<String>,
     pub fallback_models: Vec<String>,
     pub max_turns: u32,
-    pub timeout_s: u64,
+    /// Wall-clock limit per run in seconds. When unset, unattended runs
+    /// (`-p`, schedules, the SDKs) use [`DEFAULT_TIMEOUT_S`] and the console
+    /// has no limit.
+    pub timeout_s: Option<u64>,
     pub profile: String,
     pub sandbox: String,
     pub skills: bool,
@@ -36,7 +42,7 @@ impl Default for Config {
             model: None,
             fallback_models: Vec::new(),
             max_turns: 200,
-            timeout_s: 1800,
+            timeout_s: None,
             profile: "auto".into(),
             sandbox: "auto".into(),
             skills: true,

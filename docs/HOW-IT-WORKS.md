@@ -69,7 +69,7 @@ When every hash in the window is equal, the model's next turn gets the line *"Yo
 
 **Prompt size.** After each response the provider's reported input tokens are taken as the size of the prompt, plus an estimate of four bytes per token for what has been appended since.
 
-**The time budget.** `gitagent_guards::TimeBudget` is given the run's limit. Every command result ends with `· N min left`. The first time 70% of the budget has passed (`nudge_at`) a reminder is appended; at 90% (`force_stop_at`) a final call to finish now. After the final call the stop check accepts `task_complete` without evidence, because a rejection could no longer help. A timeout counts as a failure, so a verified partial result beats running out of time.
+**The time budget.** `gitagent_guards::TimeBudget` is given the run's limit: `--timeout-s`, `timeout_s` in `gitagent.yaml`, or `timeoutMs` over IPC. Without one, runs nobody watches get 30 minutes and the console has no limit, so a console turn shows no time left and gets no reminders. Every command result ends with `· N min left`. The first time 70% of the budget has passed (`nudge_at`) a reminder is appended; at 90% (`force_stop_at`) a final call to finish now. After the final call the stop check accepts `task_complete` without evidence, because a rejection could no longer help. A timeout counts as a failure, so a verified partial result beats running out of time.
 
 **Masking** (`gitagent_context::Masker`) hides old tool results. It has three modes:
 

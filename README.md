@@ -98,7 +98,7 @@ In interactive mode, Ctrl-C stops the current task and Ctrl-D or `exit` quits.
 | `--config <file>` | A `gitagent.yaml` to use; its `prompts/` and `profiles/` override the built-ins |
 | `--conversation` | A plain reply ends the run, instead of `task_complete` (always on in the console) |
 | `--max-turns <n>` | Stop after this many model calls |
-| `--timeout-s <seconds>` | Time budget for the run |
+| `--timeout-s <seconds>` | Time limit for the run. Without one, the console has no limit and `-p` runs stop after 30 minutes |
 | `--allowed-tools <a,b>`, `--disallowed-tools <a,b>` | Offer only these tools, or never these |
 | `--append-system-prompt <text>` | Text added after the system prompt |
 | `--workflow <name>`, `--input key=value` | Run one of the agent's workflows instead of a task |
@@ -276,6 +276,8 @@ The model is the same across these comparisons, so the difference lies in what t
 
 None of these makes the model more capable. Together they remove the ways a capable model loses a task it could have solved: stopping too early, losing focus in long output, repeating itself, running out of time, and spending its opening turns on orientation. They also reinforce each other. A smaller context makes loops easier to escape, the time reminders leave room for the completion check to send work back before the deadline, and the cache savings make the extra verification turns nearly free.
 
+Outside benchmarks, the same mechanisms are on by default, with two differences. The time reminders appear only when a run has a time limit, and the environment probe stays a benchmark setting. See [Configuration](#configuration).
+
 **The rules behind the numbers** (`docs/INTEGRITY.md`, checked by `scripts/integrity-audit.sh`): the agent never reads a task's tests or verifier output, and a built-in guard refuses writes under `/tests`; the tasks used while developing were kept apart from the ones used to score; benchmark mode uses only the built-in configuration, with a test that fails if the prompt or tool list sent to the model ever changes.
 
 ## How gitagent works
@@ -292,7 +294,7 @@ Most agents are a prompt, a model and a bag of tools, and the interesting part i
 
 **Reminders are appended, never injected.** The time left is shown on every result, and a reminder fires when the budget runs low. These go after the turn's results, never into earlier turns. Changing an earlier turn would invalidate the provider's prompt cache and the model's thinking blocks, so the whole history stays byte-identical and 92% of the input is served from cache. That is where the cost per run comes from.
 
-**The loop detector.** If the model issues the same tool call with the same arguments and gets the same output twice, it is told so, with a nudge to change approach. Runaway loops are where other harnesses burn a time budget and a bill: a model that returns empty replies can be re-sent the whole growing conversation until the clock runs out. gitagent stops after the second repeat.
+**The loop detector.** If the model makes the same tool call with the same arguments and gets the same output three times in a row, it is told so and asked to change approach. Runaway loops are where other harnesses burn a time budget and a bill: a model that returns empty replies can be re-sent the whole growing conversation until the clock runs out. gitagent breaks the loop at the third identical call.
 
 **Context is managed, not truncated.** Old tool results are cleared in batches through the provider's own context editing, which does not count as a history edit. Near the end of the window the history is replaced by a structured summary, done, pending, key files, last failure, ruled out, with the original task repeated verbatim by the harness rather than paraphrased by the model, so the goal never drifts.
 
@@ -531,7 +533,14 @@ gitagent reads `gitagent.yaml` from `--config`, else the project folder (`gitage
 | `agents/<name>.md` | Sub-agent definitions (`name`, `description`, `tools`, `disallowedTools`, `maxTurns`, `model`, `effort`; the body is the prompt), when the profile enables sub-agents |
 | `.claude/agents/`, `.claude/skills/`, `.claude/settings.json` | An existing `.claude/` project layout, read as it is after the layers above: sub-agents and skills, and `PreToolUse` / `PostToolUse` hooks with their matchers, stdin JSON, exit codes and `hookSpecificOutput` answers (tool and argument names are translated both ways) |
 
-`profile: auto` picks `anthropic`, `openai`, `google` or `compat` from the model's provider. Every behavior that changes results is a switch in the profile. Some features stay off until measured: the environment snapshot, the stop check, the time budget, the loop detector and hiding old tool output. Context compaction is on.
+`profile: auto` picks `anthropic`, `openai`, `google` or `compat` from the model's provider. Every behavior that changes results is a switch in the profile. The defaults for everyday work:
+
+- **On:** output shaping, context compaction, the loop detector, and the stop check for runs that end with `task_complete` (`-p` and SDK task mode; a reply ends a console turn, so it never fires there).
+- **On for Claude models:** old tool results are cleared by the provider once the conversation passes 50,000 tokens.
+- **On when the run has a time limit:** the minutes left on every result, a reminder at 70% of the limit and a final call at 90%.
+- **Benchmark profiles only:** the environment snapshot, which adds up to 15 seconds to each start.
+
+**Time limits.** Everyday work needs none. In the console a turn runs until it is done or you press Ctrl-C. Runs nobody watches (`-p`, schedules, the SDKs) stop after 30 minutes unless you set another limit with `timeout_s` in `gitagent.yaml`, `--timeout-s`, or `timeoutMs` over IPC. Setting `timeout_s` applies to the console too.
 
 With `learning: online`, gitagent learns from each task it completes. The model reads the run's trajectory and proposes general lessons, which are saved in the project's `.gitagent/prompts/lessons.md`. A lesson is used only once two different tasks support it. Review the file like code: edit or delete lines freely. In repo mode the lessons are committed separately on the branch. `--bench` never learns and never loads project lessons.
 
@@ -551,8 +560,11 @@ On Linux, outside benchmark runs, the agent's shell runs under Landlock: it may 
 scripts/build-release.sh
 PYTHONPATH=$PWD harbor run -d terminal-bench/terminal-bench-2-1 \
   -a gitagent_harbor.agent:GitAgent -m anthropic/claude-opus-5-5 \
-  --env-file .env --ak timeout_s=840 -k 3 -n 8 -o bench/jobs
+  --env-file .env --ak timeout_s=840 \
+  --ak profile=$PWD/bench/profiles/anthropic-m4-nolessons.yaml -k 3 -n 8 -o bench/jobs
 ```
+
+The profile is the one the published run used. Each task sets its own time limit in its `task.toml`. Harbor stops the agent at that limit, but the shim is not given it, so the limit is passed in with `timeout_s`: the task's limit minus 60 seconds, so gitagent finishes its work and its records before Harbor cuts it off. The example suits the tasks with the common 15-minute limit. `scripts/run-dev-pass.sh` handles every limit: it reads each task's limit, starts one Harbor job per limit, and passes the matching `timeout_s`. That is why the published run has one job per time limit.
 
 The shim (`gitagent_harbor/agent.py`):
 

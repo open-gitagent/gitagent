@@ -12,7 +12,7 @@ fn bench_run_writes_trajectory_and_counters() {
     let script = dir.path().join("script.yaml");
     std::fs::write(
         &script,
-        "- tool_calls: [{name: exec, arguments: {cmd: 'echo hello > out.txt && cat out.txt'}}]\n\
+        "- tool_calls: [{name: exec, arguments: {cmd: 'echo hello > out.txt && echo hello | diff - out.txt'}}]\n\
          - tool_calls: [{name: task_complete, arguments: {summary: wrote out.txt}}]\n",
     )
     .unwrap();
@@ -336,6 +336,7 @@ fn repo_mode_clones_commits_and_pushes_without_leaking_the_token() {
     std::fs::write(
         &script,
         "- tool_calls: [{name: write_file, arguments: {path: fix.txt, content: \"fixed\\n\"}}]\n\
+         - tool_calls: [{name: exec, arguments: {cmd: git status}}]\n\
          - tool_calls: [{name: task_complete, arguments: {summary: Add fix.txt}}]\n",
     )
     .unwrap();
@@ -1028,6 +1029,7 @@ fn agent_hooks_follow_the_session() {
         "first",
         "- tool_calls: [{name: exec, arguments: {cmd: \"rm -rf build\"}}]\n\
          - tool_calls: [{name: write_file, arguments: {path: notes.txt, content: hi}}]\n\
+         - tool_calls: [{name: exec, arguments: {cmd: git status}}]\n\
          - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n",
     );
     assert!(out.status.success());

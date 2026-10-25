@@ -918,9 +918,11 @@ pub fn prepare(options: &AgentOptions) -> Result<Prepared> {
         .out_dir
         .clone()
         .unwrap_or_else(|| std::env::temp_dir().join("gitagent").join(&session_id));
-    let timeout = options
-        .timeout
-        .unwrap_or(Duration::from_secs(spec.config.timeout_s));
+    let timeout = options.timeout.unwrap_or(Duration::from_secs(
+        spec.config
+            .timeout_s
+            .unwrap_or(gitagent_loader::DEFAULT_TIMEOUT_S),
+    ));
     let tool_allowlist = (!options.allowed_tools.is_empty())
         .then(|| names::normalize_tool_list(&options.allowed_tools));
     let tool_denylist = names::normalize_tool_list(&options.disallowed_tools);

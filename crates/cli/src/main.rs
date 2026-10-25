@@ -101,7 +101,8 @@ pub(crate) struct Cli {
     #[arg(long, default_value = "/tmp/gitagent")]
     out_dir: PathBuf,
 
-    /// Wall-clock budget for the run in seconds (default: timeout_s from the config).
+    /// Wall-clock budget for the run in seconds (default: timeout_s from the
+    /// config; without one, 30 minutes, and no limit in the console).
     #[arg(long)]
     timeout_s: Option<u64>,
 
@@ -183,7 +184,11 @@ pub(crate) struct Setup {
     pub spec: AgentSpec,
     pub provider: Box<dyn Provider>,
     pub work_dir: PathBuf,
+    /// The limit for unattended runs: the one set, or 30 minutes.
     pub timeout: Duration,
+    /// The limit set by `--timeout-s` or `timeout_s`, if any; the console
+    /// uses only this one.
+    pub timeout_set: Option<Duration>,
     pub events: Events,
     /// Directories the sandboxed shell may write to; `None` when the
     /// sandbox is off.
@@ -421,7 +426,11 @@ pub(crate) fn setup(cli: &Cli, conversation: bool) -> Result<Setup> {
         spec.system_prompt.push('\n');
     }
     let provider = make_provider(&spec)?;
-    let timeout = Duration::from_secs(cli.timeout_s.unwrap_or(spec.config.timeout_s));
+    let timeout_set = cli
+        .timeout_s
+        .or(spec.config.timeout_s)
+        .map(Duration::from_secs);
+    let timeout = timeout_set.unwrap_or(Duration::from_secs(gitagent_loader::DEFAULT_TIMEOUT_S));
     let events = match cli.events {
         Some(EventFormat::Jsonl) => Events::stdout(),
         None => Events::disabled(),
@@ -447,6 +456,7 @@ pub(crate) fn setup(cli: &Cli, conversation: bool) -> Result<Setup> {
         provider,
         work_dir,
         timeout,
+        timeout_set,
         events,
         sandbox,
     })

@@ -27,7 +27,7 @@ pub mod workflows;
 pub use agent_hooks::{HookEntry, HookEvent};
 pub use agents::{AgentDef, GENERAL as GENERAL_AGENT};
 pub use compliance::{AuditCfg, Supervision};
-pub use config::{Config, RepoConfig};
+pub use config::{Config, RepoConfig, DEFAULT_TIMEOUT_S};
 pub use declared::DeclaredTool;
 pub use env_config::EnvConfig;
 pub use knowledge::Knowledge;
@@ -865,6 +865,14 @@ mod tests {
     }
 
     #[test]
+    fn the_built_in_config_sets_no_time_limit() {
+        // Unset, so the console runs without a limit and unattended runs
+        // fall back to DEFAULT_TIMEOUT_S.
+        let spec = load(&opts("anthropic:m")).unwrap();
+        assert_eq!(spec.config.timeout_s, None);
+    }
+
+    #[test]
     fn rejects_combinations_the_provider_would_fail() {
         let anthropic = DEFAULT_PROFILES[0].1;
         let check = |text: String| {
@@ -872,14 +880,17 @@ mod tests {
             validate_profile(&p)
         };
         assert!(check(anthropic.to_string()).is_ok());
-        let client = anthropic.replace("masking: none", "masking: client");
+        assert!(
+            anthropic.contains("masking: server"),
+            "Claude clears old results by default"
+        );
+        let client = anthropic.replace("masking: server", "masking: client");
         let err = check(client.clone()).unwrap_err().to_string();
         assert!(err.contains("drop_block"), "{err}");
         assert!(
             check(client.replace("thinking_binding: error", "thinking_binding: drop_block"))
                 .is_ok()
         );
-        assert!(check(anthropic.replace("masking: none", "masking: server")).is_ok());
         let openai = DEFAULT_PROFILES[1]
             .1
             .replace("masking: none", "masking: server");
