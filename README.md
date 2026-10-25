@@ -29,7 +29,7 @@
   <img src="./docs/media/console.gif" alt="A gitagent session in the terminal" width="820" />
 </p>
 
-**Terminal-Bench 2.1: 93.03%** with Claude Opus 5.5, all 89 tasks, five runs each, code frozen at the published commit. The published harnesses on the same benchmark: Terminus 2 with the same model 87.6%, Codex CLI with GPT-6 Astra 87.4%, the top entry 91.4%. The numbers are under [Results](#results); the reason is under [How gitagent works](#how-gitagent-works).
+**Terminal-Bench 2.1: 93.03%** with Claude Opus 5.5, all 89 tasks, five runs each, code frozen at the published commit. The published harnesses on the same benchmark: Terminus 2 with the same model 87.6%, Codex CLI with GPT-6 Astra 87.4%, and the highest published entry, Artificial Analysis's own harness with Claude Fable 5.1 at maximum effort, 91.4%. The numbers are under [Results](#results); the reason is under [How gitagent works](#how-gitagent-works).
 
 This is gitagent 2, the Rust binary. Agents, hooks, schedules and client code written for gitagent 1.x run unchanged, and agent folders in the OpenGAP format load too. New in 2: the console (one `$` line per tool call, approvals inline, a task board), parallel tasks with a reconciling step, schedules, workflows, plugins, sub-agents, knowledge, the IPC protocol the Python and TypeScript clients speak, and the benchmark harness.
 
@@ -145,9 +145,9 @@ Every run is in `bench/RESULTS.md` with its commit, profile, model, cost and wha
 | Harness | Model | Terminal-Bench 2.1 | Runs per task | Source |
 |---|---|---|---|---|
 | **gitagent 2** | Claude Opus 5.5 | **93.03%** (414/445; 75 of 89 tasks passed every run) | 5 | `bench/RESULTS.md`, round tb21-final |
-| Terminus 2 | Claude Opus 5.5 | 87.6% | 1 | Vals.ai |
-| Codex CLI | GPT-6 Astra | 87.4% ±0.9 | — | Snorkel |
-| top published entry | Fable 5.1, max effort | 91.4% | — | Artificial Analysis |
+| Terminus 2 | Claude Opus 5.5 | 87.6% | 1 | [Vals.ai](https://www.vals.ai/benchmarks/terminal-bench-2-1) |
+| Codex CLI | GPT-6 Astra | 87.4% ±0.9 | — | [Snorkel, the official leaderboard](https://snorkel.ai/leaderboard/terminal-bench-2-1/) |
+| Artificial Analysis's own harness | Claude Fable 5.1, max effort | 91.4% | — | [Artificial Analysis](https://artificialanalysis.ai/evaluations/terminalbench-2-1) |
 
 The same run by the tasks' time limits (pass@k is the chance that at least one of k runs passes):
 
