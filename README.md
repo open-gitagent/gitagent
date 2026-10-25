@@ -528,9 +528,9 @@ cargo test --workspace
 
 The tests need no network or keys: a scripted provider replays model replies from YAML, and the provider adapters are tested against local mock servers.
 
-- `BLUEPRINT.md`: what is built and why.
-- `TASKS.md`: the milestones.
-- `docs/DEVIATIONS.md`: where the implementation differs from the blueprint, and why.
+- [BLUEPRINT.md](./BLUEPRINT.md): what is built and why.
+- [docs/HOW-IT-WORKS.md](./docs/HOW-IT-WORKS.md): the mechanics, with numbers and formats.
+- [docs/INTEGRITY.md](./docs/INTEGRITY.md): the rules that keep benchmark results honest, and the audit that checks them.
 
 ## License
 

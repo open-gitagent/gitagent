@@ -113,9 +113,26 @@ Because the record is complete, a failed run can be read step by step, and a cha
 
 On Linux, with `sandbox: auto` or `on`, the agent's shell, not gitagent itself, starts through `gitagent __sandbox`, which applies Landlock (writes allowed only under the working directory, the output directory, `/tmp`, `/var/tmp`, `/dev` and `~/.cache`; reads unrestricted) and a seccomp deny-list (mount, kernel modules, reboot, keyrings, BPF, clock and host-name changes; denied calls fail with `EPERM`), then execs the shell. Everything the shell starts inherits the restrictions, while gitagent can still write its records. Where a container already provides the isolation, the sandbox can be turned off.
 
-## 12. Learning, offline
+## 12. Learning between runs
 
-`gitagent learn` reads finished runs: only gitagent's own trajectory of each and whether it succeeded, nothing else. The model is asked for operations on a lesson store, `add`, `edit`, `upvote`, `downvote`, at most three per reply. Every proposed lesson passes an audit before it is stored: at most 400 characters, at least five words, no code block, no code span longer than 40 characters, and nothing that names the task or repeats paths, identifiers or numbers from its instruction. A lesson starts at importance 2, gains 1 for each new task that confirms it, loses 1 on a downvote, and is deleted at 0. It is shown to the agent only once two different tasks support it. The rendered `prompts/lessons.md` is reviewed and committed like any other prompt change.
+gitagent can turn its own finished runs into short, general lessons that later runs see in their system prompt. Nothing is ever learned during a run.
+
+**Offline,** `gitagent learn --from <runs>` reads finished runs: only gitagent's own trajectory of each and whether it succeeded. Runs of the same task are grouped into units, a passed and a failed attempt side by side when both exist, so the learner can see what made the difference. The learner model (`prompts/learner.md`) gets one unit and the current lessons, and answers with at most three operations:
+
+| Operation | Effect |
+|---|---|
+| `add` | A new lesson at importance 2, supported by this task. Skipped when it shares at least 80% of its words with an existing lesson |
+| `edit` | A lesson rewritten to be more accurate or more general; counts as a vote from this task |
+| `upvote` | The attempt shows the lesson helps or is right: `helpful` + 1, a vote from this task |
+| `downvote` | The attempt shows the lesson hurt or is wrong: importance − 1, `harmful` + 1; at 0 the lesson is deleted |
+
+A vote from a task raises a lesson's importance only the first time that task votes, so running one task many times cannot make a lesson look widely supported.
+
+**The audit.** Every added or edited lesson is checked before it is stored, and rejected when it is over 400 characters, under five words, contains a code block or a code span over 40 characters, or names the task or repeats a path, file name, identifier or number from its instruction. Rejections are counted.
+
+**What reaches the prompt.** The store keeps every lesson with its evidence. The prompt's `prompts/lessons.md` is rebuilt from it on every learning run: lessons supported by at least two different tasks, highest importance first, until the file would pass 3,000 characters. A lesson seen on one task waits in the store for a second. The same lessons go to every run, so the system prompt stays byte-identical and cached. The file is reviewed like any prompt change, committed, and compiled into the binary; a profile can leave lessons out with `lessons: false`.
+
+**Online,** `learning: online` in `gitagent.yaml` runs the same learner after each finished task in a project, into the project's `.gitagent/prompts/lessons.md`, which later runs load on top of the built-in lessons. A lesson's support is the learner model's judgment that an attempt shows it, not a measured cause; whether lessons help is measured by comparing runs with and without them.
 
 ## 13. Memory, hooks and approvals
 

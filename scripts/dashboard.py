@@ -1307,7 +1307,6 @@ def summary(root: Path):
         "learner_md": read_text(REPO / "prompts" / "learner.md"),
         "profiles": profiles(),
         "docs": {
-            "DEVIATIONS.md": read_text(REPO / "docs" / "DEVIATIONS.md"),
             "INTEGRITY.md": read_text(REPO / "docs" / "INTEGRITY.md"),
             "RESULTS.md": read_text(REPO / "bench" / "RESULTS.md"),
         },
