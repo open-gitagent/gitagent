@@ -121,7 +121,14 @@ pub(crate) struct Gate<'a> {
     error_seen: bool,
     /// Where this month's spending is kept (`.gitagent/state.json`).
     state_file: Option<PathBuf>,
+    /// Payments counted when their call was let through, by call id; a
+    /// call that then fails is taken off again.
+    reserved: std::sync::Mutex<std::collections::HashMap<String, u64>>,
 }
+
+/// Held while this month's spending is read and rewritten, so payments
+/// running at the same time (a plan's tasks) cannot both pass the cap.
+static SPENDING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// A payment a tool call makes: the amount in cents and its category.
 pub(crate) struct Payment {
@@ -130,31 +137,47 @@ pub(crate) struct Payment {
 }
 
 /// The payment a call makes, read from `amount_cents` (or `amount`, in
-/// whole units) and `category` in its arguments.
-pub(crate) fn payment_of(call: &ToolCall) -> Option<Payment> {
+/// whole units) and `category` in its arguments. `None` when the call names
+/// no amount; an error when it names one that cannot be read, which the
+/// spending rules treat as a block rather than as no payment.
+pub(crate) fn payment_of(call: &ToolCall) -> Option<Result<Payment, String>> {
     let args = &call.arguments;
     let cents = match (args.get("amount_cents"), args.get("amount")) {
-        (Some(c), _) => c
-            .as_u64()
-            .or_else(|| c.as_str().and_then(|s| s.parse().ok()))?,
-        (None, Some(a)) => {
-            let units = a
-                .as_f64()
-                .or_else(|| a.as_str().and_then(|s| s.parse().ok()))?;
-            if units < 0.0 {
-                return None;
-            }
-            (units * 100.0).round() as u64
-        }
+        (Some(c), _) => cents_of(c, 1.0),
+        (None, Some(a)) => cents_of(a, 100.0),
         (None, None) => return None,
     };
-    Some(Payment {
-        cents,
-        category: args
-            .get("category")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-    })
+    Some(
+        cents
+            .map(|cents| Payment {
+                cents,
+                category: args
+                    .get("category")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            })
+            .ok_or_else(|| "the payment's amount could not be read".to_string()),
+    )
+}
+
+/// An amount in cents from a number or a string such as `"1,500.00"` or
+/// `"$15"`, scaled by `scale`; `None` when negative, fractional cents or
+/// not a number.
+fn cents_of(v: &Value, scale: f64) -> Option<u64> {
+    let n = v.as_f64().or_else(|| {
+        v.as_str().and_then(|s| {
+            s.trim()
+                .trim_start_matches('$')
+                .replace(',', "")
+                .parse::<f64>()
+                .ok()
+        })
+    })?;
+    let cents = n * scale;
+    if !cents.is_finite() || cents < 0.0 || (scale == 1.0 && cents.fract() != 0.0) {
+        return None;
+    }
+    Some(cents.round() as u64)
 }
 
 impl<'a> Gate<'a> {
@@ -182,6 +205,7 @@ impl<'a> Gate<'a> {
             kill_file,
             error_seen: false,
             state_file,
+            reserved: Default::default(),
         }
     }
 
@@ -197,24 +221,33 @@ impl<'a> Gate<'a> {
     }
 
     /// Notes a call's result: for the `error_detected` trigger, and a
-    /// payment that went through counts toward the month's spending.
+    /// payment counted by [`Gate::block_reason`] whose call failed, was
+    /// denied or was blocked is taken off the month's spending again.
     pub fn observe(&mut self, call: &ToolCall, is_error: bool) {
         self.error_seen |= is_error;
-        if is_error || self.spec.supervision.finance.is_none() {
-            return;
-        }
-        if let Some(p) = payment_of(call) {
+        let reserved = self
+            .reserved
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&call.id);
+        if let (Some(cents), true) = (reserved, is_error) {
+            let _held = SPENDING.lock().unwrap_or_else(|e| e.into_inner());
             let month = this_month();
-            let mut state = self.state();
-            let spent = state["spending"][&month].as_u64().unwrap_or(0);
-            state["spending"][&month] = json!(spent + p.cents);
-            if let Some(path) = &self.state_file {
-                if let Some(dir) = path.parent() {
-                    let _ = std::fs::create_dir_all(dir);
-                }
-                let _ = std::fs::write(path, state.to_string());
-            }
+            let spent = self.state()["spending"][&month].as_u64().unwrap_or(0);
+            self.write_spent(&month, spent.saturating_sub(cents));
         }
+    }
+
+    fn write_spent(&self, month: &str, cents: u64) {
+        let Some(path) = &self.state_file else {
+            return;
+        };
+        let mut state = self.state();
+        state["spending"][month] = json!(cents);
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, state.to_string());
     }
 
     fn state(&self) -> Value {
@@ -226,7 +259,10 @@ impl<'a> Gate<'a> {
     }
 
     /// Why the call may not run at all, if so: a handoff whose roles the
-    /// agent does not hold, or a payment outside the spending rules.
+    /// agent does not hold, or a payment outside the spending rules. A
+    /// payment that passes is counted toward the month at once, so calls
+    /// running at the same time see it; [`Gate::observe`] takes it off again
+    /// if the call does not go through.
     pub fn block_reason(&self, call: &ToolCall) -> Option<String> {
         let sup = &self.spec.supervision;
         let agent = self
@@ -255,6 +291,10 @@ impl<'a> Gate<'a> {
         let (Some(f), Some(p)) = (&sup.finance, payment_of(call)) else {
             return None;
         };
+        let p = match p {
+            Ok(p) => p,
+            Err(why) => return Some(format!("{why} (financial governance)")),
+        };
         if let Some(c) = &p.category {
             if f.blocked_categories.iter().any(|b| b == c) {
                 return Some(format!(
@@ -279,8 +319,10 @@ impl<'a> Gate<'a> {
                 f.max_per_transaction_cents.unwrap_or_default()
             ));
         }
+        let _held = SPENDING.lock().unwrap_or_else(|e| e.into_inner());
+        let month = this_month();
+        let spent = self.state()["spending"][&month].as_u64().unwrap_or(0);
         if let Some(cap) = f.max_monthly_cents {
-            let spent = self.state()["spending"][this_month()].as_u64().unwrap_or(0);
             if spent + p.cents > cap {
                 return Some(format!(
                     "{} cents would take this month's spending to {} of the {cap} allowed (financial governance)",
@@ -289,13 +331,21 @@ impl<'a> Gate<'a> {
                 ));
             }
         }
+        self.write_spent(&month, spent + p.cents);
+        self.reserved
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(call.id.clone(), p.cents);
         None
     }
 
     /// Whether a request that nobody answers in time counts as approved
     /// (a payment with `auto_deny_on_timeout: false`).
     pub fn approve_on_timeout(&self, call: &ToolCall) -> bool {
-        match (&self.spec.supervision.finance, payment_of(call)) {
+        match (
+            &self.spec.supervision.finance,
+            payment_of(call).and_then(Result::ok),
+        ) {
             (Some(f), Some(_)) => !f.auto_deny_on_timeout,
             _ => false,
         }
@@ -338,7 +388,7 @@ impl<'a> Gate<'a> {
                 ));
             }
         }
-        if let (Some(f), Some(p)) = (&sup.finance, payment_of(call)) {
+        if let (Some(f), Some(Ok(p))) = (&sup.finance, payment_of(call)) {
             if f.require_above_cents.is_some_and(|t| p.cents > t) {
                 return Some(format!(
                     "a payment of {} cents is over {} (financial governance)",

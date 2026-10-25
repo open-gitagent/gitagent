@@ -333,6 +333,48 @@ async fn ask(child: &ChildRun, spec: &AgentSpec, request: &ApprovalRequest) -> A
         })
 }
 
+/// Puts a tool call a step makes through the checks of the agent loop; gives
+/// the call to run (a hook may have changed its arguments) or why it may not.
+async fn checked_call(
+    spec: &AgentSpec,
+    child: &ChildRun,
+    gate: &mut crate::approval::Gate<'_>,
+    mut call: ToolCall,
+) -> Result<ToolCall, String> {
+    if let Some(reason) = gate.halted() {
+        return Err(format!("Not run: the agent was halted: {reason}."));
+    }
+    let file_hooks = crate::discover_hooks(spec, &child.cwd, "workflow");
+    match crate::pre_hooks(
+        file_hooks.as_ref(),
+        child.hooks.as_ref(),
+        &call.name,
+        &call.arguments,
+    )
+    .await
+    {
+        crate::PreHooks::Blocked(reason) => return Err(format!("Blocked by a hook: {reason}")),
+        crate::PreHooks::Run { arguments, .. } => call.arguments = arguments,
+    }
+    if let Some(reason) = gate.block_reason(&call) {
+        return Err(format!("Not run: {reason}."));
+    }
+    if let Some(reason) = gate.reason(&call, 0) {
+        let request = ApprovalRequest {
+            tool_name: call.name.clone(),
+            arguments: call.arguments.clone(),
+            reason,
+        };
+        let on_timeout = gate.approve_on_timeout(&call);
+        let answer = gate.ask_with(&request, on_timeout).await;
+        if !answer.approved {
+            gate.observe(&call, true);
+            return Err(crate::approval::denial_message(&request, &answer));
+        }
+    }
+    Ok(call)
+}
+
 /// Runs one step and gives what it produced as text.
 #[allow(clippy::too_many_arguments)]
 async fn run_step(
@@ -351,25 +393,39 @@ async fn run_step(
             name: tool.clone(),
             arguments: inputs.clone(),
         };
-        if let Some(t) = spec.declared_tools.iter().find(|t| &t.name == tool) {
-            let out = gitagent_tools::run_declared(&call, t, remaining, &spec.env_config.env_vars)
-                .await
-                .map_err(|e| e.to_string())?;
-            return if out.is_error {
-                Err(out.content)
+        let declared = spec.declared_tools.iter().find(|t| &t.name == tool);
+        let servers = child.mcp.as_ref().filter(|m| m.has(tool));
+        if declared.is_some() || servers.is_some() {
+            // The step calls the tool itself, so it passes the same checks
+            // as a call the model makes: kill switch, hooks, the spending and
+            // role rules, and approval.
+            let mut gate = crate::approval::Gate::new(
+                spec,
+                child.approver.as_ref(),
+                child.mcp.as_deref(),
+                child.kill.as_ref(),
+            );
+            let call = checked_call(spec, child, &mut gate, call).await?;
+            let (content, is_error) = if let Some(t) = declared {
+                let out =
+                    gitagent_tools::run_declared(&call, t, remaining, &spec.env_config.env_vars)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                (out.content, out.is_error)
+            } else if let Some(servers) = servers {
+                let out = servers
+                    .call(
+                        tool,
+                        &call.arguments,
+                        remaining.unwrap_or(Duration::from_secs(600)),
+                    )
+                    .await?;
+                (out.text, out.is_error)
             } else {
-                Ok(out.content)
+                unreachable!("declared or an MCP tool")
             };
-        }
-        if let Some(servers) = child.mcp.as_ref().filter(|m| m.has(tool)) {
-            let out = servers
-                .call(tool, inputs, remaining.unwrap_or(Duration::from_secs(600)))
-                .await?;
-            return if out.is_error {
-                Err(out.text)
-            } else {
-                Ok(out.text)
-            };
+            gate.observe(&call, is_error);
+            return if is_error { Err(content) } else { Ok(content) };
         }
         // A built-in tool: the agent makes the call. Anything else is a
         // mistake in the workflow, not a job for the model.

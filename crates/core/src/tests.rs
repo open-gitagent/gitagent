@@ -1895,7 +1895,7 @@ async fn audit_log_handoffs_and_spending_rules() {
     for name in ["transfer", "audit-export", "pay"] {
         write(
             agent.join(format!("tools/{name}.sh")),
-            "cat >/dev/null; echo '{\"text\": \"done\"}'\n",
+            "case \"$(cat)\" in *fail*) echo boom >&2; exit 1;; esac; echo '{\"text\": \"done\"}'\n",
         );
         write(
             agent.join(format!("tools/{name}.yaml")),
@@ -1920,6 +1920,9 @@ async fn audit_log_handoffs_and_spending_rules() {
                   - tool_calls: [{name: pay, arguments: {amount_cents: 1500, category: office}}]\n\
                   - tool_calls: [{name: pay, arguments: {amount_cents: 4500, category: travel, note: approved}}]\n\
                   - tool_calls: [{name: pay, arguments: {amount_cents: 3000, category: travel, note: approved}}]\n\
+                  - tool_calls: [{name: pay, arguments: {amount_cents: 1800, category: office, note: fail}}]\n\
+                  - tool_calls: [{name: pay, arguments: {amount_cents: 1800, category: office}}]\n\
+                  - tool_calls: [{name: pay, arguments: {amount_cents: \"15 dollars\", category: office}}]\n\
                   - tool_calls: [{name: subagent, arguments: {description: x, prompt: go, agent: both}}]\n\
                   - tool_calls: [{name: task_complete, arguments: {summary: done}}]\n";
     let approver = test_approver(None);
@@ -1935,7 +1938,7 @@ async fn audit_log_handoffs_and_spending_rules() {
                 .map(str::to_string)
         })
         .collect();
-    assert_eq!(results.len(), 10, "{results:#?}");
+    assert_eq!(results.len(), 13, "{results:#?}");
     // transfer: a handoff the teller takes part in (maker), approval asked.
     assert_eq!(results[0], "done");
     // audit-export: a handoff needing the approver role the teller lacks.
@@ -1969,10 +1972,20 @@ async fn audit_log_handoffs_and_spending_rules() {
         "{}",
         results[7]
     );
+    // An 1800 payment whose call fails is not counted, so the next 1800
+    // still fits under the cap (7800 of 8000).
+    assert_ne!(results[8], "done");
+    assert_eq!(results[9], "done");
+    // An amount the rules cannot read is blocked, not waved through.
     assert!(
-        results[8].contains("holds both maker and approver, which conflict"),
+        results[10].contains("the payment's amount could not be read"),
         "{}",
-        results[8]
+        results[10]
+    );
+    assert!(
+        results[11].contains("holds both maker and approver, which conflict"),
+        "{}",
+        results[11]
     );
     let seen: Vec<String> = approver
         .seen
@@ -1994,7 +2007,7 @@ async fn audit_log_handoffs_and_spending_rules() {
             .values()
             .next()
             .unwrap(),
-        6000
+        7800
     );
 
     // The audit log: tool calls and model versions, no prompts or texts.
@@ -2031,6 +2044,12 @@ async fn audit_log_handoffs_and_spending_rules() {
         .iter()
         .all(|r| r["session_id"] == "-" && r["timestamp"].is_string()));
     assert!(!events.contains(&"prompt"), "{events:?}");
+    // Spending and role blocks are recorded with what blocked them.
+    assert!(records.iter().any(|r| r["event"] == "blocked"
+        && r["by"] == "compliance"
+        && r["reason"]
+            .as_str()
+            .is_some_and(|t| t.contains("gambling is blocked"))));
 
     // A strict agent holding both roles does not load at all.
     write(
@@ -2105,6 +2124,87 @@ async fn a_workflow_step_naming_a_missing_tool_fails_plainly() {
         report.steps[0].status
     );
     assert!(provider.requests().is_empty());
+}
+
+/// A workflow step that calls a declared tool itself goes through the same
+/// approval as a call the model makes: with no one to approve, it does not run.
+#[tokio::test]
+async fn a_workflow_tool_step_needs_the_same_approval_as_the_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("workflows")).unwrap();
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: a\nversion: 1.0.0\ndescription: A.\n",
+    )
+    .unwrap();
+    std::fs::write(agent.join("SOUL.md"), "I am A.\n").unwrap();
+    std::fs::write(
+        agent.join("workflows/w.yaml"),
+        "name: w\nsteps:\n  - {id: s, action: Pay., tool: pay}\n",
+    )
+    .unwrap();
+    let marker = dir.path().join("paid");
+    let script_path = dir.path().join("pay.sh");
+    std::fs::write(
+        &script_path,
+        format!("cat >/dev/null; touch {}; echo paid\n", marker.display()),
+    )
+    .unwrap();
+    let mut spec = load(&LoadOptions {
+        project_dir: Some(agent.clone()),
+        model: Some("scripted:test".into()),
+        ..Default::default()
+    })
+    .unwrap();
+    spec.declared_tools.push(gitagent_loader::DeclaredTool {
+        name: "pay".into(),
+        description: "Pays.".into(),
+        input_schema: json!({"type": "object"}),
+        runner: gitagent_loader::declared::Runner::Script {
+            command: vec!["sh".into(), script_path.display().to_string()],
+            dir: dir.path().to_path_buf(),
+        },
+        timeout: Duration::from_secs(10),
+        requires_confirmation: true,
+        read_only: false,
+    });
+    let provider = ScriptedProvider::from_yaml("- text: should not be asked\n").unwrap();
+    let report = run_workflow(
+        &spec,
+        &provider,
+        "w",
+        &Map::new(),
+        RunOptions {
+            instruction: String::new(),
+            work_dir: agent.clone(),
+            out_dir: dir.path().join("out"),
+            timeout: None,
+            session_id: None,
+            events: gitagent_record::Events::disabled(),
+            resume: None,
+            sandbox: None,
+            tool_allowlist: None,
+            tool_denylist: Vec::new(),
+            hook_callbacks: None,
+            mcp: None,
+            approver: None,
+            kill: None,
+            steer: None,
+            external_tools: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(
+            &report.steps[0].status,
+            crate::workflow::StepStatus::Failed(_)
+        ),
+        "{:?}",
+        report.steps[0].status
+    );
+    assert!(!marker.exists(), "the tool ran without approval");
 }
 
 /// `plan`: each phase's tasks run at the same time as sub-agents, a later

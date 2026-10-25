@@ -124,11 +124,19 @@ pub(crate) fn scaffold(
         std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
         created.push(*rel);
     }
-    let mut note = start_git(dir).unwrap_or_default();
-    if git(dir, &["rev-parse", "--is-inside-work-tree"])
+    let started = start_git(dir);
+    let mut note = started.clone().unwrap_or_default();
+    // A repository started just now gets everything, as in 1.x; in an
+    // existing one only the files made here are committed, never the
+    // user's own uncommitted work.
+    let committed = git(dir, &["rev-parse", "--is-inside-work-tree"])
         && !created.is_empty()
-        && commit_all(dir, "Start the agent")
-    {
+        && if started.is_some() {
+            commit_all(dir, "Start the agent")
+        } else {
+            commit_paths(dir, &created, "Start the agent")
+        };
+    if committed {
         note.push_str("; committed");
     }
     Ok((created, note))
@@ -161,6 +169,25 @@ fn commit_all(dir: &std::path::Path, message: &str) -> bool {
         )
 }
 
+/// Commits only `paths`, leaving anything else staged or changed alone.
+fn commit_paths(dir: &std::path::Path, paths: &[&str], message: &str) -> bool {
+    let mut add = vec!["add", "--"];
+    add.extend_from_slice(paths);
+    let mut commit = vec![
+        "-c",
+        "user.name=gitagent",
+        "-c",
+        "user.email=gitagent@localhost",
+        "commit",
+        "--quiet",
+        "-m",
+        message,
+        "--",
+    ];
+    commit.extend_from_slice(paths);
+    git(dir, &add) && git(dir, &commit)
+}
+
 /// Starts a git repository in `dir` if it is not inside one; gives a note
 /// for the user when something happened.
 fn start_git(dir: &std::path::Path) -> Option<String> {
@@ -183,4 +210,46 @@ pub(crate) fn ensure_repo(dir: &std::path::Path) -> Option<String> {
         return Some(format!("{note}; committed what was there"));
     }
     Some(note)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scaffolding_in_a_repository_commits_only_its_own_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        assert!(git(d, &["init", "--quiet"]));
+        std::fs::write(d.join("app.py"), "print(1)\n").unwrap();
+        assert!(commit_all(d, "init"));
+        // The user's work in progress: a change and a new file.
+        std::fs::write(d.join("app.py"), "print(2)\n").unwrap();
+        std::fs::write(d.join("notes.txt"), "draft\n").unwrap();
+
+        let (created, note) = scaffold(d, "app", "anthropic:m", None).unwrap();
+        assert!(created.contains(&"agent.yaml"), "{created:?}");
+        assert!(note.contains("committed"), "{note}");
+        let shown = Command::new("git")
+            .args(["show", "--name-only", "--format=", "HEAD"])
+            .current_dir(d)
+            .output()
+            .unwrap();
+        let files = String::from_utf8_lossy(&shown.stdout).to_string();
+        assert!(files.contains("agent.yaml"), "{files}");
+        assert!(
+            !files.contains("app.py") && !files.contains("notes.txt"),
+            "{files}"
+        );
+        let status = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(d)
+            .output()
+            .unwrap();
+        let status = String::from_utf8_lossy(&status.stdout).to_string();
+        assert!(
+            status.contains(" M app.py") && status.contains("?? notes.txt"),
+            "{status}"
+        );
+    }
 }

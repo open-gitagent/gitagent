@@ -386,8 +386,13 @@ impl Runner {
 
     /// Fires schedules as they come due until Ctrl-C (or `max_runs` jobs).
     async fn serve(&mut self, max_runs: Option<u32>) -> ExitCode {
-        let offset = local_offset();
+        // When each schedule last fired: its next time is always later, even
+        // when a job ends within the second it was due.
+        let mut fired: std::collections::HashMap<String, i64> = Default::default();
         loop {
+            // Read every time round, so a change of daylight-saving time
+            // moves the schedules with the clock.
+            let offset = local_offset();
             let (found, problems) = schedules::discover(&self.dir);
             for p in problems {
                 eprintln!("gitagent schedule: warning: {p}");
@@ -395,7 +400,10 @@ impl Runner {
             let now = now_unix();
             let mut due: Vec<(i64, Schedule)> = found
                 .into_iter()
-                .filter_map(|s| s.next_after(now - 1, offset).map(|t| (t, s)))
+                .filter_map(|s| {
+                    let from = fired.get(&s.id).map_or(now - 1, |&t| t.max(now - 1));
+                    s.next_after(from, offset).map(|t| (t, s))
+                })
                 .collect();
             due.sort_by_key(|(t, _)| *t);
             if self.runs == 0 {
@@ -433,10 +441,11 @@ impl Runner {
                     .into_iter()
                     .find(|s| s.id == next.id);
                 match still {
-                    Some(s) if s.enabled && s.next_after(at - 1, offset) == Some(at) => {}
+                    Some(s) if s.enabled && s.next_after(at - 1, local_offset()) == Some(at) => {}
                     _ => continue,
                 }
             }
+            fired.insert(next.id.clone(), at);
             self.job(&next, next.once).await;
             if max_runs.is_some_and(|n| self.runs >= n) {
                 return ExitCode::SUCCESS;

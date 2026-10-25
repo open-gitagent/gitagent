@@ -194,8 +194,80 @@ fn read_markdown(file: &Path, shown: &str) -> Result<Workflow, String> {
 
 fn read_yaml(file: &Path, shown: &str) -> Result<Workflow, String> {
     let text = std::fs::read_to_string(file).map_err(|e| e.to_string())?;
-    let v: Value = serde_saphyr::from_str(&text).map_err(|e| format!("not valid YAML: {e}"))?;
+    let mut v: Value = serde_saphyr::from_str(&text).map_err(|e| format!("not valid YAML: {e}"))?;
+    steps_in_file_order(&text, &mut v);
     parse(&v, shown)
+}
+
+/// The keys of the `steps:` mapping in the order the file has them.
+struct StepKeys(Vec<String>);
+
+impl<'de> serde::Deserialize<'de> for StepKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Keys;
+        impl<'de> serde::de::Visitor<'de> for Keys {
+            type Value = StepKeys;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("the steps")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<StepKeys, A::Error> {
+                let mut keys = Vec::new();
+                while let Some(k) = map.next_key::<String>()? {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                    keys.push(k);
+                }
+                Ok(StepKeys(keys))
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<StepKeys, A::Error> {
+                while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+                Ok(StepKeys(Vec::new()))
+            }
+        }
+        d.deserialize_any(Keys)
+    }
+}
+
+/// The parsed value keeps mapping keys sorted, so a `steps:` mapping (the
+/// README's form, keyed by step id) is turned into the list form in the
+/// order of the file; steps without a prompt then still follow each other
+/// as written.
+fn steps_in_file_order(text: &str, v: &mut Value) {
+    #[derive(serde::Deserialize)]
+    struct Doc {
+        #[serde(default)]
+        steps: Option<StepKeys>,
+    }
+    let Some(Value::Object(map)) = v.get("steps") else {
+        return;
+    };
+    let Ok(Doc {
+        steps: Some(StepKeys(order)),
+    }) = serde_saphyr::from_str::<Doc>(text)
+    else {
+        return;
+    };
+    if order.len() != map.len() {
+        return;
+    }
+    let list: Vec<Value> = order
+        .iter()
+        .filter_map(|id| {
+            let mut step = map.get(id)?.clone();
+            if let Value::Object(o) = &mut step {
+                o.insert("id".into(), Value::String(id.clone()));
+            }
+            Some(step)
+        })
+        .collect();
+    if list.len() == order.len() {
+        v["steps"] = Value::Array(list);
+    }
 }
 
 /// A workflow from its YAML value.
@@ -527,6 +599,18 @@ fn compare(a: &Value, op: &str, b: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_steps_mapping_keeps_the_order_of_the_file() {
+        let text = "name: w\nsteps:\n  gather: {prompt: Collect the data}\n  analyze: {prompt: Analyze it}\n";
+        let mut v: Value = serde_saphyr::from_str(text).unwrap();
+        steps_in_file_order(text, &mut v);
+        let wf = parse(&v, "w.yaml").unwrap();
+        let ids: Vec<&str> = wf.steps.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["gather", "analyze"]);
+        assert_eq!(wf.steps[1].depends_on, ["gather"]);
+        assert!(wf.steps[0].depends_on.is_empty());
+    }
     use serde_json::json;
 
     #[test]

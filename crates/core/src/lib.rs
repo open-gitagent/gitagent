@@ -879,6 +879,7 @@ pub async fn run(
                                     approver: opts.approver.clone(),
                                     kill: opts.kill.clone(),
                                 },
+                                started: Instant::now(),
                             };
                             let done =
                                 plan::run(spec, provider, &run_call, &children, &events, at_once)

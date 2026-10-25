@@ -19,7 +19,8 @@
 //! `fail_open` (the loader's default for plain hooks, as in 1.x) that is a
 //! warning and the action goes on; a compliance hook, or one with
 //! `fail_open: false`, blocks. Output that is not such an answer (a log
-//! line, or JSON without `action`) means allow, as it did in 1.x. With several hooks for an event they run in file
+//! line, or JSON without a known `action`) means allow, as it did in 1.x,
+//! except for a hook that fails closed, where it counts as a failure. With several hooks for an event they run in file
 //! order, each seeing the changes of the ones before; the first block wins.
 
 use std::path::{Path, PathBuf};
@@ -236,9 +237,17 @@ impl AgentHooks {
         if stdout.trim().is_empty() {
             return Ok(Answer::Allow);
         }
-        // As in 1.x: anything that is not an answer means allow.
+        // As in 1.x, anything that is not an answer means allow; a hook that
+        // fails closed (compliance, or `fail_open: false`) has failed instead.
+        let not_an_answer = |what: &str| {
+            if hook.fail_open {
+                Ok(Answer::Allow)
+            } else {
+                Err(format!("{what}: {}", cut_line(stdout.trim())))
+            }
+        };
         let Ok(answer) = serde_json::from_str::<Value>(stdout.trim()) else {
-            return Ok(Answer::Allow);
+            return not_an_answer("its output is not a JSON answer");
         };
         let reason = || {
             answer["reason"]
@@ -252,8 +261,18 @@ impl AgentHooks {
             Some("modify") => Ok(Answer::Modify(
                 answer.as_object().cloned().unwrap_or_default(),
             )),
-            _ => Ok(Answer::Allow),
+            _ => not_an_answer("its answer has no known action"),
         }
+    }
+}
+
+/// The first line of a hook's output, short enough for a message.
+fn cut_line(text: &str) -> String {
+    let line = text.lines().next().unwrap_or_default();
+    if line.chars().count() > 120 {
+        format!("{}…", line.chars().take(120).collect::<String>())
+    } else {
+        line.to_string()
     }
 }
 
@@ -346,17 +365,27 @@ esac"#,
     async fn failures_block_unless_fail_open() {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path();
-        // Output that is not an answer allows, as in 1.x.
+        // Output that is not an answer allows, as in 1.x; a hook that fails
+        // closed blocks on it instead.
         for body in [
             "echo not json",
             "echo '{\"ok\": true}'",
-            "echo '{\"action\": \"whatever\"}'",
+            "echo '{\"action\": \"deny\"}'",
         ] {
-            let e = hook(d, HookEvent::PreQuery, body, false);
-            let h = hooks(d, vec![e]);
+            let open = hook(d, HookEvent::PreQuery, body, true);
+            let h = hooks(d, vec![open]);
             assert_eq!(
                 h.fire(HookEvent::PreQuery, None, Map::new()).await,
                 Decision::Allow,
+                "{body}"
+            );
+            let closed = hook(d, HookEvent::PreQuery, body, false);
+            let h = hooks(d, vec![closed]);
+            assert!(
+                matches!(
+                    h.fire(HookEvent::PreQuery, None, Map::new()).await,
+                    Decision::Block { .. }
+                ),
                 "{body}"
             );
         }

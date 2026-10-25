@@ -381,7 +381,6 @@ fn help(s: &Setup) {
         "gitagent validate dir",
         "check the agent's files (--compliance for the rules)",
     );
-    row("gitagent ui -d dir", "a local web page for the agent");
     row("gitagent --help", "every flag");
     println!();
 }

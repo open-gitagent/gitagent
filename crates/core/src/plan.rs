@@ -6,8 +6,7 @@
 //! the earlier phases' results after the first phase). A phase's tasks run
 //! `at_once` at a time; the next phase starts when the whole phase is done.
 //! Events `plan` (phase_start, task_start, task_end, phase_end,
-//! reconcile_start, reconcile_end) let the console and the page show the
-//! lanes.
+//! reconcile_start, reconcile_end) let the console draw the task board.
 
 use gitagent_provider::ToolCall;
 use gitagent_record::Events;
@@ -24,6 +23,9 @@ const MAX_PHASES: usize = 10;
 /// output directory under the plan's.
 pub(crate) struct Children {
     pub template: ChildRun,
+    /// When the plan started: each task gets the time left from
+    /// `template.remaining` minus what the plan has used so far.
+    pub started: std::time::Instant,
 }
 
 impl Children {
@@ -32,7 +34,9 @@ impl Children {
         ChildRun {
             cwd: t.cwd.clone(),
             out_dir: t.out_dir.join(format!("tasks/{n}")),
-            remaining: t.remaining,
+            remaining: t
+                .remaining
+                .map(|r| r.saturating_sub(self.started.elapsed())),
             sandbox: t.sandbox.clone(),
             hooks: t.hooks.clone(),
             mcp: t.mcp.clone(),

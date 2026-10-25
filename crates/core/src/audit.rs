@@ -126,8 +126,16 @@ impl AuditLog {
                 "approval",
                 object(json!({"turn": turn, "id": e["id"], "approved": e["approved"], "reason": e["reason"]})),
             ),
-            "guard" if e["kind"] == "hook_block" => {
-                self.write("blocked", object(json!({"turn": turn, "reason": e["reason"]})));
+            "guard" if e["kind"] == "hook_block" || e["kind"] == "compliance_block" => {
+                let by = if e["kind"] == "hook_block" {
+                    "hook"
+                } else {
+                    "compliance"
+                };
+                self.write(
+                    "blocked",
+                    object(json!({"turn": turn, "by": by, "reason": e["reason"]})),
+                );
             }
             "run_end" => self.write(
                 "run_end",
