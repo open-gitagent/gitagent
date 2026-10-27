@@ -104,6 +104,13 @@ fn install(
         .trim_end_matches(".git")
         .to_string();
     let name = name.unwrap_or(&base);
+    for n in [name, base.as_str()] {
+        if !gitagent_loader::manifest::is_plain_name(n) {
+            return Err(format!(
+                "the plugin name {n:?} must not contain `/`, `\\` or be `.` or `..`; pass --name"
+            ));
+        }
+    }
     let mut fields = vec![("enabled", Value::Bool(enable))];
     let dest = if is_git_source(source) {
         let dest = root.join(".gitagent/plugins").join(&base);
@@ -200,6 +207,9 @@ fn list(root: &Path) -> Result<String, String> {
 }
 
 fn remove(root: &Path, name: &str) -> Result<String, String> {
+    if !gitagent_loader::manifest::is_plain_name(name) {
+        return Err(format!("{name:?} is not a plugin name"));
+    }
     let mut removed = None;
     for dir in [
         root.join("plugins").join(name),

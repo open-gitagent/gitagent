@@ -511,20 +511,67 @@ pub fn git_clone(url: &str, dest: &Path, branch: Option<&str>) -> Result<(), Str
 }
 
 /// A dependency's mount point: `mount`, else `.gitagent/deps/<name>`.
-pub fn dependency_mount(root: &Path, dep: &Value) -> Option<(String, PathBuf)> {
-    let name = dep["name"].as_str()?.trim().to_string();
-    let mount = dep["mount"]
+pub fn dependency_mount(root: &Path, dep: &Value) -> Result<(String, PathBuf), String> {
+    let name = dep["name"]
         .as_str()
-        .map(|m| root.join(m.trim()))
-        .unwrap_or_else(|| root.join(".gitagent/deps").join(&name));
-    Some((name, mount))
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .ok_or("has no `name`")?
+        .to_string();
+    if !is_plain_name(&name) {
+        return Err(format!(
+            "the name {name:?} must not contain `/`, `\\` or be `.` or `..`"
+        ));
+    }
+    let mount = match dep["mount"].as_str().map(str::trim) {
+        Some(m) => inside(root, m).map_err(|e| format!("its `mount` {e}"))?,
+        None => root.join(".gitagent/deps").join(&name),
+    };
+    Ok((name, mount))
+}
+
+/// A name usable as one folder name: not empty, no path separator, not
+/// `.` or `..`.
+pub fn is_plain_name(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', '\0'])
+}
+
+/// `rel` joined to `root`, refused when it is absolute or climbs out of
+/// `root` with `..`, so nothing outside the agent's folder is written or
+/// deleted on its say-so.
+pub fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let p = Path::new(rel);
+    if rel.is_empty() || p.is_absolute() || p.has_root() {
+        return Err(format!("{rel:?} must be a path inside the agent's folder"));
+    }
+    let mut depth: usize = 0;
+    for part in p.components() {
+        match part {
+            std::path::Component::Normal(_) => depth += 1,
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                depth = depth
+                    .checked_sub(1)
+                    .ok_or_else(|| format!("{rel:?} leads outside the agent's folder"))?;
+            }
+            _ => return Err(format!("{rel:?} must be a path inside the agent's folder")),
+        }
+    }
+    if depth == 0 {
+        return Err(format!("{rel:?} is the agent's folder itself"));
+    }
+    Ok(root.join(p))
 }
 
 /// Warns about dependencies that are not installed.
 fn dependencies_present(root: &Path, manifest: &Manifest, warnings: &mut Vec<String>) {
     for dep in &manifest.dependencies {
-        let Some((name, mount)) = dependency_mount(root, dep) else {
-            continue;
+        let (name, mount) = match dependency_mount(root, dep) {
+            Ok(m) => m,
+            Err(e) => {
+                warnings.push(format!("a dependency {e}"));
+                continue;
+            }
         };
         if !mount.join("agent.yaml").is_file() {
             warnings.push(format!(

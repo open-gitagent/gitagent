@@ -66,9 +66,12 @@ pub(crate) fn run(args: &[std::ffi::OsString]) -> ExitCode {
         report("parent", install_parent(&root, src, cli.force));
     }
     for dep in manifest["dependencies"].as_array().into_iter().flatten() {
-        let Some((name, mount)) = dependency_mount(&root, dep) else {
-            report("dependency", Err("has no `name`".into()));
-            continue;
+        let (name, mount) = match dependency_mount(&root, dep) {
+            Ok(m) => m,
+            Err(e) => {
+                report("dependency", Err(e));
+                continue;
+            }
         };
         let source = dep["source"].as_str().map(str::trim).unwrap_or_default();
         let version = dep["version"].as_str().map(str::trim);
@@ -123,6 +126,13 @@ fn install_dependency(
     if mount.join("agent.yaml").is_file() && !force {
         return Ok(format!(
             "already at {} (use --force to replace it)",
+            mount.display()
+        ));
+    }
+    // Something else is there: only `--force` may replace it.
+    if mount.exists() && !force {
+        return Err(format!(
+            "{} exists and is not an installed agent; move it away or use --force to replace it",
             mount.display()
         ));
     }

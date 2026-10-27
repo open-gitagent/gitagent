@@ -251,7 +251,18 @@ fn interactive_session_continues_between_tasks() {
         std::fs::read_to_string(dir.path().join("x.txt")).unwrap(),
         "7\n"
     );
-    assert!(dir.path().join("logs/task-2/trajectory.json").exists());
+    let session = std::fs::read_dir(dir.path().join("logs"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("console-")
+        })
+        .expect("a session folder");
+    assert!(session.join("task-2/trajectory.json").exists());
 }
 
 #[test]
@@ -1703,7 +1714,23 @@ fn interactive_commands() {
             && stderr.contains("● completed · 1 model call"),
         "{stderr}"
     );
-    let t = std::fs::read_to_string(dir.path().join("out/task-1/trajectory.json")).unwrap();
+    // Each console session writes under its own `console-…` folder.
+    let session = std::fs::read_dir(dir.path().join("out"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("console-")
+        })
+        .expect("a session folder");
+    assert!(
+        stderr.contains(&format!("records: {}", session.display())),
+        "{stderr}"
+    );
+    let t = std::fs::read_to_string(session.join("task-1/trajectory.json")).unwrap();
     assert!(
         t.contains("Use the skill `release-notes` for this request")
             && t.contains("Group the changes.")
@@ -2293,4 +2320,60 @@ fn schedules_are_listed_run_and_fired_when_due() {
     let (code, out, _) = schedule(&["remove", "ticker"]);
     assert_eq!(code, Some(0));
     assert!(out.contains("removed") && !agent.join("schedules/ticker.yaml").exists());
+}
+
+/// `gitagent install` never deletes outside the agent's folder, and inside
+/// it replaces something that is not an installed agent only with --force.
+#[test]
+fn install_keeps_to_the_agent_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let precious = dir.path().join("precious");
+    std::fs::create_dir_all(&precious).unwrap();
+    std::fs::write(precious.join("data.txt"), "important").unwrap();
+    let agent = dir.path().join("agent");
+    std::fs::create_dir_all(agent.join("agents/local")).unwrap();
+    std::fs::write(agent.join("agents/local/notes.txt"), "mine").unwrap();
+    let absolute = precious.display().to_string();
+    for (mount, name) in [
+        ("../precious", "up"),
+        (absolute.as_str(), "abs"),
+        ("agents/local", "local"),
+    ] {
+        std::fs::write(
+            agent.join("agent.yaml"),
+            format!("name: kid\nversion: 1.0.0\ndescription: Kid.\ndependencies:\n  - {{name: {name}, source: ../nowhere, mount: \"{mount}\"}}\n"),
+        )
+        .unwrap();
+        let out = gitagent().arg("install").arg(&agent).output().unwrap();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!out.status.success(), "{mount}: {text}");
+        assert!(
+            text.contains("inside the agent's folder")
+                || text.contains("leads outside")
+                || text.contains("use --force"),
+            "{mount}: {text}"
+        );
+    }
+    assert!(
+        precious.join("data.txt").is_file(),
+        "outside the agent: untouched"
+    );
+    assert!(
+        agent.join("agents/local/notes.txt").is_file(),
+        "not an installed agent: kept without --force"
+    );
+
+    // A dependency name that is a path is refused too.
+    std::fs::write(
+        agent.join("agent.yaml"),
+        "name: kid\nversion: 1.0.0\ndescription: Kid.\ndependencies:\n  - {name: \"..\", source: ../nowhere}\n",
+    )
+    .unwrap();
+    let out = gitagent().arg("install").arg(&agent).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("must not contain"));
 }
