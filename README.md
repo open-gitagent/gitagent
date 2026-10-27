@@ -247,7 +247,7 @@ Pass@k is the chance that at least one of k runs passes:
 | 3 h 20 min | 5 | 100.0% | 100.0% | 100.0% | [job](https://hub.harborframework.com/jobs/1d8e0bdb-7ae5-4ec7-8e54-329007590e9d) |
 | **all** | **445** | **93.03% ±0.8** | | | |
 
-Two of the 89 tasks start a virtual machine inside the task container, which this host cannot do, and no harness has passed them here; without those two the mean is 95.2%. The ±0.8 is the standard error across the five runs (93.3, 95.5, 92.1, 92.1 and 92.1%), the measure the official leaderboard shows; across tasks, the 95% interval is 88.8–96.9%, which answers the wider question of how the score would hold on a different set of tasks. It cost $112.85, about $0.25 per run, with 92% of the input tokens served from the prompt cache.
+Two of the 89 tasks start a virtual machine inside the container, which this host can't do, so every harness fails them here; without them the score is 95.2%. The ±0.8 is the run-to-run variation, the measure the official leaderboard uses: the five runs scored 93.3, 95.5, 92.1, 92.1 and 92.1%. The run cost $112.85, about $0.25 per run, with 91% of the input tokens served from the prompt cache.
 
 ### Why it scores higher than the other harnesses
 
@@ -273,7 +273,7 @@ The model is the same across these comparisons, so the difference lies in what t
 - Old tool results are cleared in batches through the provider's own context editing once the conversation grows past 50,000 tokens.
 - Reminders, such as the time left, are added at the end of the conversation and never written into earlier turns.
 
-**Why it helps.** The last rule matters more than it seems. Providers cache the start of a conversation, and any change to an earlier message invalidates the cache from that point on. Because gitagent never rewrites history, 92% of the input tokens in the published run were served from the cache, which makes each call faster and about ten times cheaper per token. The model's attention stays on recent, relevant output.
+**Why it helps.** The last rule matters more than it seems. Providers cache the start of a conversation, and any change to an earlier message invalidates the cache from that point on. Because gitagent never rewrites history, 91% of the input tokens in the published run were served from the cache. That makes each call faster, and on Opus 5.5 a cache read costs a twentieth of normal input. The model's attention stays on recent, relevant output.
 
 #### 3. The harness keeps track of time and repetition
 
@@ -311,11 +311,11 @@ Most agents are a prompt, a model and a bag of tools, and the interesting part i
 
 **Output is shaped before the model sees it.** A build log is ten thousand lines; the model needs the head, the tail and the exit code. Every command result is cut to a budget: long output is spilled to a file, runs of similar lines (progress bars, repeated warnings) collapse to their first and last line, and a one-line status carries the exit code, the line count and the path of the spill file, so the model can ask for the rest if it matters. Fewer tokens per turn means more turns before the context is full, and more of each turn spent on the task.
 
-**Reminders are appended, never injected.** The time left is shown on every result, and a reminder fires when the budget runs low. These go after the turn's results, never into earlier turns. Changing an earlier turn would invalidate the provider's prompt cache and the model's thinking blocks, so the whole history stays byte-identical and 92% of the input is served from cache. That is where the cost per run comes from.
+**Reminders are appended, never injected.** The time left is shown on every result, and a reminder fires when the budget runs low. These go after the turn's results, never into earlier turns. Changing an earlier turn would invalidate the provider's prompt cache and the model's thinking blocks, so the whole history stays byte-identical and 91% of the input is served from cache. That is where the cost per run comes from.
 
 **The loop detector.** If the model makes the same tool call with the same arguments and gets the same output three times in a row, it is told so and asked to change approach. Runaway loops are where other harnesses burn a time budget and a bill: a model that returns empty replies can be re-sent the whole growing conversation until the clock runs out. gitagent breaks the loop at the third identical call.
 
-**Context is managed, not truncated.** Old tool results are cleared in batches through the provider's own context editing, which does not count as a history edit. Near the end of the window the history is replaced by a structured summary, done, pending, key files, last failure, ruled out, with the original task repeated verbatim by the harness rather than paraphrased by the model, so the goal never drifts.
+**Context is managed, not truncated.** Old tool results are cleared in batches through the provider's own context editing. Each clear invalidates the cache from the point it clears, so clearing waits until the prompt is large and then removes a lot at once. Near the end of the window the history is replaced by a structured summary, done, pending, key files, last failure, ruled out, with the original task repeated verbatim by the harness rather than paraphrased by the model, so the goal never drifts.
 
 **Done means verified.** `task_complete` is accepted only when the run shows a verification after the last edit. A completion without evidence is sent back with the task repeated. It is a small rule with a large effect: it catches the case where the model is confident and wrong.
 
