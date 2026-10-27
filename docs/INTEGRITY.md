@@ -14,6 +14,10 @@ How gitagent keeps benchmark results honest, and how to check it.
 | Development tasks kept apart from scoring tasks | Changes are developed and measured on one set of tasks; the tasks used to score are kept apart, and their runs are not used to change the code. |
 | No critic that rewrites answers | The stop check only accepts or rejects `task_complete`; it never changes the agent's work. |
 
+## How certain the score is
+
+The headline 93.03% ±0.8 is the mean of five runs over all 89 tasks; the ±0.8 is the standard error across the runs (93.3, 95.5, 92.1, 92.1 and 92.1%), the measure the official leaderboard reports. It does not cover a different question: how the score would hold on a different set of tasks. Resampling the 89 tasks with replacement 20,000 times gives a 95% range of 88.8–96.9%. It is wider because most tasks either always pass or always fail, so which tasks are in the set matters more than run-to-run variation. Against the highest published entry, 91.4%, the lead holds by the leaderboard's measure but sits inside this wider range.
+
 ## Audit
 
 ```
