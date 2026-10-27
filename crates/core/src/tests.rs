@@ -2472,3 +2472,43 @@ async fn the_tests_guard_applies_to_benchmark_runs_only() {
     let r = run_script(&bench, "x", script).await;
     assert!(first_result(&r.trajectory()).contains("Refused: nothing may be written under /tests"));
 }
+
+#[test]
+fn cleared_results_are_counted_once() {
+    let mut last = 0;
+    // Calls report 0, 8, 8, 12 cleared: 12 distinct results in all.
+    let counted: u64 = [0, 8, 8, 12]
+        .into_iter()
+        .map(|n| newly_cleared(&mut last, n))
+        .sum();
+    assert_eq!(counted, 12);
+    // A compaction replaces the history: a lower count starts again.
+    assert_eq!(newly_cleared(&mut last, 3), 0);
+    assert_eq!(newly_cleared(&mut last, 5), 2);
+}
+
+#[test]
+fn huge_or_odd_payment_amounts_are_unreadable_and_so_blocked() {
+    let call = |args: Value| gitagent_provider::ToolCall {
+        id: "p".into(),
+        name: "pay".into(),
+        arguments: args.as_object().unwrap().clone(),
+    };
+    for args in [
+        json!({"amount": 1e30}),
+        json!({"amount_cents": 1e25}),
+        json!({"amount_cents": "1e30"}),
+        json!({"amount": -5}),
+        json!({"amount": "five dollars"}),
+    ] {
+        assert!(
+            matches!(
+                crate::approval::payment_of(&call(args.clone())),
+                Some(Err(_))
+            ),
+            "{args}"
+        );
+    }
+    let ok = crate::approval::payment_of(&call(json!({"amount": "$1,500.25"})));
+    assert_eq!(ok.unwrap().unwrap().cents, 150_025);
+}

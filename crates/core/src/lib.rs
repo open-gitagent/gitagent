@@ -438,6 +438,9 @@ pub async fn run(
     let mut overflow_compactions = 0;
     let mut total = Usage::default();
     let mut turns = 0;
+    // Tool results the provider reported cleared on the last call: each call
+    // reports all of them again, so only the increase is new.
+    let mut server_cleared: u64 = 0;
     let mut no_tool_turns = 0;
     let outcome = loop {
         if let Some(reason) = blocked.take() {
@@ -555,7 +558,10 @@ pub async fn run(
             Err(e) => break Outcome::ProviderFailed(e.to_string()),
         };
         prompt_tokens = resp.usage.input_tokens.max(prompt_tokens);
-        counters.add("masks_applied", resp.cleared_tool_results);
+        counters.add(
+            "masks_applied",
+            newly_cleared(&mut server_cleared, resp.cleared_tool_results),
+        );
         if resp.tool_calls.is_empty() && spec.profile.tool_calling != ToolCalling::Native {
             let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
             let calls = fallback::parse_text_calls(&resp.text, &names, turns);
@@ -2077,6 +2083,16 @@ impl Compaction<'_> {
         *messages = vec![Message::user_text(first)];
         message_tokens(messages)
     }
+}
+
+/// Tool results the provider cleared for the first time on this call. Each
+/// call reports every result it cleared, old ones included, so only the
+/// increase over the last call is new; after a compaction the history is
+/// new and the count starts again.
+fn newly_cleared(last: &mut u64, now: u64) -> u64 {
+    let new = now.saturating_sub(*last);
+    *last = now;
+    new
 }
 
 /// How many times one model call was retried, and why.

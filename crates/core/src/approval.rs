@@ -174,11 +174,20 @@ fn cents_of(v: &Value, scale: f64) -> Option<u64> {
         })
     })?;
     let cents = n * scale;
-    if !cents.is_finite() || cents < 0.0 || (scale == 1.0 && cents.fract() != 0.0) {
+    if !cents.is_finite()
+        || cents < 0.0
+        || cents > MAX_PAYMENT_CENTS as f64
+        || (scale == 1.0 && cents.fract() != 0.0)
+    {
         return None;
     }
     Some(cents.round() as u64)
 }
+
+/// The largest amount read as a payment: a trillion dollars. Anything above
+/// it is unreadable (and so blocked), which keeps every sum far from
+/// overflowing.
+const MAX_PAYMENT_CENTS: u64 = 100_000_000_000_000;
 
 impl<'a> Gate<'a> {
     pub fn new(
@@ -243,6 +252,9 @@ impl<'a> Gate<'a> {
             return;
         };
         let mut state = self.state();
+        if !state["spending"].is_object() {
+            state["spending"] = json!({});
+        }
         state["spending"][month] = json!(cents);
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -254,7 +266,8 @@ impl<'a> Gate<'a> {
         self.state_file
             .as_ref()
             .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|t| serde_json::from_str(&t).ok())
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .filter(Value::is_object)
             .unwrap_or_else(|| json!({}))
     }
 
@@ -322,16 +335,21 @@ impl<'a> Gate<'a> {
         let _held = SPENDING.lock().unwrap_or_else(|e| e.into_inner());
         let month = this_month();
         let spent = self.state()["spending"][&month].as_u64().unwrap_or(0);
+        let Some(total) = spent.checked_add(p.cents) else {
+            return Some(
+                "the payment would overflow this month's spending record (financial governance)"
+                    .into(),
+            );
+        };
         if let Some(cap) = f.max_monthly_cents {
-            if spent + p.cents > cap {
+            if total > cap {
                 return Some(format!(
-                    "{} cents would take this month's spending to {} of the {cap} allowed (financial governance)",
-                    p.cents,
-                    spent + p.cents
+                    "{} cents would take this month's spending to {total} of the {cap} allowed (financial governance)",
+                    p.cents
                 ));
             }
         }
-        self.write_spent(&month, spent + p.cents);
+        self.write_spent(&month, total);
         self.reserved
             .lock()
             .unwrap_or_else(|e| e.into_inner())

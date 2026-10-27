@@ -48,6 +48,18 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
     let mut resume: Option<Resume> = None;
     let mut n = 0;
     let session_id = format!("gitagent-{}", std::process::id());
+    // Each console session keeps its records in a folder of its own, so a
+    // new session never overwrites an earlier one's.
+    let session_dir = out_dir.join(format!(
+        "console-{}-{}",
+        gitagent_record::utc_now_rfc3339()
+            .chars()
+            .take(19)
+            .collect::<String>()
+            .replace(':', ""),
+        std::process::id()
+    ));
+    eprintln!("{}", st.dim(&format!("records: {}", session_dir.display())));
     let mcp = crate::connect_mcp(&s.spec).await;
     loop {
         let line = if editing {
@@ -94,7 +106,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
             let opts = RunOptions {
                 instruction: String::new(),
                 work_dir: s.work_dir.clone(),
-                out_dir: out_dir.join(format!("task-{n}")),
+                out_dir: session_dir.join(format!("task-{n}")),
                 timeout: s.timeout_set,
                 session_id: Some(session_id.clone()),
                 events: s.events.clone(),
@@ -147,7 +159,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
         let opts = RunOptions {
             instruction: task,
             work_dir: s.work_dir.clone(),
-            out_dir: out_dir.join(format!("task-{n}")),
+            out_dir: session_dir.join(format!("task-{n}")),
             timeout: s.timeout_set,
             session_id: Some(session_id.clone()),
             events: events.clone(),
@@ -191,7 +203,7 @@ pub(crate) async fn run(s: Setup, out_dir: &Path) -> Result<()> {
         let opts = RunOptions {
             instruction: String::new(),
             work_dir: s.work_dir.clone(),
-            out_dir: out_dir.join("teardown"),
+            out_dir: session_dir.join("teardown"),
             timeout: s.timeout_set,
             session_id: Some(session_id.clone()),
             events: s.events.clone(),

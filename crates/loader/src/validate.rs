@@ -745,16 +745,19 @@ fn manifest_extras(doc: &mut Doc, m: &Value, root: &Path) {
         }
     }
     for dep in m["dependencies"].as_array().into_iter().flatten() {
-        if let Some((name, mount)) = crate::manifest::dependency_mount(root, dep) {
-            if !mount.join("agent.yaml").is_file() {
-                doc.warn(
-                    "dependencies",
-                    format!(
-                        "{name:?} is not installed at {}; run `gitagent install`",
-                        mount.display()
-                    ),
-                );
+        match crate::manifest::dependency_mount(root, dep) {
+            Ok((name, mount)) => {
+                if !mount.join("agent.yaml").is_file() {
+                    doc.warn(
+                        "dependencies",
+                        format!(
+                            "{name:?} is not installed at {}; run `gitagent install`",
+                            mount.display()
+                        ),
+                    );
+                }
             }
+            Err(e) => doc.error("dependencies", format!("a dependency {e}")),
         }
     }
     if let Some(agents) = m["agents"].as_object() {
