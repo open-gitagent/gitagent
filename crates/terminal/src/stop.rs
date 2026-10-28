@@ -16,6 +16,12 @@ use nix::unistd::Pid;
 const TERM_GRACE: Duration = Duration::from_secs(1);
 const TERM_POLL: Duration = Duration::from_millis(20);
 
+/// How long the shell's jobs get to start before it is hung up. The shell
+/// passes its SIGHUP on to every job, and `nohup` ignores SIGHUP only once it
+/// runs, so a job forked just before the hang-up (`nohup server &` as the
+/// last command) would die with the shell.
+const JOB_START_GRACE: Duration = Duration::from_millis(200);
+
 /// Sends SIGTERM to every process group in the shell's session, waits up to
 /// [`TERM_GRACE`] for them to exit, then sends SIGKILL to whatever is left,
 /// the shell included. `tty` is the shell's terminal; `foreground` is that
@@ -45,6 +51,13 @@ pub(crate) fn stop_foreground(shell: Pid, foreground: Option<Pid>) {
     };
     terminate(&[group], shell);
     signal_groups(&[group], Signal::SIGKILL);
+}
+
+/// Waits [`JOB_START_GRACE`] if the shell has jobs, before it is hung up.
+pub(crate) fn let_jobs_start(shell: Pid, tty: Option<&Path>) {
+    if session_groups(shell, tty).iter().any(|&group| group != shell) {
+        std::thread::sleep(JOB_START_GRACE);
+    }
 }
 
 /// Sends SIGTERM to `groups` and waits up to [`TERM_GRACE`] for all of them

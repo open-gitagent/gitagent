@@ -305,7 +305,8 @@ impl Session {
 
     /// Stops the shell and the command it is running. Background jobs get
     /// the shell's SIGHUP, as when a terminal window closes, so jobs started
-    /// with `nohup` (e.g. a server) keep running.
+    /// with `nohup` (e.g. a server) keep running, including one started just
+    /// before the hang-up.
     pub(crate) fn hang_up(&mut self) {
         self.end_shell(Ending::Foreground);
     }
@@ -315,12 +316,13 @@ impl Session {
             if let Some(pid) = shell.child.process_id().and_then(|p| i32::try_from(p).ok()) {
                 let pid = Pid::from_raw(pid);
                 let foreground = shell.master.process_group_leader().map(Pid::from_raw);
+                let tty = shell.master.tty_name();
                 match ending {
-                    Ending::Session => {
-                        let tty = shell.master.tty_name();
-                        stop::stop_session(pid, tty.as_deref(), foreground);
+                    Ending::Session => stop::stop_session(pid, tty.as_deref(), foreground),
+                    Ending::Foreground => {
+                        stop::stop_foreground(pid, foreground);
+                        stop::let_jobs_start(pid, tty.as_deref());
                     }
-                    Ending::Foreground => stop::stop_foreground(pid, foreground),
                 }
             }
             // SIGHUP, then SIGKILL, to the shell. Errors only mean it already
