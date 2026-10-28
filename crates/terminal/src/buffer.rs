@@ -80,7 +80,10 @@ impl OutputBuffer {
                 return None;
             };
             let line = String::from_utf8_lossy(&self.data[line_start..line_start + nl]);
-            let (code, cwd) = line.split_once(' ').unwrap_or((&line, ""));
+            // A terminal that still maps `\n` to `\r\n` (seen on macOS) ends
+            // the line with `\r`, which would otherwise end up in the cwd.
+            let line = line.trim_end_matches('\r');
+            let (code, cwd) = line.split_once(' ').unwrap_or((line, ""));
             let Ok(exit) = code.parse::<i32>() else {
                 // Not our marker (for example the text of the printf format).
                 from = line_start;
@@ -168,6 +171,17 @@ mod tests {
         let (m, t) = b.take_marker(3).unwrap();
         assert_eq!(m.exit, 1);
         assert_eq!(t.output, b"x\n__GA_END_2__ 0 /\n\n__GA_END_3__ %s %s\ny");
+    }
+
+    #[test]
+    fn strips_carriage_return_from_the_marker_cwd() {
+        let mut b = OutputBuffer::new(1 << 20);
+        b.push(b"out\r\n__GA_END_4__ 0 /tmp/dir\r\nrest");
+        let (m, t) = b.take_marker(4).unwrap();
+        assert_eq!(m.exit, 0);
+        assert_eq!(m.cwd, "/tmp/dir");
+        assert_eq!(t.output, b"out\r");
+        assert_eq!(b.take_all().output, b"rest");
     }
 
     #[test]

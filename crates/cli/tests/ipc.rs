@@ -325,6 +325,63 @@ fn steering_and_abort() {
     assert!(is("system", "session_end")(rest.last().unwrap()));
 }
 
+fn process_exists(pid: &str) -> bool {
+    Command::new("kill")
+        .args(["-0", pid])
+        .stderr(Stdio::null())
+        .status()
+        .unwrap()
+        .success()
+}
+
+#[test]
+fn sigterm_stops_the_running_command() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let model = script(
+        tmp.path(),
+        "s.yaml",
+        "- tool_calls: [{name: exec, arguments: {cmd: \"sh -c 'echo $$ > pid.txt; exec sleep 300'\", yield_ms: 60000}}]\n\
+         - text: \"unreachable\"\n",
+    );
+    let mut s = Session::start(tmp.path(), &tmp.path().join("out"));
+    s.send(json!({"type": "initialize", "protocol": 1, "options": {"model": model, "dir": work, "sessionId": "sig"}}));
+    s.until(is("system", "session_start"));
+    s.send(json!({"type": "user", "content": "sleep"}));
+    s.until(|m| m["type"] == "tool_use");
+    let pid_file = work.join("pid.txt");
+    let mut pid = String::new();
+    for _ in 0..100 {
+        pid = std::fs::read_to_string(&pid_file)
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if !pid.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(process_exists(&pid), "the command did not start: {pid:?}");
+
+    let gitagent = s.child.id().to_string();
+    assert!(Command::new("kill")
+        .args(["-TERM", &gitagent])
+        .status()
+        .unwrap()
+        .success());
+    let code = s.child.wait().unwrap().code();
+    assert_eq!(code, Some(143));
+    // The shell is gone at once; its orphaned command is reaped shortly after.
+    for _ in 0..100 {
+        if !process_exists(&pid) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("pid {pid} survived SIGTERM");
+}
+
 #[test]
 fn startup_problems_and_blocking_hooks() {
     let tmp = tempfile::tempdir().unwrap();

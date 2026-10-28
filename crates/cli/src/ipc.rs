@@ -704,13 +704,37 @@ pub(crate) async fn run(cli: Cli) -> ! {
             let _ = stdout.flush().await;
         }
     });
-    // `session` drops its shells and MCP servers before returning.
-    let code = session(cli, out.clone()).await;
+    // `session` drops its shells and MCP servers before returning. A stop
+    // signal drops it too, so the commands the shells run do not outlive us.
+    let code = tokio::select! {
+        code = session(cli, out.clone()) => code,
+        signal = stop_signal() => 128 + signal,
+    };
     out.send(Value::Null);
     let _ = writer.await;
     // The stdin reader may still be waiting in a blocking read the runtime
     // would wait for (a client may keep its end open after `session_end`).
     std::process::exit(code)
+}
+
+/// Waits for SIGTERM or SIGINT and returns its number.
+async fn stop_signal() -> i32 {
+    use tokio::signal::unix::{signal, SignalKind};
+    let wait_for = |kind: SignalKind| async move {
+        match signal(kind) {
+            Ok(mut stream) => {
+                stream.recv().await;
+                kind.as_raw_value()
+            }
+            // No handler was installed, so the signal keeps its default
+            // action (ending the process) and this branch never fires.
+            Err(_) => std::future::pending().await,
+        }
+    };
+    tokio::select! {
+        number = wait_for(SignalKind::terminate()) => number,
+        number = wait_for(SignalKind::interrupt()) => number,
+    }
 }
 
 async fn session(cli: Cli, out: Out) -> i32 {
