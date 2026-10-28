@@ -16,7 +16,9 @@
 //! ```
 //!
 //! Script paths are relative to `hooks/` and must stay inside the agent
-//! directory. Problems are warnings and the hook is left out.
+//! directory. Problems are warnings and the hook is left out, except for a
+//! compliance or fail-closed hook: one that cannot be loaded stops the agent
+//! from starting, since leaving it out would let through what it blocks.
 
 use std::path::Path;
 use std::time::Duration;
@@ -113,8 +115,9 @@ pub struct HookEntry {
 }
 
 /// The hooks in an agent directory's `hooks/hooks.yaml`, in file order, and
-/// what was wrong with the rest.
-pub fn load(agent: &AgentDir) -> (Vec<HookEntry>, Vec<String>) {
+/// what was wrong with the rest. A compliance or fail-closed hook that
+/// cannot be loaded is an error.
+pub fn load(agent: &AgentDir) -> Result<(Vec<HookEntry>, Vec<String>), String> {
     // The child's hooks, else the nearest parent's.
     let base = agent
         .file_root("hooks/hooks.yaml")
@@ -122,33 +125,51 @@ pub fn load(agent: &AgentDir) -> (Vec<HookEntry>, Vec<String>) {
     let path = base.join("hooks/hooks.yaml");
     let mut warnings = Vec::new();
     let Ok(text) = std::fs::read_to_string(&path) else {
-        return (Vec::new(), warnings);
+        return Ok((Vec::new(), warnings));
     };
     let root: Value = match serde_saphyr::from_str(&text) {
         Ok(v) => v,
         Err(e) => {
             warnings.push(format!("hooks/hooks.yaml: not valid YAML: {e}"));
-            return (Vec::new(), warnings);
+            return Ok((Vec::new(), warnings));
         }
     };
     let Some(events) = root.get("hooks").and_then(Value::as_object) else {
         warnings.push("hooks/hooks.yaml: no `hooks:` mapping".into());
-        return (Vec::new(), warnings);
+        return Ok((Vec::new(), warnings));
+    };
+    let required = |name: &str, i: usize, why: &str| {
+        format!(
+            "hooks/hooks.yaml: {name}[{i}]: {why}; it is a compliance or fail-closed hook, \
+             so the agent cannot run without it"
+        )
     };
     let mut entries = Vec::new();
     for (name, list) in events {
+        let hooks = list.as_array().map(Vec::as_slice).unwrap_or_default();
         let Some(event) = HookEvent::parse(name) else {
+            if let Some(i) = hooks.iter().position(is_fail_closed) {
+                return Err(required(name, i, &format!("unknown event {name:?}")));
+            }
             warnings.push(format!("hooks/hooks.yaml: unknown event {name:?}"));
             continue;
         };
-        for (i, v) in list.as_array().into_iter().flatten().enumerate() {
+        for (i, v) in hooks.iter().enumerate() {
             match entry(event, v, &base) {
                 Ok(e) => entries.push(e),
+                Err(why) if is_fail_closed(v) => return Err(required(name, i, &why)),
                 Err(why) => warnings.push(format!("hooks/hooks.yaml: {name}[{i}]: {why}")),
             }
         }
     }
-    (entries, warnings)
+    Ok((entries, warnings))
+}
+
+/// Whether a hook's settings say a failure must block: a compliance hook,
+/// or one with `fail_open: false`.
+fn is_fail_closed(v: &Value) -> bool {
+    v.get("compliance").and_then(Value::as_bool) == Some(true)
+        || v.get("fail_open").and_then(Value::as_bool) == Some(false)
 }
 
 /// The event named `name`, if there is one.
@@ -231,6 +252,16 @@ fn entry(event: HookEvent, v: &Value, root: &Path) -> Result<HookEntry, String> 
             crate::sdk::normalize_tool_list(&names)
         })
         .unwrap_or_default();
+    let compliance = flag("compliance");
+    // As in 1.x, a hook that fails is a warning, not a block, unless it
+    // is a compliance hook or says otherwise. A compliance hook always blocks.
+    let fail_open = match v.get("fail_open").and_then(Value::as_bool) {
+        Some(true) if compliance => {
+            return Err("a compliance hook cannot set `fail_open: true`".into())
+        }
+        Some(open) => open,
+        None => !compliance,
+    };
     let mut command = crate::declared::interpreter(None, &path);
     command.push(path.display().to_string());
     Ok(HookEntry {
@@ -243,13 +274,8 @@ fn entry(event: HookEvent, v: &Value, root: &Path) -> Result<HookEntry, String> 
             .unwrap_or_default()
             .to_string(),
         timeout,
-        compliance: flag("compliance"),
-        // As in 1.x, a hook that fails is a warning, not a block, unless it
-        // is a compliance hook or says otherwise.
-        fail_open: v
-            .get("fail_open")
-            .and_then(Value::as_bool)
-            .unwrap_or(!flag("compliance")),
+        compliance,
+        fail_open,
         applies_to,
     })
 }
@@ -280,7 +306,7 @@ mod tests {
         )
         .unwrap();
         let agent = AgentDir::load(root).unwrap().unwrap();
-        let (hooks, warnings) = load(&agent);
+        let (hooks, warnings) = load(&agent).unwrap();
         assert_eq!(hooks.len(), 3);
         let a = &hooks[0];
         assert_eq!(
@@ -313,5 +339,58 @@ mod tests {
                 "{warnings:?}"
             );
         }
+    }
+
+    /// An agent directory whose hooks/ holds `present.sh` and `hooks_yaml`.
+    fn agent_with_hooks(dir: &Path, hooks_yaml: &str) -> AgentDir {
+        std::fs::write(
+            dir.join("agent.yaml"),
+            "name: t\nversion: 1.0.0\ndescription: d\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("SOUL.md"), "I test.\n").unwrap();
+        std::fs::create_dir_all(dir.join("hooks")).unwrap();
+        std::fs::write(dir.join("hooks/present.sh"), "true\n").unwrap();
+        std::fs::write(dir.join("hooks/hooks.yaml"), hooks_yaml).unwrap();
+        AgentDir::load(dir).unwrap().unwrap()
+    }
+
+    #[test]
+    fn a_compliance_or_fail_closed_hook_that_cannot_load_is_an_error() {
+        for (hooks_yaml, expected) in [
+            (
+                "hooks:\n  pre_tool_use:\n    - {script: present.sh}\n    - {script: missing.sh, compliance: true}\n",
+                "pre_tool_use[1]: the script hooks/missing.sh does not exist",
+            ),
+            (
+                "hooks:\n  pre_tool_use:\n    - {script: missing.sh, fail_open: false}\n",
+                "the script hooks/missing.sh does not exist",
+            ),
+            (
+                "hooks:\n  pre_tool_usee:\n    - {script: present.sh, compliance: true}\n",
+                "unknown event \"pre_tool_usee\"",
+            ),
+            (
+                "hooks:\n  pre_tool_use:\n    - {script: present.sh, compliance: true, fail_open: true}\n",
+                "a compliance hook cannot set `fail_open: true`",
+            ),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let agent = agent_with_hooks(dir.path(), hooks_yaml);
+            let err = load(&agent).expect_err(hooks_yaml);
+            assert!(err.contains(expected), "{err}");
+            assert!(err.contains("cannot run without it"), "{err}");
+        }
+
+        // An ordinary hook that cannot load is still only a warning.
+        let dir = tempfile::tempdir().unwrap();
+        let agent = agent_with_hooks(
+            dir.path(),
+            "hooks:\n  pre_tool_use:\n    - {script: missing.sh}\n    - {script: present.sh, compliance: true}\n",
+        );
+        let (hooks, warnings) = load(&agent).unwrap();
+        assert_eq!(hooks.len(), 1);
+        assert!(hooks[0].compliance && !hooks[0].fail_open);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
     }
 }

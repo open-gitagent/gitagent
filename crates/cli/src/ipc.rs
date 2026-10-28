@@ -30,11 +30,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gitagent_core::{
-    Approval, ApprovalRequest, Approver, ExternalTools, Outcome, Resume, RunOptions, Steering,
+    Approval, ApprovalRequest, Approver, ExternalTools, Outcome, Resume, RunOptions, RunReport,
+    Steering,
 };
 use gitagent_hooks::{Decision, ToolHooks};
 use gitagent_loader::v1;
-use gitagent_provider::{Message, ToolSpec};
+use gitagent_provider::{Message, ToolSpec, Usage};
 use gitagent_record::Events;
 use serde_json::{json, Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -401,6 +402,47 @@ struct Totals {
 }
 
 impl Totals {
+    /// `usage` from `requests` model calls, priced at `prices`.
+    fn priced(prices: Option<gitagent_sdk::Prices>, usage: &Usage, requests: u64) -> Totals {
+        Totals {
+            input: usage.input_tokens,
+            output: usage.output_tokens,
+            cache_read: usage.cache_read_tokens,
+            cache_write: usage.cache_write_tokens,
+            cost: gitagent_sdk::cost_of(
+                prices,
+                &gitagent_sdk::Usage {
+                    input_tokens: usage.input_tokens,
+                    output_tokens: usage.output_tokens,
+                    cache_read_input_tokens: usage.cache_read_tokens,
+                    cache_creation_input_tokens: usage.cache_write_tokens,
+                },
+            ),
+            requests,
+        }
+    }
+
+    fn add(&mut self, other: &Totals) {
+        self.input += other.input;
+        self.output += other.output;
+        self.cache_read += other.cache_read;
+        self.cache_write += other.cache_write;
+        self.cost += other.cost;
+        self.requests += other.requests;
+    }
+
+    /// What was added since `before`.
+    fn since(&self, before: &Totals) -> Totals {
+        Totals {
+            input: self.input - before.input,
+            output: self.output - before.output,
+            cache_read: self.cache_read - before.cache_read,
+            cache_write: self.cache_write - before.cache_write,
+            cost: self.cost - before.cost,
+            requests: self.requests - before.requests,
+        }
+    }
+
     fn json(&self) -> Value {
         json!({
             "inputTokens": self.input,
@@ -420,10 +462,31 @@ struct Stream {
     cb: Arc<Callbacks>,
     provider: String,
     prices: Option<gitagent_sdk::Prices>,
-    totals: Mutex<Totals>,
+    /// The model calls streamed so far: the parent's only, since sub-agents
+    /// run without events.
+    streamed: Mutex<Totals>,
 }
 
 impl Stream {
+    fn streamed(&self) -> Totals {
+        *self.streamed.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// What a run used. A finished run's report has every model call,
+    /// its sub-agents' included; without one, only the streamed calls since
+    /// `before` are known.
+    fn run_usage(&self, report: Option<&RunReport>, before: &Totals) -> Totals {
+        let streamed = self.streamed().since(before);
+        match report {
+            Some(r) => Totals::priced(
+                self.prices,
+                &r.usage,
+                streamed.requests + r.counters.get("subagent_turns"),
+            ),
+            None => streamed,
+        }
+    }
+
     fn feed(&self, e: &Value) {
         let kind = e["event"].as_str().unwrap_or_default();
         match kind {
@@ -472,31 +535,17 @@ impl Stream {
         }
         let u = &e["usage"];
         let n = |k: &str| u[k].as_u64().unwrap_or(0);
-        let turn = Totals {
-            input: n("input_tokens"),
-            output: n("output_tokens"),
-            cache_read: n("cache_read_tokens"),
-            cache_write: n("cache_write_tokens"),
-            cost: gitagent_sdk::cost_of(
-                self.prices,
-                &gitagent_sdk::Usage {
-                    input_tokens: n("input_tokens"),
-                    output_tokens: n("output_tokens"),
-                    cache_read_input_tokens: n("cache_read_tokens"),
-                    cache_creation_input_tokens: n("cache_write_tokens"),
-                },
-            ),
-            requests: 1,
+        let usage = Usage {
+            input_tokens: n("input_tokens"),
+            output_tokens: n("output_tokens"),
+            cache_read_tokens: n("cache_read_tokens"),
+            cache_write_tokens: n("cache_write_tokens"),
         };
-        {
-            let mut t = self.totals.lock().unwrap_or_else(|e| e.into_inner());
-            t.input += turn.input;
-            t.output += turn.output;
-            t.cache_read += turn.cache_read;
-            t.cache_write += turn.cache_write;
-            t.cost += turn.cost;
-            t.requests += 1;
-        }
+        let turn = Totals::priced(self.prices, &usage, 1);
+        self.streamed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .add(&turn);
         let (stop, error) = match (
             e["tool_calls"].as_u64().unwrap_or(0),
             e["stop_reason"].as_str(),
@@ -611,6 +660,31 @@ fn session_file(dir: &Path, id: &str) -> Result<PathBuf, String> {
         .join(".gitagent/sessions")
         .join(id)
         .join("messages.json"))
+}
+
+/// Locks the stored session `id` for this process (an advisory lock on a
+/// `lock` file next to the conversation). The lock lasts as long as the
+/// returned file is open; the system drops it when the process ends, so a
+/// crashed process leaves nothing to clean up.
+fn lock_session(store: &Path, id: &str) -> Result<std::fs::File, String> {
+    let path = store.with_file_name("lock");
+    let cannot = |e: std::io::Error| format!("the session lock {} failed: {e}", path.display());
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(cannot)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(cannot)?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(format!(
+            "session {id:?} is open in another process; end that one first or use another sessionId"
+        )),
+        Err(std::fs::TryLockError::Error(e)) => Err(cannot(e)),
+    }
 }
 
 pub(crate) async fn run(cli: Cli) -> ! {
@@ -772,6 +846,16 @@ async fn session(cli: Cli, out: Out) -> i32 {
     } else {
         None
     };
+    // Held until the process ends, so a second process cannot load and
+    // overwrite the same stored conversation.
+    let _session_lock = match store
+        .as_deref()
+        .map(|p| lock_session(p, &session_id))
+        .transpose()
+    {
+        Ok(lock) => lock,
+        Err(e) => return fatal(&out, e),
+    };
     let agent_name = s
         .spec
         .agent
@@ -803,7 +887,7 @@ async fn session(cli: Cli, out: Out) -> i32 {
         cb: cb.clone(),
         provider: s.spec.model.provider.clone(),
         prices,
-        totals: Mutex::new(Totals::default()),
+        streamed: Mutex::new(Totals::default()),
     });
 
     let (mcp, warnings) = gitagent_core::connect_mcp(&s.spec).await;
@@ -956,6 +1040,8 @@ async fn session(cli: Cli, out: Out) -> i32 {
         .has("approval")
         .then(|| Arc::new(ClientApprover(cb.clone())) as Arc<dyn Approver>);
 
+    // Every model call of the session, sub-agents' included.
+    let mut session_usage = Totals::default();
     let mut queue: VecDeque<String> = VecDeque::new();
     let mut ending = false;
     let mut n = 0;
@@ -994,7 +1080,7 @@ async fn session(cli: Cli, out: Out) -> i32 {
             let stream = stream.clone();
             Events::to_callback(move |e| stream.feed(&e))
         };
-        let before = *stream.totals.lock().unwrap_or_else(|e| e.into_inner());
+        let before = stream.streamed();
         let opts = RunOptions {
             instruction: content,
             work_dir: s.work_dir.clone(),
@@ -1040,15 +1126,12 @@ async fn session(cli: Cli, out: Out) -> i32 {
         for late in ctl.steering.take().into_iter().rev() {
             queue.push_front(late);
         }
-        let after = *stream.totals.lock().unwrap_or_else(|e| e.into_inner());
-        let turn_usage = Totals {
-            input: after.input - before.input,
-            output: after.output - before.output,
-            cache_read: after.cache_read - before.cache_read,
-            cache_write: after.cache_write - before.cache_write,
-            cost: after.cost - before.cost,
-            requests: after.requests - before.requests,
-        };
+        let report = result
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map(|f| &f.report);
+        let turn_usage = stream.run_usage(report, &before);
+        session_usage.add(&turn_usage);
         match result {
             None => {
                 out.system(
@@ -1145,7 +1228,14 @@ async fn session(cli: Cli, out: Out) -> i32 {
             external_tools: external.clone(),
             throttle: None,
         };
-        match gitagent_core::teardown(&s.spec, s.provider.as_ref(), opts).await {
+        let before = stream.streamed();
+        let done = gitagent_core::teardown(&s.spec, s.provider.as_ref(), opts).await;
+        let report = done
+            .as_ref()
+            .and_then(|r| r.as_ref().ok())
+            .map(|f| &f.report);
+        session_usage.add(&stream.run_usage(report, &before));
+        match done {
             Some(Ok(done)) => out.system(
                 "teardown",
                 done.report.summary.clone().unwrap_or_default(),
@@ -1174,8 +1264,7 @@ async fn session(cli: Cli, out: Out) -> i32 {
             }
         }
     }
-    let totals = *stream.totals.lock().unwrap_or_else(|e| e.into_inner());
-    end["costs"] = totals.json();
+    end["costs"] = session_usage.json();
     out.system(
         "session_end",
         format!("Agent {agent_name} finished"),

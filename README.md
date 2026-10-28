@@ -490,11 +490,11 @@ done
 | `system/ready`, `system/session_start` | After `initialize`: the session id, the agent, the model, the tools |
 | `user`, `delta`, `assistant`, `tool_use`, `tool_result` | As the turn runs; `assistant` carries `usage` and `costUsd` |
 | `callback_request` (`kind`: `hook`, `tool` or `approval`) | The binary needs your answer; reply with `callback_response` and the same `id` |
-| `system/turn_end` | A turn finished, with its `outcome` and usage |
+| `system/turn_end` | A turn finished, with its `outcome` and usage (sub-agents' model calls included) |
 | `system/warning`, `system/error`, `system/hook_blocked` | Something to show; the session goes on unless the error was fatal |
-| `system/session_end` | Last message, with the session's costs |
+| `system/session_end` | Last message, with the session's costs (sub-agents' included) |
 
-With `resume: true` the conversation is stored after every turn under `.gitagent/sessions/<sessionId>/`, and a new process started with the same `sessionId` continues it.
+With `resume: true` the conversation is stored after every turn under `.gitagent/sessions/<sessionId>/`, and a new process started with the same `sessionId` continues it. One process at a time holds a stored session: a second one opened while the first runs gets `system/error` and stops.
 
 ### Rust
 

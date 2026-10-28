@@ -371,6 +371,115 @@ fn startup_problems_and_blocking_hooks() {
     assert_eq!(code, 0);
 }
 
+/// Sub-agents run without events, but what they use counts in the turn's
+/// and the session's usage.
+#[test]
+fn usage_includes_sub_agents() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("work");
+    agent(&work, "");
+    std::fs::create_dir_all(work.join("agents")).unwrap();
+    std::fs::write(
+        work.join("agents/helper.md"),
+        "---\nname: helper\ndescription: Looks things up.\n---\nAnswer briefly.\n",
+    )
+    .unwrap();
+    // The parent starts the helper, the helper answers, the parent replies.
+    let model = script(
+        tmp.path(),
+        "s.yaml",
+        "- tool_calls: [{name: subagent, arguments: {description: look up, prompt: \"Find the answer.\", agent: helper}}]\n\
+         - text: \"The answer is 42.\"\n\
+         - text: \"It is 42.\"\n",
+    );
+    let mut s = Session::start(tmp.path(), &tmp.path().join("out"));
+    s.send(json!({
+        "type": "initialize", "protocol": 1,
+        "options": {"model": model, "dir": work, "prices": {"input": 100.0, "output": 100.0}}
+    }));
+    s.until(is("system", "session_start"));
+    s.send(json!({"type": "user", "content": "what is the answer?"}));
+    let turn = s.until(is("system", "turn_end"));
+    let streamed: Vec<&Value> = turn.iter().filter(|m| m["type"] == "assistant").collect();
+    assert_eq!(
+        streamed.len(),
+        2,
+        "only the parent's model calls are streamed"
+    );
+    let streamed_input: u64 = streamed
+        .iter()
+        .map(|m| m["usage"]["inputTokens"].as_u64().unwrap())
+        .sum();
+    let streamed_cost: f64 = streamed
+        .iter()
+        .map(|m| m["usage"]["costUsd"].as_f64().unwrap())
+        .sum();
+    let end = turn.last().unwrap();
+    assert_eq!(end["metadata"]["result"], "It is 42.");
+    let usage = &end["metadata"]["usage"];
+    assert_eq!(usage["requests"], 3, "{usage}");
+    assert!(
+        usage["inputTokens"].as_u64().unwrap() > streamed_input,
+        "{usage}, streamed {streamed_input}"
+    );
+    assert!(
+        usage["costUsd"].as_f64().unwrap() > streamed_cost,
+        "{usage}, streamed {streamed_cost}"
+    );
+    s.send(json!({"type": "end"}));
+    let (code, rest) = s.finish();
+    assert_eq!(code, 0);
+    let session_end = rest.last().unwrap();
+    assert!(is("system", "session_end")(session_end));
+    assert_eq!(&session_end["metadata"]["costs"], usage);
+}
+
+/// Two processes on one stored session would each save over the other's
+/// conversation, so the second is refused while the first runs.
+#[test]
+fn a_stored_session_is_open_in_one_process_at_a_time() {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let model = script(tmp.path(), "s.yaml", "- text: \"hi\"\n");
+    let open = |out: &str| {
+        let mut s = Session::start(tmp.path(), &tmp.path().join(out));
+        s.send(json!({
+            "type": "initialize", "protocol": 1,
+            "options": {"model": model, "dir": work, "sessionId": "shared", "resume": true}
+        }));
+        s
+    };
+    let mut first = open("out1");
+    first.until(is("system", "session_start"));
+
+    let (code, rest) = open("out2").finish();
+    assert_eq!(code, 2);
+    let error = rest
+        .iter()
+        .find(|m| is("system", "error")(m))
+        .expect("an error");
+    assert!(
+        error["content"]
+            .as_str()
+            .unwrap()
+            .contains("session \"shared\" is open in another process"),
+        "{error}"
+    );
+    assert!(is("system", "session_end")(rest.last().unwrap()));
+    assert!(!rest.iter().any(|m| is("system", "session_start")(m)));
+
+    // The first goes on, and once it has ended the session opens again.
+    first.send(json!({"type": "user", "content": "hello"}));
+    first.until(is("system", "turn_end"));
+    first.send(json!({"type": "end"}));
+    assert_eq!(first.finish().0, 0);
+    let mut again = open("out3");
+    again.until(is("system", "session_start"));
+    again.send(json!({"type": "end"}));
+    assert_eq!(again.finish().0, 0);
+}
+
 /// 1.x's `repo` option: the session works in a clone on a session branch
 /// and the changes are committed and pushed when it ends; a second session
 /// with `session` set to that branch reuses the clone and resumes it.
