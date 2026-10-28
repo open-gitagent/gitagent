@@ -84,8 +84,12 @@ impl Terminal {
         let mut session = Session::start(cfg).await?;
         let mut r = session.exec(cmd, yield_ms).await?;
         r.session = id;
+        // A finished session only hangs up, so a server it started with
+        // `nohup` keeps running for the rest of the run (and for `--linger`).
         if session.is_running() {
             self.sessions.insert(id, session);
+        } else {
+            session.hang_up();
         }
         Ok(r)
     }
@@ -103,7 +107,9 @@ impl Terminal {
         r.session = id;
         // A background session is done once its command finishes.
         if id != MAIN_SESSION && !session.is_running() {
-            self.sessions.remove(&id);
+            if let Some(mut done) = self.sessions.remove(&id) {
+                done.hang_up();
+            }
         }
         Ok(r)
     }
@@ -250,5 +256,35 @@ mod tests {
         assert!(err.to_string().contains("too many sessions"));
         t.kill_all();
         assert!(t.background_sessions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_finished_background_session_leaves_nohup_jobs_until_the_terminal_ends() {
+        use crate::tests::{parse_pid, process_exists, wait_until_gone};
+        let (_d, mut t) = start().await;
+        let r = t
+            .exec("nohup sleep 300 >/dev/null 2>&1 & echo $!", 5000, true)
+            .await
+            .unwrap();
+        assert!(r.finished);
+        assert!(t.background_sessions().is_empty());
+        let pid = parse_pid(&r);
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(
+            process_exists(pid),
+            "the nohup job was stopped with its session"
+        );
+
+        let r = t.exec("sleep 300 & echo $!", 5000, false).await.unwrap();
+        let main_job = parse_pid(&r);
+        drop(t);
+        assert!(wait_until_gone(main_job).await, "pid {main_job} survived");
+        // The finished session's job is no longer the terminal's to stop.
+        assert!(process_exists(pid));
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid),
+            nix::sys::signal::Signal::SIGKILL,
+        )
+        .expect("stopping the nohup job");
     }
 }

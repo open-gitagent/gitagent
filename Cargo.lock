@@ -610,6 +610,7 @@ name = "gitagent-terminal"
 version = "3.0.0"
 dependencies = [
  "anyhow",
+ "nix",
  "portable-pty",
  "tempfile",
  "tokio",

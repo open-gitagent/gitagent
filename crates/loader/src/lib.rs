@@ -312,7 +312,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         Some(a) => {
             let (mut tools, warnings) = declared::discover(a);
             a.warnings.extend(warnings);
-            let (mut hooks, warnings) = agent_hooks::load(a);
+            let (mut hooks, warnings) = agent_hooks::load(a).map_err(anyhow::Error::msg)?;
             a.warnings.extend(warnings);
             // Plugins add their tools and hooks after the agent's own.
             let taken: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
