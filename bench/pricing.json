@@ -1,0 +1,23 @@
+{
+  "_note": "USD per million tokens, used by scripts/dashboard.py to estimate costs. Edit when prices change; the dashboard labels every cost as an estimate from this file.",
+  "_source": "Anthropic list prices as reported on 2026-10-15 (verify at platform.claude.com); OpenAI GPT-6 Astra figures from price aggregators on 2026-10-17, unverified against developers.openai.com/api/docs/pricing",
+  "claude-opus-5-5": {
+    "input": 4.0,
+    "output": 20.0,
+    "cache_read": 0.2,
+    "cache_write": 5.0
+  },
+  "claude-opus-5": {
+    "input": 5.0,
+    "output": 25.0,
+    "cache_read": 0.5,
+    "cache_write": 6.25
+  },
+  "gpt-6-astra": {
+    "input": 10.0,
+    "output": 50.0,
+    "cache_read": 1.0,
+    "cache_write": 10.0
+  },
+  "_note_openai": "OpenAI has no separate cache-write charge: the uncached part of a prompt (reported by the adapter as cache_write_tokens) is billed at the input price."
+}

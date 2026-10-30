@@ -1,0 +1,9 @@
+spec_version: "0.1.0"
+name: agent
+version: 0.1.0
+description: The agent agent.
+model:
+  preferred: claude-sonnet-5-5
+  fallback: []
+runtime:
+  max_turns: 50
