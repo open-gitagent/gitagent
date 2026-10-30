@@ -37,7 +37,8 @@ pub use memory::MemoryCfg;
 pub use plugins::Plugin;
 pub use profile::{
     AnthropicCfg, CacheCfg, ContextCfg, EditTool, Effort, GuardsCfg, Masking, OpenAiCfg, Profile,
-    ShapeCfg, StopCfg, ThinkingBinding, ThinkingDisplay, ToolCalling, ToolNaming, ToolsCfg,
+    Sampling, ShapeCfg, StopCfg, ThinkingBinding, ThinkingDisplay, ToolCalling, ToolNaming,
+    ToolsCfg,
 };
 pub use schedules::Schedule;
 pub use skills::{split_frontmatter, Skill};
@@ -299,7 +300,7 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         Some(path) => (read(path)?, path.display().to_string()),
         None => (DEFAULT_CONFIG.to_string(), "built-in".to_string()),
     };
-    let mut config: Config = serde_saphyr::from_str(&config_text)
+    let (mut config, unknown_settings) = config::parse(&config_text)
         .with_context(|| format!("parsing gitagent.yaml ({config_source})"))?;
 
     // An agent directory (`agent.yaml`) in the project: only outside
@@ -327,7 +328,10 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
 
     // The environment's settings (`config/`), only outside benchmark runs.
     let outside_bench = opts.project_dir.is_some() || opts.home_dir.is_some();
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<String> = unknown_settings
+        .iter()
+        .map(|key| format!("gitagent.yaml ({config_source}): `{key}` is not a setting; ignored"))
+        .collect();
     let env_config = match (&agent, outside_bench) {
         (Some(a), true) => {
             let from_var = std::env::var("GITAGENT_ENV").ok();
@@ -416,6 +420,19 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         }
         if let Some(n) = constraints.and_then(|c| c.max_tokens) {
             profile.max_output_tokens = n;
+        }
+        if let Some(c) = constraints {
+            profile.sampling = Sampling {
+                top_p: c.top_p,
+                top_k: c.top_k,
+                stop_sequences: c.stop_sequences.clone(),
+            };
+            for name in profile.sampling.unsupported(model.family()) {
+                warnings.push(format!(
+                    "model.constraints.{name} is not supported by {} models; ignored",
+                    model.family().as_str()
+                ));
+            }
         }
         if let Some(t) = env_config.temperature_override {
             profile.temperature = Some(t);
@@ -648,6 +665,21 @@ pub fn load(opts: &LoadOptions) -> Result<AgentSpec> {
         system_prompt.push('\n');
         system_prompt.push_str(&section);
     }
+    if let Some(a) = &agent {
+        let read = |name: &str| {
+            let relative = format!("compliance/{name}");
+            let root = a.file_root(&relative)?;
+            std::fs::read_to_string(root.join(relative)).ok()
+        };
+        let section = compliance::files_section(
+            read("regulatory-map.yaml").as_deref(),
+            read("validation-schedule.yaml").as_deref(),
+        );
+        if !section.is_empty() {
+            system_prompt.push('\n');
+            system_prompt.push_str(&section);
+        }
+    }
     let memory = match &opts.project_dir {
         Some(project) if agent.is_some() || config.memory => {
             Some(MemoryCfg::for_project(project, config.memory_commit)?)
@@ -722,7 +754,8 @@ pub fn load_config(config_path: Option<&Path>, home_dir: Option<&Path>) -> Resul
         Some(p) => read(p)?,
         None => DEFAULT_CONFIG.to_string(),
     };
-    serde_saphyr::from_str(&text).context("parsing gitagent.yaml")
+    let (config, _) = config::parse(&text).context("parsing gitagent.yaml")?;
+    Ok(config)
 }
 
 /// The built-in lessons, then each layer's `prompts/lessons.md` (lessons add
@@ -1002,16 +1035,29 @@ mod tests {
     }
 
     #[test]
-    fn unknown_config_keys_are_rejected() {
+    fn unknown_config_keys_are_warnings_and_wrong_values_errors() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("gitagent.yaml");
         std::fs::write(&path, "model: anthropic:x\nmax_turn: 7\n").unwrap();
+        let spec = load(&LoadOptions {
+            config_path: Some(path.clone()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            spec.warnings,
+            [format!(
+                "gitagent.yaml ({}): `max_turn` is not a setting; ignored",
+                path.display()
+            )]
+        );
+        std::fs::write(&path, "model: anthropic:x\nmax_turns: seven\n").unwrap();
         let err = load(&LoadOptions {
             config_path: Some(path),
             ..Default::default()
         })
         .unwrap_err();
-        assert!(format!("{err:#}").contains("max_turn"), "{err:#}");
+        assert!(format!("{err:#}").contains("max_turns"), "{err:#}");
     }
 
     #[test]
@@ -1195,6 +1241,71 @@ profile: quiet
             .unwrap();
         }
         dir
+    }
+
+    #[test]
+    fn sampling_constraints_reach_the_profile_and_unsupported_ones_warn() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("agent.yaml"),
+            "name: a\nversion: 1.0.0\ndescription: A.\nmodel:\n  preferred: google:gemini-x\n  constraints: {top_p: 0.9, top_k: 40, stop_sequences: [END]}\n",
+        )
+        .unwrap();
+        let load_with = |model: Option<&str>| {
+            load(&LoadOptions {
+                project_dir: Some(dir.path().to_path_buf()),
+                model: model.map(str::to_string),
+                ..Default::default()
+            })
+            .unwrap()
+        };
+        let spec = load_with(None);
+        assert_eq!(
+            spec.profile.sampling,
+            Sampling {
+                top_p: Some(0.9),
+                top_k: Some(40),
+                stop_sequences: vec!["END".into()],
+            }
+        );
+        assert!(spec.warnings.is_empty(), "{:?}", spec.warnings);
+        // OpenAI's API has no top_k or stop sequences: said, not silent.
+        let spec = load_with(Some("openai:gpt-x"));
+        assert_eq!(
+            spec.warnings,
+            [
+                "model.constraints.top_k is not supported by openai models; ignored",
+                "model.constraints.stop_sequences is not supported by openai models; ignored",
+            ]
+        );
+        // Without an agent (benchmark runs), nothing is set.
+        assert_eq!(
+            load(&opts("anthropic:m")).unwrap().profile.sampling,
+            Sampling::default()
+        );
+    }
+
+    #[test]
+    fn the_compliance_files_reach_the_system_prompt() {
+        let dir = agent_project();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("compliance")).unwrap();
+        std::fs::write(
+            root.join("compliance/regulatory-map.yaml"),
+            "frameworks:\n  SOC2: {}\n",
+        )
+        .unwrap();
+        let spec = load(&LoadOptions {
+            project_dir: Some(root.to_path_buf()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(
+            spec.system_prompt
+                .contains("\n# Compliance\n\nRegulatory frameworks: SOC2\n"),
+            "{}",
+            spec.system_prompt
+        );
     }
 
     #[test]

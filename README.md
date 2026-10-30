@@ -533,13 +533,24 @@ gitagent 3 replaces the TypeScript packages (1.x and 2.x) with one binary. What 
 - **Agent folders.** `agent.yaml`, `SOUL.md`, `RULES.md`, `memory/`, `skills/`, `tools/`, `hooks/`, `schedules/`, `workflows/`, `agents/`, `config/` and `.env` are read as they were. 1.x settings such as `tools: [cli, read, write, memory]`, `runtime.timeout` and the 1.x `compliance` shape are accepted; `gitagent validate` points out the newer spelling as a warning, never an error.
 - **Hook scripts.** They get the same JSON and answer the same way; output that is not an answer, or a script that crashes, allows the action with a warning, as before. Only hooks marked `compliance: true` or `fail_open: false`, which are new, block in those cases.
 - **The CLI.** `gitagent`, `-p`, `-d`, `-m`, `-e`, `--repo`, `--pat`, `--session` and the REPL's slash commands work as before.
-- **SDK code.** `query()`, `tool()`, hooks, `steer()`, `abort()`, the message types and the `repo` option are the same; the TypeScript package now needs the `gitagent` binary installed.
+- **SDK code.** `query()`, `tool()`, hooks, `steer()`, `abort()`, the message types and the `repo` option are the same; the TypeScript package now needs the `gitagent` binary installed. A `tool()` handler still gets the arguments and an `AbortSignal`, and may return a string, 1.x's `{text, details}` or `{content, isError}`.
+- **Model settings.** `model.constraints` (`temperature`, `max_tokens`, `top_p`, `top_k`, `stop_sequences`) are sent to the providers whose API takes them. OpenAI's API has no `top_k` or stop sequences, so those two are ignored there with a warning. Current Claude models reject `temperature`, `top_p` and `top_k`, so the model call fails; `gitagent validate` warns about them.
+- **Scripts.** A declared tool or hook ending in `.sh` runs under `sh`, as before, unless its `#!` line names another shell. Hooks get 10 seconds unless `hooks.yaml` sets `timeout`. A plugin's settings reach its script tools and hooks as environment variables (see `plugin.yaml`'s `env` names, or `GITAGENT_PLUGIN_CONFIG` for all of them as JSON).
+- **Compliance files.** The frameworks named in `compliance/regulatory-map.yaml` and the checks in `compliance/validation-schedule.yaml` are added to the system prompt, as before.
 
-What changed: the binary must be installed (one `curl` line, above); `--voice` and the remote `--sandbox` are not part of gitagent 3; a plugin's `entry` JavaScript is not run (plugins contribute tools, skills, hooks and prompt text through files); usage errors exit with 2, provider failures with 3 and interrupts with 130 instead of 1.
+### What changed
+
+- **Install.** The binary must be installed (one `curl` line, above). The TypeScript and Python packages drive it.
+- **Exit codes.** 1.x exited with 1 for every error. gitagent 3 exits with 0 when a run ends (also when it runs out of turns or time), 2 for usage and setup errors, 3 when the model provider fails, and 130 when the run is stopped. A script that only checks for a nonzero code works as before; one that checks for exactly 1 needs updating.
+- **Not carried over.** `--voice`; the remote `--sandbox` (the binary prints a one-line note); a plugin's `entry` JavaScript (plugins contribute tools, skills, hooks and prompt text through files); the 1.x telemetry adapter (OTLP export replaces it).
+- **Task list.** 1.x's `task_tracker` kept a searchable list of tasks. gitagent 3's `todo` is a plain checklist the agent rewrites whole; the name `task_tracker` still maps to it in tool lists and hooks.
+- **Learning.** 1.x's online skill learning, which adjusted a skill's confidence after each use, is gone. Lessons are learned from finished runs instead (`learning: online` or `gitagent learn`, below) and go into the system prompt; skills are not changed.
+- **Sandbox on macOS.** The sandbox is Linux-only (Landlock and seccomp). On macOS the agent's shell runs without one, where 1.x's remote sandbox worked on every system.
+- **Scripts without a runtime.** 1.x ran every declared tool with `sh` unless `runtime` was set. gitagent 3 picks the interpreter by extension (`.py` with `python3`, `.js` with `node`, `.rb` with `ruby`, …), so such tools now run instead of failing.
 
 ## Configuration
 
-gitagent reads `gitagent.yaml` from `--config`, else the project folder (`gitagent.yaml` or `.gitagent/gitagent.yaml`), else `~/.gitagent/gitagent.yaml`. The other files are looked up one by one in the same places (the config's folder, the project's `.gitagent/`, then `~/.gitagent/`, then the project's and home `.claude/`), and fall back to the built-in versions:
+gitagent reads `gitagent.yaml` from `--config`, else the project folder (`gitagent.yaml` or `.gitagent/gitagent.yaml`), else `~/.gitagent/gitagent.yaml`. The other files are looked up one by one in the same places (the config's folder, the project's `.gitagent/`, then `~/.gitagent/`, then the project's and home `.claude/`), and fall back to the built-in versions. A key that `gitagent.yaml` does not know is ignored with a warning, and `gitagent validate` checks the project's copy.
 
 | Path | What it is |
 |---|---|

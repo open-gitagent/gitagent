@@ -717,14 +717,31 @@ async fn session(cli: Cli, out: Out) -> i32 {
     if let Some(n) = c["maxTokens"].as_u64().or(c["max_tokens"].as_u64()) {
         s.spec.profile.max_output_tokens = n as u32;
     }
-    for key in ["topP", "topK"] {
-        if !c[key].is_null() {
-            out.system(
-                "warning",
-                format!("constraints.{key} is not supported; ignored"),
-                None,
-            );
-        }
+    let sampling = &mut s.spec.profile.sampling;
+    if let Some(p) = c["topP"].as_f64().or(c["top_p"].as_f64()) {
+        sampling.top_p = Some(p as f32);
+    }
+    if let Some(k) = c["topK"].as_u64().or(c["top_k"].as_u64()) {
+        sampling.top_k = Some(k as u32);
+    }
+    let stops = c.get("stopSequences").or(c.get("stop_sequences"));
+    if let Some(list) = stops.and_then(Value::as_array) {
+        sampling.stop_sequences = list
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect();
+    }
+    let family = s.spec.model.family();
+    for name in s.spec.profile.sampling.unsupported(family) {
+        out.system(
+            "warning",
+            format!(
+                "constraints.{name} is not supported by {} models; ignored",
+                family.as_str()
+            ),
+            None,
+        );
     }
     for (name, v) in o["mcpServers"].as_object().into_iter().flatten() {
         match gitagent_loader::mcp::parse(name, v, &s.work_dir) {

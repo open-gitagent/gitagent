@@ -30,7 +30,12 @@
 //! one with a git `source` is cloned into the last of those when missing.
 //! A plugin whose tool names collide with the agent's or an earlier
 //! plugin's is left out, as 1.x did.
+//!
+//! The plugin's settings reach its script tools and hook scripts: each one
+//! in the variable its property names (`SEARCH_API_KEY` above), and all of
+//! them as JSON in `GITAGENT_PLUGIN_CONFIG`.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value};
@@ -299,6 +304,28 @@ fn load_one(
             ));
         }
     }
+    // The settings reach the plugin's own scripts: each under the variable
+    // its property names, and all of them as JSON.
+    let mut env = BTreeMap::new();
+    for (key, prop) in m["config"]["properties"].as_object().into_iter().flatten() {
+        if let (Some(var), Some(v)) = (prop["env"].as_str(), config.get(key)) {
+            let text = match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            env.insert(var.to_string(), text);
+        }
+    }
+    env.insert(
+        "GITAGENT_PLUGIN_CONFIG".to_string(),
+        Value::Object(config.clone()).to_string(),
+    );
+    for t in &mut tools {
+        t.env = env.clone();
+    }
+    for h in &mut hooks {
+        h.env = env.clone();
+    }
     let plugin = Plugin {
         id,
         name: s("name").unwrap_or_else(|| name.to_string()),
@@ -405,6 +432,14 @@ mod tests {
         assert_eq!(search.config["api_key"], "from-env");
         assert_eq!(search.config["region"], "eu");
         assert_eq!(search.config["retries"], 2);
+        // The plugin's own tool and hook get its settings.
+        for env in [&loaded.tools[0].env, &loaded.hooks[0].env] {
+            assert_eq!(env["GITAGENT_TEST_PLUGIN_KEY"], "from-env");
+            assert_eq!(
+                env["GITAGENT_PLUGIN_CONFIG"],
+                r#"{"api_key":"from-env","region":"eu","retries":2}"#
+            );
+        }
         let w = loaded.warnings.join("\n");
         for expected in [
             "plugin web-dup: its tool \"web\" collides with an existing tool; left out",

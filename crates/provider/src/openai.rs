@@ -138,7 +138,11 @@ pub(crate) fn request_body(req: &ChatRequest, cfg: &OpenAiCfg) -> Value {
         "include": ["reasoning.encrypted_content"],
     });
     if let Some(t) = req.temperature {
-        body["temperature"] = crate::temperature_json(t);
+        body["temperature"] = crate::float_json(t);
+    }
+    // The Responses API has no top_k or stop sequences; the loader warns.
+    if let Some(p) = req.sampling.top_p {
+        body["top_p"] = crate::float_json(p);
     }
     if let Some(key) = &cfg.prompt_cache_key {
         body["prompt_cache_key"] = json!(key);

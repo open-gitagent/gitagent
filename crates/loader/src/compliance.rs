@@ -380,6 +380,52 @@ fn prompt_lines(c: &Value) -> String {
     format!("# Compliance constraints\n\n{}\n", lines.join("\n"))
 }
 
+/// What 1.x put in the prompt from `compliance/regulatory-map.yaml` (the
+/// frameworks it names) and `compliance/validation-schedule.yaml` (its
+/// checks). Unreadable files are left out, as in 1.x.
+pub fn files_section(regulatory_map: Option<&str>, validation_schedule: Option<&str>) -> String {
+    let yaml = |text: Option<&str>| text.and_then(|t| serde_saphyr::from_str::<Value>(t).ok());
+    let mut parts = Vec::new();
+    if let Some(map) = yaml(regulatory_map) {
+        let names: Vec<String> = match &map["frameworks"] {
+            Value::Object(o) => o.keys().cloned().collect(),
+            Value::Array(a) => a
+                .iter()
+                .filter_map(|f| f.as_str().or(f["name"].as_str()))
+                .map(str::to_string)
+                .collect(),
+            _ => Vec::new(),
+        };
+        if !names.is_empty() {
+            parts.push(format!("Regulatory frameworks: {}", names.join(", ")));
+        }
+    }
+    if let Some(schedule) = yaml(validation_schedule) {
+        let checks: Vec<String> = schedule["checks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| {
+                let mut line = format!("- {}", c["name"].as_str()?);
+                if let Some(f) = c["frequency"].as_str() {
+                    line.push_str(&format!(" ({f})"));
+                }
+                if let Some(d) = c["description"].as_str().filter(|d| !d.is_empty()) {
+                    line.push_str(&format!(": {d}"));
+                }
+                Some(line)
+            })
+            .collect();
+        if !checks.is_empty() {
+            parts.push(format!("Validation schedule:\n{}", checks.join("\n")));
+        }
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!("# Compliance\n\n{}\n", parts.join("\n\n"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,6 +446,27 @@ mod tests {
         let (s, _) = read(&json!({"human_in_the_loop": false}));
         assert_eq!(s.hitl, Hitl::None);
         assert!(!is_v1_shape(&json!({"risk_tier": "high"})));
+    }
+
+    #[test]
+    fn the_1x_compliance_files_are_summed_up_for_the_prompt() {
+        let map = "frameworks:\n  SOC2: {controls: [CC6.1]}\n  GDPR: {articles: [32]}\n";
+        let schedule = "checks:\n  - {name: Access review, frequency: quarterly, description: Review who has access}\n  - {name: Model drift}\n";
+        // Framework names in sorted order.
+        assert_eq!(
+            files_section(Some(map), Some(schedule)),
+            "# Compliance\n\nRegulatory frameworks: GDPR, SOC2\n\nValidation schedule:\n- Access review (quarterly): Review who has access\n- Model drift\n"
+        );
+        assert_eq!(
+            files_section(Some("frameworks: [HIPAA, {name: SOX}]\n"), None),
+            "# Compliance\n\nRegulatory frameworks: HIPAA, SOX\n"
+        );
+        // Missing, empty or unreadable files add nothing.
+        assert_eq!(files_section(None, Some("checks: [\n")), "");
+        assert_eq!(
+            files_section(Some("frameworks: {}\n"), Some("checks: []\n")),
+            ""
+        );
     }
 
     #[test]

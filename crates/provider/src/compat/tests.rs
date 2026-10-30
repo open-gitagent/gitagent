@@ -15,6 +15,7 @@ fn request(messages: Vec<Message>) -> ChatRequest {
         }],
         effort: Effort::Medium,
         temperature: Some(0.7),
+        sampling: Default::default(),
         max_output_tokens: 16000,
         cache: CachePlan::default(),
         server_masking: None,
@@ -132,4 +133,19 @@ fn parses_a_recorded_ollama_stream() {
     let r = parse(include_str!("ollama-stream.txt"), 4096).unwrap();
     assert_eq!(r.tool_calls.len(), 1, "{r:?}");
     assert_eq!(r.tool_calls[0].name, "exec");
+}
+
+#[test]
+fn sampling_settings_are_sent_when_set() {
+    let mut req = request(vec![Message::user_text("x")]);
+    assert!(request_body(&req).get("top_p").is_none());
+    req.sampling = gitagent_loader::Sampling {
+        top_p: Some(0.9),
+        top_k: Some(40),
+        stop_sequences: vec!["END".into()],
+    };
+    let body = request_body(&req);
+    assert_eq!(body["top_p"].to_string(), "0.9");
+    assert_eq!(body["top_k"], 40);
+    assert_eq!(body["stop"], json!(["END"]));
 }

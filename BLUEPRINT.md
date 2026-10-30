@@ -131,6 +131,7 @@ Steps 4 to 9 repeat until the stop check accepts, the agent replies in conversat
 | D25 | Sub-agents are warned as their turns run low, may be given their own turn limit (up to 100), and come back marked partial when they run out | A review cut off mid-step wastes its whole cost; a warned one hands back what it found, and the lead re-runs only what is marked partial |
 | D26 | The `/tests` write guard applies to benchmark runs only | It protects graders' tests; in a user's project `/tests` is an ordinary path and a pattern such as `grep -v /tests/` must not be refused |
 | D27 | One throttle per session: `max_parallel` is a ceiling, a rate-limit refusal halves the window, ten clean calls in a row give a slot back | The right number of parallel calls depends on the account's rate limit, which gitagent cannot know; backing off beats retrying blindly, and the ceiling stays the user's choice |
+| D28 | Where a 1.x agent relies on a default, 1.x's default stays: `.sh` scripts under `sh`, 10-second hooks, every sampling setting a provider takes, plugin settings for plugin scripts, unknown `gitagent.yaml` keys as warnings; a setting that cannot be honoured is a warning, never silent | Existing agents must run unchanged, and a difference nobody is told about costs more than an old default |
 
 **Left out on purpose:** critics that rewrite answers; best-of-N on benchmarks; memory or learning during a scored run; automated rewriting of the harness; masking every turn; third-party multi-provider frameworks; a web interface; voice; remote sandboxes.
 

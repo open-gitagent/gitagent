@@ -209,6 +209,7 @@ impl AgentHooks {
         let mut cmd = Command::new(program);
         cmd.args(rest)
             .envs(self.env.iter().map(|(k, v)| (k, v)))
+            .envs(&hook.env)
             .current_dir(&self.root)
             .env("GITAGENT_AGENT_DIR", &self.root)
             .env("GITAGENT_SESSION_ID", session_id)
@@ -294,6 +295,7 @@ mod tests {
             compliance: false,
             fail_open,
             applies_to: Vec::new(),
+            env: Default::default(),
         }
     }
 

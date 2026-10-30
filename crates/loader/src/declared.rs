@@ -51,6 +51,8 @@ pub struct DeclaredTool {
     pub requires_confirmation: bool,
     /// `annotations.read_only`: the tool changes nothing.
     pub read_only: bool,
+    /// More environment for its script: a plugin's settings.
+    pub env: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -257,6 +259,7 @@ fn read(file: &Path, root: &Path) -> Result<DeclaredTool, String> {
         timeout,
         requires_confirmation: flag("requires_confirmation"),
         read_only: flag("read_only"),
+        env: BTreeMap::new(),
     })
 }
 
@@ -283,7 +286,9 @@ pub(crate) fn interpreter(runtime: Option<&str>, path: &Path) -> Vec<String> {
         Some("ts") => by_name("deno"),
         Some("rb") => by_name("ruby"),
         Some("go") => by_name("go"),
-        Some("sh" | "bash") => by_name("bash"),
+        Some("bash") => by_name("bash"),
+        // `sh`, as in 1.x, unless the first line asks for another shell.
+        Some("sh") => Some(words(&[shebang_shell(path).unwrap_or("sh")])),
         _ => None,
     };
     by_ext.unwrap_or_else(|| {
@@ -293,6 +298,23 @@ pub(crate) fn interpreter(runtime: Option<&str>, path: &Path) -> Vec<String> {
             words(&["sh"])
         }
     })
+}
+
+/// The shell a script's `#!` line names (`#!/bin/bash`,
+/// `#!/usr/bin/env zsh`), when it is one.
+fn shebang_shell(path: &Path) -> Option<&'static str> {
+    let text = std::fs::read(path).ok()?;
+    let first = text.split(|b| *b == b'\n').next()?;
+    let line = std::str::from_utf8(first).ok()?.strip_prefix("#!")?;
+    let mut words = line.split_whitespace();
+    let mut program = words.next()?;
+    if program.ends_with("/env") {
+        program = words.find(|w| !w.starts_with('-'))?;
+    }
+    let name = program.rsplit('/').next()?;
+    ["bash", "zsh", "ksh", "dash", "sh"]
+        .into_iter()
+        .find(|shell| *shell == name)
 }
 
 #[cfg(unix)]
@@ -385,7 +407,7 @@ mod tests {
         assert_eq!(lint.timeout, DEFAULT_TIMEOUT);
         match &lint.runner {
             Runner::Script { command, dir } => {
-                assert_eq!(command[0], "bash");
+                assert_eq!(command[0], "sh");
                 assert!(command[1].ends_with("tools/lint.sh"));
                 assert_eq!(dir, root);
             }
@@ -427,5 +449,25 @@ mod tests {
             "Bearer v/!"
         );
         assert_eq!(expand_env("${open"), "${open");
+    }
+
+    #[test]
+    fn a_sh_script_runs_under_sh_unless_its_first_line_names_a_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let shell_of = |name: &str, text: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, text).unwrap();
+            interpreter(None, &path)[0].clone()
+        };
+        assert_eq!(shell_of("a.sh", "echo hi\n"), "sh");
+        assert_eq!(shell_of("b.sh", "#!/bin/bash\necho hi\n"), "bash");
+        assert_eq!(
+            shell_of("c.sh", "#!/usr/bin/env -S zsh -e\necho hi\n"),
+            "zsh"
+        );
+        assert_eq!(shell_of("d.sh", "#!/usr/bin/python3\n"), "sh");
+        assert_eq!(shell_of("e.bash", "echo hi\n"), "bash");
+        let path = dir.path().join("f.sh");
+        assert_eq!(interpreter(Some("bash"), &path), vec!["bash"]);
     }
 }

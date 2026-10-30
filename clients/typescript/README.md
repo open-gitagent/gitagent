@@ -46,6 +46,10 @@ console.log(q.result()?.outcome, q.costs());
   the session after the current turn.
 - `sessionId()`, `manifest()`, `messages()`, `result()` and `costs()`
   report on the session.
+- A tool's handler gets the arguments and an `AbortSignal`, aborted when
+  the turn is stopped or the session ends. It returns a string, `{content,
+  isError?}`, or 1.x's `{text, details?}` (the text becomes the result;
+  `details` is not sent to the model).
 - Hooks (`onSessionStart`, `preQuery`, `preToolUse`, `postToolUse`,
   `postToolFailure`, `fileChanged`,
   `postResponse`, `onError`) get the protocol's input and return `{action:

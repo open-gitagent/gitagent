@@ -22,6 +22,7 @@ fn request(messages: Vec<Message>) -> ChatRequest {
         }],
         effort: Effort::High,
         temperature: None,
+        sampling: Default::default(),
         max_output_tokens: 64000,
         cache: CachePlan::default(),
         server_masking: None,
@@ -349,4 +350,18 @@ fn notes_in_a_user_turn_follow_the_tool_outputs() {
     assert_eq!(items[0]["type"], "function_call_output");
     assert_eq!(items[1]["role"], "user");
     assert_eq!(items[1]["content"][0]["text"], "Time check");
+}
+
+#[test]
+fn only_top_p_is_sent_of_the_sampling_settings() {
+    let mut req = request(vec![Message::user_text("x")]);
+    req.sampling = gitagent_loader::Sampling {
+        top_p: Some(0.9),
+        top_k: Some(40),
+        stop_sequences: vec!["END".into()],
+    };
+    let body = request_body(&req, &cfg());
+    assert_eq!(body["top_p"].to_string(), "0.9");
+    assert!(body.get("top_k").is_none());
+    assert!(body.get("stop").is_none());
 }
