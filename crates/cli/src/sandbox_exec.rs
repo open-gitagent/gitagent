@@ -1,11 +1,12 @@
-//! `gitagent __sandbox --write <dir>... -- <program> [args...]`: applies the
-//! sandbox to this process, then replaces it with the program (the agent's
-//! shell). Used only internally, when the sandbox is on.
+//! `gitagent __sandbox --write <dir>... -- <program> [args...]`: prepares the
+//! sandbox (on Linux by restricting this process), then replaces this process
+//! with the program (the agent's shell), started inside it. Used only
+//! internally, when the sandbox is on.
 
 use std::ffi::OsString;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 use gitagent_sandbox::{Policy, Status};
 
@@ -34,17 +35,17 @@ pub(crate) fn run(args: &[OsString]) -> ExitCode {
         eprintln!("gitagent __sandbox: missing `-- <program>`");
         return ExitCode::from(2);
     };
-    match gitagent_sandbox::apply(&Policy { writable }) {
-        Ok(Status::Enforced) => {}
-        Ok(Status::Partial(note) | Status::Unsupported(note)) => {
-            eprintln!("gitagent: sandbox limited: {note}");
-        }
+    let sandbox = match gitagent_sandbox::prepare(&Policy { writable }) {
+        Ok(s) => s,
         Err(e) => {
             eprintln!("gitagent: sandbox failed: {e:#}");
             return ExitCode::from(2);
         }
+    };
+    if let Status::Partial(note) | Status::Unsupported(note) = &sandbox.status {
+        eprintln!("gitagent: sandbox limited: {note}");
     }
-    let err = Command::new(&program).args(rest).exec();
+    let err = sandbox.command(&program).args(rest).exec();
     eprintln!("gitagent __sandbox: cannot start {program:?}: {err}");
     ExitCode::from(127)
 }

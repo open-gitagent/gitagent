@@ -56,7 +56,7 @@ The workspace is split into crates under `crates/`:
 | `mcp` | The Model Context Protocol client |
 | `record` | Trajectories, counters and events |
 | `repo` | Repo mode: clones, branches, commits, pushes |
-| `sandbox` | Landlock and seccomp for the agent's shell |
+| `sandbox` | Landlock and seccomp for the agent's shell; `sandbox-exec` on macOS |
 | `learn` | Offline learning of lessons from finished runs |
 | `sdk` | The Rust library interface |
 

@@ -79,7 +79,7 @@ Harbor also hosts other benchmarks with the same task shape, SWE-bench Verified 
                  │    hooks · approvals · audit                             │
                  ├──────────────────────────────────────────────────────────┤
                  │  record: trajectory + counters every turn, events        │
-                 │  sandbox: Landlock + seccomp around the agent's shell    │
+                 │  sandbox: Landlock + seccomp; macOS: sandbox-exec        │
                  └──────────────────────────────────────────────────────────┘
 ```
 
@@ -125,7 +125,7 @@ Steps 4 to 9 repeat until the stop check accepts, the agent replies in conversat
 | D19 | Parallel work as a `plan` tool over sub-agents, with a reconciling step, opt-in per agent | Large jobs finish faster and more consistently; bounded phases and tasks keep the cost predictable |
 | D20 | Schedules run in-process while `gitagent schedule start` runs | The same behaviour as before; anything that must not be missed calls `gitagent schedule run` from an external scheduler |
 | D21 | The terminal is the interface | One console with tool lines, approvals, a task board and command suggestions; no web server to secure |
-| D22 | Landlock and seccomp around the agent's shell, not around gitagent | The agent cannot write outside its folders, while gitagent can still record |
+| D22 | Landlock and seccomp (on macOS, a `sandbox-exec` profile) around the agent's shell, not around gitagent | The agent cannot write outside its folders, while gitagent can still record |
 | D23 | `--bench` reads only committed files, and a test pins its prompt and tools | Product features cannot change a scored run by accident |
 | D24 | Everyday defaults keep the benchmark's guards, except the snapshot; the console has no time limit unless one is set | The loop detector, stop check and context clearing help in any repository; a person at the console stops a turn with Ctrl-C, while runs nobody watches keep a 30-minute ceiling; the snapshot costs up to 15 seconds per start in a project the user already knows |
 | D25 | Sub-agents are warned as their turns run low, may be given their own turn limit (up to 100), and come back marked partial when they run out | A review cut off mid-step wastes its whole cost; a warned one hands back what it found, and the lead re-runs only what is marked partial |
@@ -180,7 +180,7 @@ gitagent/
 │  ├─ mcp/        the MCP client
 │  ├─ record/     trajectory, counters, events
 │  ├─ repo/       clone, branch, commit, push
-│  ├─ sandbox/    Landlock and seccomp
+│  ├─ sandbox/    Landlock and seccomp; sandbox-exec on macOS
 │  ├─ learn/      offline learning of lessons
 │  └─ sdk/        the in-process Rust library
 ├─ clients/       python/ and typescript/: thin clients over --ipc
@@ -201,7 +201,7 @@ pub trait Provider: Send + Sync {
 }
 ```
 
-Dependencies are kept few: `tokio`, `reqwest` with rustls, `serde`, `serde_json`, a YAML parser, `clap`, `regex`, `portable-pty`, `anyhow`, `thiserror`, `async-trait`, and `landlock` with a seccomp filter for the sandbox. Token counts are estimated at four bytes per token instead of linking a tokenizer. Release builds are static musl binaries for x86_64 and aarch64 Linux, plus macOS.
+Dependencies are kept few: `tokio`, `reqwest` with rustls, `serde`, `serde_json`, a YAML parser, `clap`, `regex`, `portable-pty`, `anyhow`, `thiserror`, `async-trait`, and `landlock` with a seccomp filter for the sandbox (on macOS it uses the system's `sandbox-exec`, so no dependency). Token counts are estimated at four bytes per token instead of linking a tokenizer. Release builds are static musl binaries for x86_64 and aarch64 Linux, plus macOS.
 
 ---
 

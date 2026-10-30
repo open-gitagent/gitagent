@@ -115,7 +115,7 @@ Because the record is complete, a failed run can be read step by step, and a cha
 
 ## 11. The sandbox
 
-On Linux, with `sandbox: auto` or `on`, the agent's shell, not gitagent itself, starts through `gitagent __sandbox`, which applies Landlock (writes allowed only under the working directory, the output directory, `/tmp`, `/var/tmp`, `/dev` and `~/.cache`; reads unrestricted) and a seccomp deny-list (mount, kernel modules, reboot, keyrings, BPF, clock and host-name changes; denied calls fail with `EPERM`), then execs the shell. Everything the shell starts inherits the restrictions, while gitagent can still write its records. Where a container already provides the isolation, the sandbox can be turned off.
+On Linux, with `sandbox: auto` or `on`, the agent's shell, not gitagent itself, starts through `gitagent __sandbox`, which applies Landlock (writes allowed only under the working directory, the output directory, `/tmp`, `/var/tmp`, `/dev` and `~/.cache`; reads unrestricted) and a seccomp deny-list (mount, kernel modules, reboot, keyrings, BPF, clock and host-name changes; denied calls fail with `EPERM`), then execs the shell. On macOS the launcher instead starts the shell through the system's `/usr/bin/sandbox-exec`, with a profile that allows every write beneath the same directories (plus `~/Library/Caches` and the per-user cache folder next to the temp folder) and refuses all others; reads are unrestricted and there is no system-call deny-list. Everything the shell starts inherits the restrictions, while gitagent can still write its records. Where a container already provides the isolation, the sandbox can be turned off.
 
 ## 12. Learning between runs
 
