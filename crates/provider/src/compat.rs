@@ -131,7 +131,17 @@ pub(crate) fn request_body(req: &ChatRequest) -> Value {
         "stream_options": {"include_usage": true},
     });
     if let Some(t) = req.temperature {
-        body["temperature"] = crate::temperature_json(t);
+        body["temperature"] = crate::float_json(t);
+    }
+    if let Some(p) = req.sampling.top_p {
+        body["top_p"] = crate::float_json(p);
+    }
+    // Not part of the standard chat API, but most compatible servers take it.
+    if let Some(k) = req.sampling.top_k {
+        body["top_k"] = json!(k);
+    }
+    if !req.sampling.stop_sequences.is_empty() {
+        body["stop"] = json!(req.sampling.stop_sequences);
     }
     body
 }

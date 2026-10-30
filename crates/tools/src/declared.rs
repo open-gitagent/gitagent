@@ -46,7 +46,7 @@ pub async fn run(
     let timeout = remaining.map_or(tool.timeout, |r| r.min(tool.timeout));
     let out = match &tool.runner {
         Runner::Script { command, dir } => {
-            run_script(command, dir, &call.arguments, timeout, env).await
+            run_script(command, dir, &call.arguments, timeout, env, &tool.env).await
         }
         Runner::Http {
             url,
@@ -76,11 +76,13 @@ async fn run_script(
     args: &Map<String, Value>,
     timeout: Duration,
     env: &std::collections::BTreeMap<String, String>,
+    own_env: &std::collections::BTreeMap<String, String>,
 ) -> Result<String, String> {
     let (program, rest) = command.split_first().ok_or("no command to run")?;
     let mut child = tokio::process::Command::new(program)
         .args(rest)
         .envs(env.iter().map(|(k, v)| (k, expand_env(v))))
+        .envs(own_env)
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -338,6 +340,7 @@ mod tests {
             timeout,
             requires_confirmation: false,
             read_only: false,
+            env: Default::default(),
         }
     }
 
@@ -396,6 +399,11 @@ mod tests {
         .into();
         let out = run(&call(json!({"n": 1})), &t, None, &env).await.unwrap();
         assert_eq!(out.content, "https://staging/eu");
+        // A plugin's settings come last and are not expanded again.
+        let mut t = t;
+        t.env = [("REGION".to_string(), "${not-a-var}".to_string())].into();
+        let out = run(&call(json!({"n": 1})), &t, None, &env).await.unwrap();
+        assert_eq!(out.content, "https://staging/${not-a-var}");
     }
 
     #[tokio::test]

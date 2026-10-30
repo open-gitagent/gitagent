@@ -182,7 +182,16 @@ pub(crate) fn request_body(req: &ChatRequest, cfg: &AnthropicCfg) -> Value {
         "output_config": {"effort": req.effort.as_str()},
     });
     if let Some(t) = req.temperature {
-        body["temperature"] = crate::temperature_json(t);
+        body["temperature"] = crate::float_json(t);
+    }
+    if let Some(p) = req.sampling.top_p {
+        body["top_p"] = crate::float_json(p);
+    }
+    if let Some(k) = req.sampling.top_k {
+        body["top_k"] = json!(k);
+    }
+    if !req.sampling.stop_sequences.is_empty() {
+        body["stop_sequences"] = json!(req.sampling.stop_sequences);
     }
     if cfg.refusal_fallback {
         body["fallbacks"] = json!("default");

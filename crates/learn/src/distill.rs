@@ -62,6 +62,7 @@ pub async fn propose(
         tools: Vec::new(),
         effort: spec.profile.effort,
         temperature: spec.profile.temperature,
+        sampling: spec.profile.sampling.clone(),
         max_output_tokens: spec.profile.max_output_tokens,
         cache: CachePlan::default(),
         server_masking: None,

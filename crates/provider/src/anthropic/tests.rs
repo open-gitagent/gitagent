@@ -23,6 +23,7 @@ fn request(messages: Vec<Message>) -> ChatRequest {
         }],
         effort: Effort::High,
         temperature: None,
+        sampling: Default::default(),
         max_output_tokens: 64000,
         cache: CachePlan {
             system: true,
@@ -80,7 +81,9 @@ fn request_body_replays_raw_blocks_and_places_breakpoints() {
         "error"
     );
     assert_eq!(body["fallbacks"], "default");
-    assert!(body.get("temperature").is_none());
+    for unset in ["temperature", "top_p", "top_k", "stop_sequences"] {
+        assert!(body.get(unset).is_none(), "{unset} sent by default");
+    }
     assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
     assert_eq!(body["tools"][0]["name"], "exec");
 
@@ -429,4 +432,18 @@ fn reports_tool_results_cleared_by_the_server() {
     );
     let r = parse_in_chunks(&stream, 64).unwrap();
     assert_eq!(r.cleared_tool_results, 6);
+}
+
+#[test]
+fn sampling_settings_are_sent_when_set() {
+    let mut req = request(vec![Message::user_text("x")]);
+    req.sampling = gitagent_loader::Sampling {
+        top_p: Some(0.9),
+        top_k: Some(40),
+        stop_sequences: vec!["END".into()],
+    };
+    let body = request_body(&req, &cfg());
+    assert_eq!(body["top_p"].to_string(), "0.9");
+    assert_eq!(body["top_k"], 40);
+    assert_eq!(body["stop_sequences"], json!(["END"]));
 }

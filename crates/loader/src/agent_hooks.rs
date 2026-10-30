@@ -18,6 +18,7 @@
 //! Script paths are relative to `hooks/` and must stay inside the agent
 //! directory. Problems are warnings and the hook is left out.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
 
@@ -25,7 +26,8 @@ use serde_json::Value;
 
 use crate::AgentDir;
 
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a hook may run when hooks.yaml gives no `timeout` (1.x's limit).
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookEvent {
@@ -110,6 +112,8 @@ pub struct HookEntry {
     pub fail_open: bool,
     /// gitagent tool names this hook is for; empty means every tool.
     pub applies_to: Vec<String>,
+    /// More environment for its script: a plugin's settings.
+    pub env: BTreeMap<String, String>,
 }
 
 /// The hooks in an agent directory's `hooks/hooks.yaml`, in file order, and
@@ -188,6 +192,7 @@ pub fn entry_in(
         // As in 1.x, a failing plugin hook is a warning, not a block.
         fail_open: true,
         applies_to: Vec::new(),
+        env: BTreeMap::new(),
     })
 }
 
@@ -251,6 +256,7 @@ fn entry(event: HookEvent, v: &Value, root: &Path) -> Result<HookEntry, String> 
             .and_then(Value::as_bool)
             .unwrap_or(!flag("compliance")),
         applies_to,
+        env: BTreeMap::new(),
     })
 }
 
@@ -290,7 +296,7 @@ mod tests {
         assert_eq!(a.timeout, Duration::from_secs(5));
         assert!(a.fail_open && !a.compliance);
         assert_eq!(a.applies_to, vec!["exec", "write_stdin", "write_file"]);
-        assert_eq!(a.command[0], "bash");
+        assert_eq!(a.command[0], "sh");
         let b = &hooks[1];
         assert_eq!(b.command[0], "python3");
         assert_eq!(b.timeout, DEFAULT_TIMEOUT);

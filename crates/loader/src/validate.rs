@@ -597,6 +597,7 @@ pub fn validate(root: &Path, compliance: bool) -> Report {
     tool_files(root, &mut out);
     skill_files(root, &mut out);
     config_files(root, &mut out);
+    gitagent_yaml(root, &mut out);
     knowledge_index(root, &mut out);
     workflow_files(root, &manifest, &mut out);
     schedule_files(root, &mut out);
@@ -665,6 +666,49 @@ fn manifest_extras(doc: &mut Doc, m: &Value, root: &Path) {
             && !root.join("tools").join(format!("{name}.yaml")).is_file()
         {
             doc.error("tools", format!("tools/{name}.yaml does not exist"));
+        }
+    }
+    let constraints = &m["model"]["constraints"];
+    let preferred = m["model"]["preferred"]
+        .as_str()
+        .map(crate::manifest::model_ref);
+    if let Some(Ok(model)) = preferred {
+        let sampling = crate::Sampling {
+            top_p: constraints["top_p"].as_f64().map(|p| p as f32),
+            top_k: constraints["top_k"].as_u64().map(|k| k as u32),
+            stop_sequences: constraints["stop_sequences"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+        };
+        for name in sampling.unsupported(model.family()) {
+            doc.warn(
+                &format!("model.constraints.{name}"),
+                format!(
+                    "is not supported by {} models and is ignored",
+                    model.family().as_str()
+                ),
+            );
+        }
+        if model.family() == crate::Family::Anthropic {
+            let set = ["temperature", "top_p", "top_k"]
+                .into_iter()
+                .filter(|key| constraints.get(key).is_some())
+                .map(|key| format!("model.constraints.{key}"))
+                .chain(
+                    m["runtime"]
+                        .get("temperature")
+                        .map(|_| "runtime.temperature".to_string()),
+                );
+            for path in set {
+                doc.warn(
+                    &path,
+                    "is rejected by current Claude models (the model call fails); leave it out",
+                );
+            }
         }
     }
     for (key, newer) in [
@@ -1175,6 +1219,27 @@ fn knowledge_index(root: &Path, out: &mut Vec<Finding>) {
 
 /// Every `config/*.yaml`; problems are warnings (the format leaves these
 /// files unchecked, and agents keep their own settings in them).
+/// The project's own `gitagent.yaml`, when it has one: a setting with a
+/// wrong value stops every run; one it does not know is ignored.
+fn gitagent_yaml(root: &Path, out: &mut Vec<Finding>) {
+    let Ok(text) = std::fs::read_to_string(root.join("gitagent.yaml")) else {
+        return;
+    };
+    let mut doc = Doc {
+        file: "gitagent.yaml",
+        text: &text,
+        out,
+    };
+    match crate::config::parse(&text) {
+        Ok((_, unknown)) => {
+            for key in unknown {
+                doc.warn(&key, "is not a setting; ignored");
+            }
+        }
+        Err(e) => doc.error("", format!("{e:#}")),
+    }
+}
+
 fn config_files(root: &Path, out: &mut Vec<Finding>) {
     let mut files: Vec<_> = std::fs::read_dir(root.join("config"))
         .into_iter()

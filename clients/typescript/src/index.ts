@@ -66,7 +66,11 @@ export interface GCToolDefinition {
   name: string;
   description: string;
   inputSchema: JsonObject;
-  handler: (args: JsonObject) => unknown | Promise<unknown>;
+  /**
+   * Returns a string, `{ content, isError? }`, or 1.x's `{ text, details? }`.
+   * `signal` is aborted when the running turn is stopped or the session ends.
+   */
+  handler: (args: JsonObject, signal: AbortSignal) => unknown | Promise<unknown>;
 }
 
 /** 1.x's local repo mode: the session works in a clone of `url` on a
@@ -97,8 +101,14 @@ export interface QueryOptions {
   sessionId?: string;
   resume?: boolean;
   mcpServers?: Record<string, JsonObject>;
-  /** `topP` and `topK` are accepted for 1.x code and ignored with a warning. */
-  constraints?: { temperature?: number; maxTokens?: number; topP?: number; topK?: number };
+  /** A setting the model's provider has no field for is ignored with a warning. */
+  constraints?: {
+    temperature?: number;
+    maxTokens?: number;
+    topP?: number;
+    topK?: number;
+    stopSequences?: string[];
+  };
   tools?: GCToolDefinition[];
   hooks?: GCHooks;
   /** Hooks whose failure blocks the action; the others report the failure
@@ -194,6 +204,8 @@ export class Query implements AsyncIterable<GCMessage> {
   private readonly wakers: ((m: GCMessage | null) => void)[] = [];
   private readonly stderrLines: string[] = [];
   private readonly pending: string[] = [];
+  /** Given to client tools; aborted, and replaced, when a turn is stopped. */
+  private toolAbort = new AbortController();
   private promptsDone = false;
   private openTurn = false;
   /** A turn ended with nothing queued: the session ends when the caller
@@ -321,11 +333,13 @@ export class Query implements AsyncIterable<GCMessage> {
   /** Stops the running turn; the session stays open. */
   abort(): void {
     this.write({ type: "abort" });
+    this.stopTools();
   }
 
   /** Stops the running turn and ends the session. */
   kill(): void {
     this.write({ type: "kill" });
+    this.stopTools();
   }
 
   /** Ends the session after the current turn. */
@@ -357,9 +371,15 @@ export class Query implements AsyncIterable<GCMessage> {
     else this.waiting.push(message);
   }
 
+  private stopTools(): void {
+    this.toolAbort.abort();
+    this.toolAbort = new AbortController();
+  }
+
   private finish(): void {
     if (this.closed) return;
     this.closed = true;
+    this.toolAbort.abort();
     this.readyResolve(this.ready !== undefined);
     for (const w of this.wakers.splice(0)) w(null);
   }
@@ -431,7 +451,7 @@ export class Query implements AsyncIterable<GCMessage> {
       if (kind === "tool") {
         const t = this.tools.get(name);
         if (!t) return { content: `no handler for the tool ${name}`, isError: true };
-        const result = await t.handler(input);
+        const result = await t.handler(input, this.toolAbort.signal);
         if (result === undefined || result === null) return { content: "" };
         if (typeof result === "object") return result as JsonObject;
         return { content: String(result) };

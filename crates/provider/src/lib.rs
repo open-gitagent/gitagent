@@ -121,8 +121,8 @@ pub(crate) fn http_client() -> anyhow::Result<reqwest::Client> {
         .build()?)
 }
 
-/// A temperature as JSON with the digits as written (0.7, not 0.699999988).
-pub(crate) fn temperature_json(t: f32) -> serde_json::Value {
+/// A float setting as JSON with the digits as written (0.7, not 0.699999988).
+pub(crate) fn float_json(t: f32) -> serde_json::Value {
     serde_json::from_str(&t.to_string()).unwrap_or_else(|_| serde_json::json!(t))
 }
 

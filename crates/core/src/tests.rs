@@ -1452,6 +1452,7 @@ async fn declared_tools_marked_for_confirmation_always_ask() {
         timeout: Duration::from_secs(10),
         requires_confirmation: true,
         read_only: true,
+        env: Default::default(),
     });
     let script = "- tool_calls: [{name: pay, arguments: {note: nope}}]\n\
                   - tool_calls: [{name: pay, arguments: {note: approved}}]\n\
@@ -2178,6 +2179,7 @@ async fn a_workflow_tool_step_needs_the_same_approval_as_the_model() {
         timeout: Duration::from_secs(10),
         requires_confirmation: true,
         read_only: false,
+        env: Default::default(),
     });
     let provider = ScriptedProvider::from_yaml("- text: should not be asked\n").unwrap();
     let report = run_workflow(

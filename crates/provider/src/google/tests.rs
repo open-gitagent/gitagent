@@ -14,6 +14,7 @@ fn request(messages: Vec<Message>) -> ChatRequest {
         }],
         effort: Effort::High,
         temperature: None,
+        sampling: Default::default(),
         max_output_tokens: 32000,
         cache: CachePlan::default(),
         server_masking: None,
@@ -178,4 +179,18 @@ async fn completes_against_a_local_server() {
     );
     assert!(raw.to_lowercase().contains("x-goog-api-key: g-key"));
     assert_eq!(body_of(&raw)["contents"][0]["parts"][0]["text"], "task");
+}
+
+#[test]
+fn sampling_settings_go_in_the_generation_config() {
+    let mut req = request(vec![Message::user_text("x")]);
+    req.sampling = gitagent_loader::Sampling {
+        top_p: Some(0.9),
+        top_k: Some(40),
+        stop_sequences: vec!["END".into()],
+    };
+    let generation = &request_body(&req)["generationConfig"];
+    assert_eq!(generation["topP"].to_string(), "0.9");
+    assert_eq!(generation["topK"], 40);
+    assert_eq!(generation["stopSequences"], json!(["END"]));
 }

@@ -147,6 +147,7 @@ mod tests {
             tools: Vec::new(),
             effort: gitagent_loader::Effort::High,
             temperature: None,
+            sampling: Default::default(),
             max_output_tokens: 1000,
             cache: Default::default(),
             server_masking: None,

@@ -160,6 +160,7 @@ mod tests {
             tools: vec![],
             effort: Effort::High,
             temperature: None,
+            sampling: Default::default(),
             max_output_tokens: 100,
             cache: CachePlan::default(),
             server_masking: None,

@@ -104,7 +104,16 @@ pub(crate) fn request_body(req: &ChatRequest) -> Value {
         "thinkingConfig": {"thinkingLevel": level, "includeThoughts": true},
     });
     if let Some(t) = req.temperature {
-        generation["temperature"] = crate::temperature_json(t);
+        generation["temperature"] = crate::float_json(t);
+    }
+    if let Some(p) = req.sampling.top_p {
+        generation["topP"] = crate::float_json(p);
+    }
+    if let Some(k) = req.sampling.top_k {
+        generation["topK"] = json!(k);
+    }
+    if !req.sampling.stop_sequences.is_empty() {
+        generation["stopSequences"] = json!(req.sampling.stop_sequences);
     }
     json!({
         "systemInstruction": {"parts": [{"text": req.system}]},

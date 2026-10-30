@@ -18,6 +18,10 @@ pub struct Profile {
     /// Omitted for models that reject a temperature.
     #[serde(default)]
     pub temperature: Option<f32>,
+    /// `top_p`, `top_k` and stop sequences, from `agent.yaml`'s
+    /// `model.constraints` only: a profile never sets them.
+    #[serde(skip)]
+    pub sampling: Sampling,
     pub max_output_tokens: u32,
     pub context_window: u32,
     pub exec_default_yield_ms: u64,
@@ -92,6 +96,35 @@ impl Effort {
             Effort::XHigh => "xhigh",
             Effort::Max => "max",
         }
+    }
+}
+
+/// Sampling options beyond the temperature. Each provider sends the ones it
+/// accepts; the loader warns about the rest.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Sampling {
+    pub top_p: Option<f32>,
+    pub top_k: Option<u32>,
+    pub stop_sequences: Vec<String>,
+}
+
+impl Sampling {
+    /// The settings `family` has no field for, by their agent.yaml names.
+    pub fn unsupported(&self, family: crate::Family) -> Vec<&'static str> {
+        let (top_k, stop) = match family {
+            crate::Family::Anthropic | crate::Family::Google | crate::Family::Compat => {
+                (true, true)
+            }
+            crate::Family::OpenAI => (false, false),
+        };
+        let mut out = Vec::new();
+        if self.top_k.is_some() && !top_k {
+            out.push("top_k");
+        }
+        if !self.stop_sequences.is_empty() && !stop {
+            out.push("stop_sequences");
+        }
+        out
     }
 }
 

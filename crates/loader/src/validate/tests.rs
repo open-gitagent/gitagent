@@ -15,7 +15,7 @@ fn messages(r: &Report) -> Vec<String> {
 const GOOD: &[(&str, &str)] = &[
     (
         "agent.yaml",
-        "spec_version: \"0.1.0\"\nname: helper\nversion: 1.2.0-beta.1\ndescription: Helps.\nmodel:\n  preferred: claude-opus-5-5\n  constraints: {temperature: 0.2, max_tokens: 4000}\nskills: [summarize]\ntools: [lookup]\nagents:\n  checker: {description: Checks.}\nmcp_servers:\n  docs: {url: \"https://docs.example.com/mcp\"}\nmetadata: {team: support, tier: 2}\n",
+        "spec_version: \"0.1.0\"\nname: helper\nversion: 1.2.0-beta.1\ndescription: Helps.\nmodel:\n  preferred: claude-opus-5-5\n  constraints: {max_tokens: 4000, stop_sequences: [END]}\nskills: [summarize]\ntools: [lookup]\nagents:\n  checker: {description: Checks.}\nmcp_servers:\n  docs: {url: \"https://docs.example.com/mcp\"}\nmetadata: {team: support, tier: 2}\n",
     ),
     ("SOUL.md", "# Identity\nI help.\n"),
     (
@@ -183,4 +183,74 @@ fn workflows_are_checked_for_what_they_use() {
         assert!(got.iter().any(|g| g == expected), "missing {expected:?} in\n{}", got.join("\n"));
     }
     assert_eq!(got.len(), 4, "{got:?}");
+}
+
+#[test]
+fn sampling_settings_a_model_cannot_take_are_warned_about() {
+    let dir = tempfile::tempdir().unwrap();
+    let agent = |model: &str, constraints: &str| {
+        format!("name: a\nversion: 1.0.0\ndescription: A.\nmodel:\n  preferred: {model}\n  constraints: {constraints}\n")
+    };
+    write(
+        dir.path(),
+        &[
+            ("SOUL.md", "I help.\n"),
+            (
+                "agent.yaml",
+                &agent(
+                    "openai:gpt-x",
+                    "{top_p: 0.9, top_k: 40, stop_sequences: [END]}",
+                ),
+            ),
+        ],
+    );
+    assert_eq!(
+        messages(&validate(dir.path(), false)),
+        [
+            "warning: agent.yaml:6: model.constraints.top_k: is not supported by openai models and is ignored",
+            "warning: agent.yaml:6: model.constraints.stop_sequences: is not supported by openai models and is ignored",
+        ]
+    );
+    write(
+        dir.path(),
+        &[(
+            "agent.yaml",
+            &agent(
+                "claude-opus-5-5",
+                "{temperature: 0.2, stop_sequences: [END]}",
+            ),
+        )],
+    );
+    let found = messages(&validate(dir.path(), false));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(
+        found[0].contains("model.constraints.temperature: is rejected by current Claude models"),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn gitagent_yaml_is_checked_too() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), GOOD);
+    write(
+        dir.path(),
+        &[(
+            "gitagent.yaml",
+            "max_turns: 50\nmax_turn: 5\nrepo: {remote: x}\n",
+        )],
+    );
+    assert_eq!(
+        messages(&validate(dir.path(), false)),
+        [
+            "warning: gitagent.yaml:2: max_turn: is not a setting; ignored",
+            "warning: gitagent.yaml:3: repo.remote: is not a setting; ignored",
+        ]
+    );
+    write(dir.path(), &[("gitagent.yaml", "max_turns: many\n")]);
+    let found = messages(&validate(dir.path(), false));
+    assert!(
+        found.len() == 1 && found[0].starts_with("error: gitagent.yaml: "),
+        "{found:?}"
+    );
 }

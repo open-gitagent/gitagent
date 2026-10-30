@@ -1,4 +1,4 @@
-use gitagent_loader::Effort;
+use gitagent_loader::{Effort, Sampling};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -135,6 +135,7 @@ pub struct ChatRequest {
     pub tools: Vec<ToolSpec>,
     pub effort: Effort,
     pub temperature: Option<f32>,
+    pub sampling: Sampling,
     pub max_output_tokens: u32,
     pub cache: CachePlan,
     pub server_masking: Option<ServerMasking>,
