@@ -545,7 +545,6 @@ gitagent 3 replaces the TypeScript packages (1.x and 2.x) with one binary. What 
 - **Not carried over.** `--voice`; the remote `--sandbox` (the binary prints a one-line note); a plugin's `entry` JavaScript (plugins contribute tools, skills, hooks and prompt text through files); the 1.x telemetry adapter (OTLP export replaces it).
 - **Task list.** 1.x's `task_tracker` kept a searchable list of tasks. gitagent 3's `todo` is a plain checklist the agent rewrites whole; the name `task_tracker` still maps to it in tool lists and hooks.
 - **Learning.** 1.x's online skill learning, which adjusted a skill's confidence after each use, is gone. Lessons are learned from finished runs instead (`learning: online` or `gitagent learn`, below) and go into the system prompt; skills are not changed.
-- **Sandbox on macOS.** The sandbox is Linux-only (Landlock and seccomp). On macOS the agent's shell runs without one, where 1.x's remote sandbox worked on every system.
 - **Scripts without a runtime.** 1.x ran every declared tool with `sh` unless `runtime` was set. gitagent 3 picks the interpreter by extension (`.py` with `python3`, `.js` with `node`, `.rb` with `ruby`, …), so such tools now run instead of failing.
 
 ## Configuration
@@ -582,7 +581,7 @@ With `learning: online`, gitagent learns from each task it completes. The model 
 
 ### Sandbox
 
-On Linux, outside benchmark runs, the agent's shell runs under Landlock: it may write only to the working folder, the output folder, the temp folders and `~/.cache`. A seccomp filter blocks system calls such as `mount`, loading kernel modules and `reboot`. Set `sandbox: off` in `gitagent.yaml` to disable it, or `sandbox: on` to require it. In benchmark runs, writing under `/tests` is refused; elsewhere `/tests` is an ordinary path.
+Outside benchmark runs, the agent's shell runs in a sandbox: it may write only to the working folder, the output folder, the temp folders and `~/.cache` (on macOS also `~/Library/Caches`). Reading is not restricted. On Linux this is Landlock, plus a seccomp filter that blocks system calls such as `mount`, loading kernel modules and `reboot`. On macOS it is the system's `sandbox-exec` with a profile that refuses other writes. Other systems run the shell without a sandbox. Set `sandbox: off` in `gitagent.yaml` to disable it, or `sandbox: on` to require it. In benchmark runs, writing under `/tests` is refused; elsewhere `/tests` is an ordinary path.
 
 ## Terminal-Bench with Harbor
 
@@ -624,7 +623,7 @@ It learns only from tasks listed under `dev` in a split file (`--split`, default
 
 **My files are not being used.** Run `gitagent validate <dir>`: it lists every problem with a file and line number. Warnings at startup (`gitagent: warning: …`) name files that were skipped.
 
-**A command or file write is refused.** On Linux the agent's shell runs in a sandbox that allows writes only under the working folder, the output folder, the temp folders and `~/.cache`. Set `sandbox: off` in `gitagent.yaml` if the agent must write elsewhere. A hook may also have blocked the action; the `$` line says so in its result.
+**A command or file write is refused.** On Linux and macOS the agent's shell runs in a sandbox that allows writes only under the working folder, the output folder, the temp folders and `~/.cache`. Set `sandbox: off` in `gitagent.yaml` if the agent must write elsewhere. A hook may also have blocked the action; the `$` line says so in its result.
 
 **The session pauses with `! approval needed`.** The agent's compliance settings ask a person for that action. Answer `y` or `n`. Without a terminal, for example in a pipe, such requests are denied.
 

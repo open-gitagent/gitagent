@@ -755,7 +755,7 @@ fn sandbox_dirs(
         "auto" => !bench && gitagent_sandbox::available(),
         "on" => {
             if !gitagent_sandbox::available() {
-                bail!("sandbox: on needs Linux (Landlock and seccomp)");
+                bail!("sandbox: on needs Linux (Landlock and seccomp) or macOS (sandbox-exec)");
             }
             true
         }
@@ -773,8 +773,19 @@ fn sandbox_dirs(
         PathBuf::from("/var/tmp"),
         PathBuf::from("/dev"),
     ];
-    if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(PathBuf::from(home).join(".cache"));
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        dirs.push(home.join(".cache"));
+        if cfg!(target_os = "macos") {
+            dirs.push(home.join("Library/Caches"));
+        }
+    }
+    // macOS keeps the per-user cache folder (compilers' module caches) next
+    // to the per-user temp folder `.../T`.
+    if cfg!(target_os = "macos") {
+        let tmp = std::env::temp_dir();
+        if tmp.file_name().is_some_and(|n| n == "T") {
+            dirs.extend(tmp.parent().map(|p| p.to_path_buf()));
+        }
     }
     std::fs::create_dir_all(out_dir)?;
     Ok(Some(dirs))
