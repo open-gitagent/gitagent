@@ -61,11 +61,17 @@ pub(crate) struct Cli {
     input: Vec<String>,
 
     /// A remote sandbox is not available in this version.
-    #[arg(long = "sandbox", hide = true)]
+    #[arg(short = 's', long = "sandbox", hide = true)]
     remote_sandbox: bool,
 
+    /// 1.x's remote sandbox settings, refused with the same note.
+    #[arg(long, hide = true)]
+    sandbox_repo: Option<String>,
+    #[arg(long, hide = true)]
+    sandbox_token: Option<String>,
+
     /// Voice mode is not available in this version.
-    #[arg(long, hide = true, num_args = 0..=1, default_missing_value = "openai")]
+    #[arg(short = 'v', long, hide = true, num_args = 0..=1, default_missing_value = "openai")]
     voice: Option<String>,
 
     /// Serve the IPC protocol on stdin and stdout (JSON Lines) for a client
@@ -276,7 +282,7 @@ pub(crate) fn load_env_files(dir: Option<&std::path::Path>) {
 }
 
 async fn async_main(mut cli: Cli) -> ExitCode {
-    if cli.remote_sandbox {
+    if cli.remote_sandbox || cli.sandbox_repo.is_some() || cli.sandbox_token.is_some() {
         return usage_error(anyhow::anyhow!(
             "--sandbox (a remote sandbox) is not available in this version; local runs are sandboxed on Linux"
         ));

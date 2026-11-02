@@ -82,8 +82,8 @@ Hook scripts get the same JSON and answer the same way. Output that is not an an
 | Online skill learning, which adjusted a skill's confidence after each use | Lessons learned from finished runs (`learning: online` or `gitagent learn`), added to the system prompt; skills are not changed |
 | Every declared tool ran with `sh` unless `runtime` was set | The interpreter is picked by extension (`.py` with `python3`, `.js` with `node`, `.rb` with `ruby`, …); `.sh` still runs under `sh` unless its `#!` line names another shell |
 | A plugin's `entry` JavaScript | Plugins contribute tools, skills, hooks and prompt text through files; plugin settings reach scripts as environment variables (`GITAGENT_PLUGIN_CONFIG` holds them all as JSON) |
-| The 1.x telemetry adapter | OTLP export: set `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| `--voice` and `@open-gitagent/voice`, the remote `--sandbox` | Not available; the binary prints a one-line note. Keep 2.x if you need voice |
+| The 1.x telemetry adapter (`GITAGENT_OTEL_ENABLED`) | OTLP export: set `OTEL_EXPORTER_OTLP_ENDPOINT`; `GITAGENT_OTEL_ENABLED` is no longer read |
+| `--voice`/`-v` and `@open-gitagent/voice`; the remote sandbox (`--sandbox`/`-s`, `--sandbox-repo`, `--sandbox-token`) | Not available; the binary prints a one-line note and exits with 2. Keep 2.x if you need voice |
 
 ## 11. Optional: new things worth turning on
 

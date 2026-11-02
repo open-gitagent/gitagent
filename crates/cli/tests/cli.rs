@@ -1602,14 +1602,26 @@ fn v1_style_invocation_and_env_files() {
         "hello-home-agent\n"
     );
 
-    for flag in ["--sandbox", "--voice"] {
+    // 1.x's flags for removed features, long and short, end with a note.
+    for flags in [
+        &["--sandbox"][..],
+        &["-s"],
+        &["--sandbox-repo", "org/repo"],
+        &["--sandbox-token", "t"],
+        &["--voice"],
+        &["-v"],
+    ] {
         let out = gitagent()
-            .args(["-p", "x", flag])
+            .args(["-p", "x"])
+            .args(flags)
             .env("HOME", dir.path())
             .output()
             .unwrap();
-        assert_eq!(out.status.code(), Some(2), "{flag}");
-        assert!(String::from_utf8_lossy(&out.stderr).contains("not available in this version"));
+        assert_eq!(out.status.code(), Some(2), "{flags:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("not available in this version"),
+            "{flags:?}"
+        );
     }
 }
 
