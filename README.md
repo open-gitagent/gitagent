@@ -528,7 +528,7 @@ The same shape is available from the command line: `gitagent -p "..." --output-f
 
 ## Coming from the TypeScript gitagent
 
-gitagent 3 replaces the TypeScript packages (1.x and 2.x) with one binary. What carries over unchanged:
+gitagent 3 replaces the TypeScript packages (1.x and 2.x) with one binary. Step by step: [docs/MIGRATING.md](./docs/MIGRATING.md); what is new in this release: [docs/RELEASE-NOTES-3.0.0.md](./docs/RELEASE-NOTES-3.0.0.md). What carries over unchanged:
 
 - **Agent folders.** `agent.yaml`, `SOUL.md`, `RULES.md`, `memory/`, `skills/`, `tools/`, `hooks/`, `schedules/`, `workflows/`, `agents/`, `config/` and `.env` are read as they were. 1.x settings such as `tools: [cli, read, write, memory]`, `runtime.timeout` and the 1.x `compliance` shape are accepted; `gitagent validate` points out the newer spelling as a warning, never an error.
 - **Hook scripts.** They get the same JSON and answer the same way; output that is not an answer, or a script that crashes, allows the action with a warning, as before. Only hooks marked `compliance: true` or `fail_open: false`, which are new, block in those cases.

@@ -1,0 +1,40 @@
+# gitagent 3.0.0
+
+gitagent 3 is a rewrite of gitagent in Rust. It ships as one static binary with no runtime to install, and it runs the agents, hooks, schedules and SDK code written for the TypeScript gitagent (1.x and 2.x) unchanged. Upgrading? Read [MIGRATING.md](./MIGRATING.md).
+
+## Highlights
+
+- **One binary.** Linux (x86_64, arm64) and macOS (arm64, x86_64). Install with one line; nothing else is needed on the machine.
+- **Terminal-Bench 2.1: 93.03%** with Claude Opus 5.5, across all 89 tasks with five runs each (414 of 445 trials), with the code frozen at the published commit. The details and the job logs are in the README under [Results](../README.md#results).
+- **One loop everywhere.** The console, the SDKs, schedules and benchmark runs all run the same agent loop, so a benchmark result describes the product.
+- **A console in your terminal**, with slash commands, line editing and a live task board.
+- **Parallel work.** Sub-agents run concurrently. The `plan` tool splits a large job into phases of tasks, runs them in parallel and reconciles the results. A shared throttle adapts to the provider's rate limits.
+- **SDKs for any language.** The Python and TypeScript clients drive the binary over a JSON-lines protocol (`gitagent --ipc`), and any language that can start a process can do the same. The Rust crate `gitagent-sdk` runs the loop in your own process.
+- **Providers.** Anthropic, OpenAI, Google and any OpenAI-compatible endpoint, with a per-family profile (tools, effort, output shaping, caching) and fallbacks.
+- **Finishing means verified.** A run that ends with `task_complete` is accepted only when the agent's last change has been exercised, by a test, a run of the program or a request.
+- **Context that stays cached.** The history is append-only. Old tool results are cleared in large, rare batches (by the provider for Claude models), and compaction near the context limit keeps the original task word for word.
+- **A sandboxed shell.** Outside benchmark runs, the agent's shell may write only to the working folder, the output folder, the temp folders and the cache folder: Landlock plus seccomp on Linux, `sandbox-exec` on macOS.
+- **Learning from finished runs.** `gitagent learn --from <runs>`, or `learning: online` in `gitagent.yaml`, turns finished runs into short lessons. A lesson is used only once two different tasks support it, and the lesson file is reviewed like code.
+- **Complete records.** Every run writes its trajectory (ATIF), a counter for every decision the harness made, and the full output of every command. `--events jsonl` streams each step, and OTLP export sends traces and metrics.
+- **The OpenGAP format.** Agent folders in the OpenGAP layout load too, and `gitagent validate` checks a folder against the format, giving the file and line of every problem.
+
+## Breaking changes
+
+- **The binary must be installed.** The TypeScript and Python packages now drive it rather than running the agent themselves.
+- **Exit codes.** 0 when a run ends (including when it runs out of turns or time), 2 for usage and setup errors, 3 when the model provider fails, 130 when the run is stopped. Before, every error exited with 1.
+- **Not carried over:**
+  - `--voice`;
+  - the remote `--sandbox`;
+  - a plugin's `entry` JavaScript (plugins now contribute tools, skills, hooks and prompt text through files);
+  - the 1.x telemetry adapter (OTLP export replaces it);
+  - online skill learning (lessons from finished runs replace it).
+- **The sandbox is on by default** outside benchmark runs. An agent that writes outside the allowed folders needs `sandbox: off` in `gitagent.yaml`.
+- **Unattended runs have a time limit.** `-p` runs, schedules and the SDKs stop after 30 minutes unless you set `timeout_s`, `--timeout-s` or `timeoutMs`. The console has no limit.
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/scripts/install.sh | sh
+```
+
+To build from source, see the README's [Install](../README.md#install) section.
