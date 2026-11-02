@@ -88,7 +88,7 @@ jobs:
           node --input-type=module -e "const m = await import('./dist/index.js'); if (typeof m.query !== 'function' || typeof m.loadAgent !== 'function') process.exit(1);"
       - name: The sandbox, with a stand-in for gitmachine
         working-directory: clients/typescript
-        run: GITAGENT_BIN="$GITHUB_WORKSPACE/target/debug/gitagent" node --test test/
+        run: GITAGENT_BIN="$GITHUB_WORKSPACE/target/debug/gitagent" node --test test/sandbox.test.mjs
 
   npm-install:
     runs-on: ubuntu-latest

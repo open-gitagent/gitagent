@@ -14,6 +14,7 @@ version=$(node -p "require('./clients/typescript/package.json').version")
 work=$(mktemp -d)
 registry=http://localhost:4873
 trap 'kill "${registry_pid:-}" 2>/dev/null || true; rm -rf "$work"' EXIT
+trap 'echo "--- failed; the last lines of the registry log:" >&2; tail -40 "$work/verdaccio.log" >&2 2>/dev/null || true' ERR
 
 echo "== the release archives, from $binary"
 rm -rf dist && mkdir -p dist
@@ -29,6 +30,8 @@ scripts/npm-packages.sh "v$version"
 echo "== a private registry"
 cat > "$work/verdaccio.yaml" <<YAML
 storage: $work/storage
+# A debug binary is far larger than a release one (about 10 MB).
+max_body_size: 500mb
 auth:
   htpasswd:
     file: $work/htpasswd
