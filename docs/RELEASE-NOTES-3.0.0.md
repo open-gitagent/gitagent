@@ -1,6 +1,16 @@
 # gitagent 3.0.0
 
-gitagent 3 is a rewrite of gitagent in Rust. It ships as one static binary with no runtime to install, and it runs the agents, hooks, schedules and SDK code written for the TypeScript gitagent (1.x and 2.x) unchanged. Upgrading? Read [MIGRATING.md](./MIGRATING.md).
+gitagent 3 is a rewrite of gitagent in Rust. It ships as one static binary with no runtime to install, through npm as before or with a one-line install script, and it runs the agents, hooks, schedules and SDK code written for the TypeScript gitagent (1.x and 2.x) unchanged.
+
+## Upgrading
+
+```sh
+npm install -g @open-gitagent/gitagent@latest     # if you installed with npm
+gitagent --version                                 # 3.0.0
+gitagent validate ./my-agent                       # warns about old spellings, never fails
+```
+
+Most agents need no changes. [MIGRATING.md](./MIGRATING.md) goes through the upgrade step by step, and `npm install -g @open-gitagent/gitagent@2` goes back.
 
 ## Highlights
 
@@ -34,12 +44,24 @@ gitagent 3 is a rewrite of gitagent in Rust. It ships as one static binary with 
 - **The sandbox is on by default** outside benchmark runs. An agent that writes outside the allowed folders needs `sandbox: off` in `gitagent.yaml`.
 - **Unattended runs have a time limit.** `-p` runs, schedules and the SDKs stop after 30 minutes unless you set `timeout_s`, `--timeout-s` or `timeoutMs`. The console has no limit.
 
+## Known limitations
+
+- **Platforms.** Prebuilt for Linux (x86_64, arm64) and macOS (arm64, x86_64). Elsewhere, build from source and set `GITAGENT_BIN`.
+- **The remote sandbox** uses 2.x's tools (`cli`, `read`, `write`, `edit`, `memory`), so background shell sessions and `write_stdin` are not available inside it. It runs through the npm command only.
+- **Python.** The Python client is installed from this repository (`pip install ./clients/python`) and needs the binary.
+
 ## Install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/scripts/install.sh | sh
 # or
 npm install -g @open-gitagent/gitagent
+```
+
+The archives below hold the binary and the README for each platform. To check a download:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing      # on macOS: shasum -a 256 -c SHA256SUMS
 ```
 
 To build from source, see the README's [Install](../README.md#install) section.
