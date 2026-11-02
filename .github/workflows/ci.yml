@@ -89,3 +89,18 @@ jobs:
       - name: The sandbox, with a stand-in for gitmachine
         working-directory: clients/typescript
         run: GITAGENT_BIN="$GITHUB_WORKSPACE/target/debug/gitagent" node --test test/
+
+  npm-install:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked -p gitagent-cli
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install from a private registry, upgrade from 2.x, use the SDK
+        run: scripts/test-npm-install.sh target/debug/gitagent
