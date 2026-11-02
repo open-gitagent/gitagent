@@ -21,7 +21,8 @@ import { execSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 const vm = process.env.FAKE_VM;
 const local = (p) => p.replaceAll("/home/user/", vm + "/");
-const log = (line) => appendFileSync(vm + "/../vm.log", line + "\\n");
+// The log sits next to the VM folder, which exists only after start().
+const log = (line) => appendFileSync(vm.replace(/\\/[^/]+$/, "") + "/vm.log", line + "\\n");
 export class GitMachine {
   constructor(options) {
     log("new " + options.repository);
