@@ -1,8 +1,17 @@
 # gitagent for TypeScript
 
-Drives the gitagent binary from Node. The agent runs in the binary
-(`GITAGENT_BIN`, or `gitagent` on the PATH); this package only translates
-calls and messages over the IPC protocol (`gitagent --ipc`).
+The `gitagent` command and its TypeScript SDK.
+
+```sh
+npm install -g @open-gitagent/gitagent   # the gitagent command
+npm install @open-gitagent/gitagent      # the SDK, in a project
+```
+
+npm also installs the prebuilt binary for your platform
+(`@open-gitagent/gitagent-linux-x64`, `-linux-arm64`, `-darwin-arm64` or
+`-darwin-x64`). The agent runs in that binary; this package translates calls
+and messages over the IPC protocol (`gitagent --ipc`). To use another binary,
+set `GITAGENT_BIN` or pass `binary` to `query()`.
 
 ```ts
 import { query, tool } from "@open-gitagent/gitagent";

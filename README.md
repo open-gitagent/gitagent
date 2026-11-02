@@ -57,7 +57,13 @@ Fork an agent. Branch a personality. `git log` its memory. Diff its rules. Revie
 curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/scripts/install.sh | sh
 ```
 
-This installs the binary for your system (Linux x86_64/arm64, macOS arm64/x86_64) into `~/.local/bin`; set `INSTALL_DIR` to change that. To build from source you need Rust (the version is pinned in `rust-toolchain.toml`):
+Or with npm, which also gives you the TypeScript SDK:
+
+```sh
+npm install -g @open-gitagent/gitagent
+```
+
+Either way you get the same binary for your system (Linux x86_64/arm64, macOS arm64/x86_64). The script puts it in `~/.local/bin` (set `INSTALL_DIR` to change that); npm installs the package for your platform, `@open-gitagent/gitagent-<os>-<cpu>`, and a `gitagent` command that runs it. To build from source you need Rust (the version is pinned in `rust-toolchain.toml`):
 
 ```sh
 cargo build --release            # ./target/release/gitagent

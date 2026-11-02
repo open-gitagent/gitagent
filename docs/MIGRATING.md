@@ -9,7 +9,15 @@ curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/scripts
 gitagent --version
 ```
 
-The binary goes into `~/.local/bin`; set `INSTALL_DIR` to put it somewhere else. The SDKs find it on `PATH`, or through `GITAGENT_BIN`.
+The binary goes into `~/.local/bin`; set `INSTALL_DIR` to put it somewhere else.
+
+If you installed gitagent with npm, update it the same way:
+
+```sh
+npm install -g @open-gitagent/gitagent@latest
+```
+
+This now installs the binary for your platform (Linux x86_64/arm64, macOS arm64/x86_64) and a `gitagent` command that runs it. On other platforms, build from source and set `GITAGENT_BIN`. If you install with `--omit=optional`, the binary package is skipped; set `GITAGENT_BIN`, or use the install script instead.
 
 ## 2. Check your agent folder
 
@@ -53,7 +61,8 @@ sandbox: off        # auto (default) | on | off
 
 ## 7. SDK code
 
-- **TypeScript.** `query()`, `tool()`, hooks, `steer()`, `abort()`, the message types and the `repo` option are unchanged, and tools keep their 1.x names (`cli`, `read`, …). The package now needs the `gitagent` binary installed. A `tool()` handler still gets the arguments and an `AbortSignal`, and may return a string, 1.x's `{text, details}` or `{content, isError}`.
+- **TypeScript.** `query()`, `tool()`, hooks, `steer()`, `abort()`, the message types and the `repo` option are unchanged, and tools keep their 1.x names (`cli`, `read`, …). The binary comes with the npm package. `import ... from "@open-gitagent/gitagent/cli"` still runs the command. A `tool()` handler still gets the arguments and an `AbortSignal`, and may return a string, 1.x's `{text, details}` or `{content, isError}`.
+- **Other 2.x exports.** 2.x also exported the harness's internals, such as `loadAgent`, `discoverSkills`, `CostTracker`, the schedule, history, compaction and telemetry helpers, and the voice types. The binary does this work now. These names still exist, so imports keep working, but they are marked deprecated, and calling one throws a `GitagentError` that names the replacement (for costs, `q.costs()`; for schedules, `gitagent schedule`).
 - **Python.** The new client in `clients/python` has the same shape: `query()`, `tool()`, hooks and an approver, plus `send()`, `steer()`, `abort()` and `end()`.
 - **Other languages.** Start `gitagent --ipc` and exchange JSON lines. The README's [SDKs](../README.md#sdks-any-language-over-ipc) section has the full protocol and a complete client in bash.
 
@@ -74,7 +83,7 @@ Hook scripts get the same JSON and answer the same way. Output that is not an an
 | Every declared tool ran with `sh` unless `runtime` was set | The interpreter is picked by extension (`.py` with `python3`, `.js` with `node`, `.rb` with `ruby`, …); `.sh` still runs under `sh` unless its `#!` line names another shell |
 | A plugin's `entry` JavaScript | Plugins contribute tools, skills, hooks and prompt text through files; plugin settings reach scripts as environment variables (`GITAGENT_PLUGIN_CONFIG` holds them all as JSON) |
 | The 1.x telemetry adapter | OTLP export: set `OTEL_EXPORTER_OTLP_ENDPOINT` |
-| `--voice`, the remote `--sandbox` | Not available; the binary prints a one-line note |
+| `--voice` and `@open-gitagent/voice`, the remote `--sandbox` | Not available; the binary prints a one-line note. Keep 2.x if you need voice |
 
 ## 11. Optional: new things worth turning on
 

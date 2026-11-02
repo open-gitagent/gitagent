@@ -49,3 +49,44 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+
+  npm:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Platform packages
+        run: scripts/npm-packages.sh "$GITHUB_REF_NAME"
+      - name: Main package
+        working-directory: clients/typescript
+        run: npm install --no-audit --no-fund --omit=optional && npm run build
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # A version with a pre-release part (3.1.0-rc.1) goes to the "next" tag, not "latest".
+          tag=latest
+          case "$GITHUB_REF_NAME" in *-*) tag=next ;; esac
+          publish() {
+            name=$(node -p "require('./$1/package.json').name")
+            version=$(node -p "require('./$1/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already published"
+            else
+              npm publish "./$1" --access public --provenance --tag "$tag"
+            fi
+          }
+          # The platform packages first, so the main package's optional dependencies resolve.
+          for dir in npm/*/; do publish "${dir%/}"; done
+          publish clients/typescript

@@ -9,14 +9,15 @@
  * }
  * ```
  *
- * The agent runs in the gitagent binary (`GITAGENT_BIN`, or `gitagent` on
- * the PATH); this package only translates calls and messages. A query is one
+ * The agent runs in the gitagent binary (`GITAGENT_BIN`, else the platform
+ * package npm installed with this one, else `gitagent` on the PATH); this package only translates calls and messages. A query is one
  * session: a string prompt runs one turn, an async iterable of strings (or
  * of 1.x's `{type: "user", content}` messages) runs a turn per item, and `send()` adds turns while iterating.
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
+import { findBinary } from "./binary.js";
 
 export const PROTOCOL = 1;
 
@@ -140,7 +141,7 @@ export function tool(
 export class GitagentError extends Error {}
 
 function binaryPath(binary?: string): string {
-  return binary ?? process.env.GITAGENT_BIN ?? "gitagent";
+  return binary ?? findBinary() ?? "gitagent";
 }
 
 /** Starts a session and returns the `Query` that streams its messages. */
@@ -472,3 +473,6 @@ export class Query implements AsyncIterable<GCMessage> {
     return {};
   }
 }
+
+export { findBinary, PLATFORM_PACKAGES } from "./binary.js";
+export * from "./compat.js";

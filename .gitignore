@@ -7,6 +7,8 @@ bench/jobs/
 __pycache__/
 *.pyc
 dist/
+/npm/
+node_modules/
 
 # The full run log, the dev/held-out split, the round history, the published
 # scores and the lesson store stay on the benchmark machine; the public proof

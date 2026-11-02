@@ -9,6 +9,7 @@ gitagent 3 is a rewrite of gitagent in Rust. It ships as one static binary with 
 - **One loop everywhere.** The console, the SDKs, schedules and benchmark runs all run the same agent loop, so a benchmark result describes the product.
 - **A console in your terminal**, with slash commands, line editing and a live task board.
 - **Parallel work.** Sub-agents run concurrently. The `plan` tool splits a large job into phases of tasks, runs them in parallel and reconciles the results. A shared throttle adapts to the provider's rate limits.
+- **On npm.** `npm install -g @open-gitagent/gitagent` installs the binary for your platform and the `gitagent` command, so npm users update the way they always have. The same package is the TypeScript SDK.
 - **SDKs for any language.** The Python and TypeScript clients drive the binary over a JSON-lines protocol (`gitagent --ipc`), and any language that can start a process can do the same. The Rust crate `gitagent-sdk` runs the loop in your own process.
 - **Providers.** Anthropic, OpenAI, Google and any OpenAI-compatible endpoint, with a per-family profile (tools, effort, output shaping, caching) and fallbacks.
 - **Finishing means verified.** A run that ends with `task_complete` is accepted only when the agent's last change has been exercised, by a test, a run of the program or a request.
@@ -20,7 +21,9 @@ gitagent 3 is a rewrite of gitagent in Rust. It ships as one static binary with 
 
 ## Breaking changes
 
-- **The binary must be installed.** The TypeScript and Python packages now drive it rather than running the agent themselves.
+- **The agent runs in the binary.** The npm package brings it along for Linux and macOS. The Python package and other clients need it installed (with the install script, or `GITAGENT_BIN`).
+- **2.x SDK internals.** Exports such as `loadAgent`, `discoverSkills`, `CostTracker` and the schedule, history, compaction and telemetry helpers remain importable but throw when called; see [MIGRATING.md](./MIGRATING.md#7-sdk-code).
+- **Voice.** `@open-gitagent/voice` works with 2.x only.
 - **Exit codes.** 0 when a run ends (including when it runs out of turns or time), 2 for usage and setup errors, 3 when the model provider fails, 130 when the run is stopped. Before, every error exited with 1.
 - **Not carried over:**
   - `--voice`;
@@ -35,6 +38,8 @@ gitagent 3 is a rewrite of gitagent in Rust. It ships as one static binary with 
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/open-gitagent/gitagent/main/scripts/install.sh | sh
+# or
+npm install -g @open-gitagent/gitagent
 ```
 
 To build from source, see the README's [Install](../README.md#install) section.

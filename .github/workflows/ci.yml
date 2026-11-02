@@ -80,4 +80,9 @@ jobs:
           node-version: "22"
       - name: TypeScript client
         working-directory: clients/typescript
-        run: npm install --no-audit --no-fund && npm run check
+        run: npm install --no-audit --no-fund --omit=optional && npm run build
+      - name: The npm launcher runs the binary
+        working-directory: clients/typescript
+        run: |
+          GITAGENT_BIN=../../target/debug/gitagent node bin/gitagent.js --version
+          node --input-type=module -e "const m = await import('./dist/index.js'); if (typeof m.query !== 'function' || typeof m.loadAgent !== 'function') process.exit(1);"
