@@ -86,6 +86,37 @@ class QueryTests(unittest.TestCase):
         self.assertTrue((self.agent / ".gitagent/sessions/t1/messages.json").is_file())
         self.assertEqual(q.wait(), 0)
 
+    def test_client_tools_replace_builtin_tools_of_the_same_name(self) -> None:
+        write(self.agent / "memory" / "MEMORY.md", "# Memory\n")
+        model = self.script(
+            "r.yaml",
+            "- tool_calls: [{name: cli, arguments: {command: \"echo hi\"}}]\n"
+            "- tool_calls: [{name: memory, arguments: {action: load}}]\n"
+            "- text: \"done\"\n",
+        )
+        ran = []
+
+        def remote(name):
+            def handler(args):
+                ran.append(name)
+                return f"{name} ran in the client"
+
+            return handler
+
+        q = query(
+            "go",
+            dir=str(self.agent),
+            model=model,
+            binary=BIN,
+            replace_builtin_tools=True,
+            tools=[tool(n, n, {"properties": {}}, remote(n)) for n in ("cli", "read", "write", "edit", "memory")],
+            out_dir=str(pathlib.Path(self.tmp.name) / "out"),
+        )
+        with q:
+            list(q)
+        self.assertEqual(sorted(q.tools()), ["cli", "edit", "memory", "read", "write"])
+        self.assertEqual(ran, ["cli", "memory"])
+
     def test_send_steer_and_approval(self) -> None:
         write(
             self.agent / "agent.yaml",

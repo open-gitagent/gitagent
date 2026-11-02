@@ -66,15 +66,27 @@ sandbox: off        # auto (default) | on | off
 - **Python.** The new client in `clients/python` has the same shape: `query()`, `tool()`, hooks and an approver, plus `send()`, `steer()`, `abort()` and `end()`.
 - **Other languages.** Start `gitagent --ipc` and exchange JSON lines. The README's [SDKs](../README.md#sdks-any-language-over-ipc) section has the full protocol and a complete client in bash.
 
-## 8. Hooks
+## 8. The remote sandbox (`--sandbox`)
+
+The remote sandbox works as in 2.x, through the npm command. The agent runs on your machine, so your API keys stay there; its commands and file edits run in an E2B VM with a clone of the repository, which is committed when the VM stops.
+
+```sh
+npm install -g @open-gitagent/gitagent gitmachine
+gitagent --sandbox -p "fix the failing test"                  # the folder's origin
+gitagent -s --sandbox-repo https://github.com/org/app.git     # one task per line
+```
+
+`--sandbox-token` (default: `GITHUB_TOKEN` or `GIT_TOKEN`), `--session`, `-d`, `-m`, `-e` and `-p` work with it as before. In the SDK, `query({ ..., sandbox: true })` or `sandbox: { repository, token, template, timeout, autoCommit, envs }` does the same and stops the VM before the iteration ends. In the sandbox the agent uses 2.x's tools (`cli`, `read`, `write`, `edit`, `memory`) instead of gitagent 3's shell, so background sessions and `write_stdin` are not available there. The binary installed with the install script does not run the remote sandbox; it says so and points to the npm command.
+
+## 9. Hooks
 
 Hook scripts get the same JSON and answer the same way. Output that is not an answer, a crash or a timeout allows the action with a warning, as before. New: a hook marked `compliance: true` or `fail_open: false` blocks the action in those cases instead. Hooks get 10 seconds unless `hooks.yaml` sets `timeout`.
 
-## 9. Model settings
+## 10. Model settings
 
 `model.constraints` (`temperature`, `max_tokens`, `top_p`, `top_k`, `stop_sequences`) are sent to the providers whose API accepts them. OpenAI's API has no `top_k` or stop sequences, so those two are ignored there with a warning. Current Claude models reject `temperature`, `top_p` and `top_k`, so remove them from Claude agents; `gitagent validate` warns about them.
 
-## 10. What changed or went away
+## 11. What changed or went away
 
 | Before | In gitagent 3 |
 |---|---|
@@ -83,9 +95,9 @@ Hook scripts get the same JSON and answer the same way. Output that is not an an
 | Every declared tool ran with `sh` unless `runtime` was set | The interpreter is picked by extension (`.py` with `python3`, `.js` with `node`, `.rb` with `ruby`, …); `.sh` still runs under `sh` unless its `#!` line names another shell |
 | A plugin's `entry` JavaScript | Plugins contribute tools, skills, hooks and prompt text through files; plugin settings reach scripts as environment variables (`GITAGENT_PLUGIN_CONFIG` holds them all as JSON) |
 | The 1.x telemetry adapter (`GITAGENT_OTEL_ENABLED`) | OTLP export: set `OTEL_EXPORTER_OTLP_ENDPOINT`; `GITAGENT_OTEL_ENABLED` is no longer read |
-| `--voice`/`-v` and `@open-gitagent/voice`; the remote sandbox (`--sandbox`/`-s`, `--sandbox-repo`, `--sandbox-token`) | Not available; the binary prints a one-line note and exits with 2. Keep 2.x if you need voice |
+| `--voice`/`-v` and `@open-gitagent/voice` | Not available; the binary prints a one-line note and exits with 2. Keep 2.x if you need voice |
 
-## 11. Optional: new things worth turning on
+## 12. Optional: new things worth turning on
 
 - **Parallel work:** `runtime: {parallel_tasks: true}` in `agent.yaml` gives the lead agent the `plan` tool.
 - **Lessons:** `learning: online` learns from each finished task into `.gitagent/prompts/lessons.md`; review that file like code.

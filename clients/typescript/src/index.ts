@@ -18,6 +18,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { findBinary } from "./binary.js";
+import { createSandboxContext, sandboxTools, type SandboxContext, type SandboxOptions } from "./sandbox.js";
 
 export const PROTOCOL = 1;
 
@@ -126,6 +127,13 @@ export interface QueryOptions {
   outDir?: string;
   binary?: string;
   abortController?: AbortController;
+  /**
+   * 1.x's remote sandbox: run the agent's commands and file edits in a VM
+   * (needs the `gitmachine` package). `true` or settings start a VM for the
+   * session and stop it, committing the work, before the iteration ends; a
+   * `SandboxContext` you started yourself is used as it is and left running.
+   */
+  sandbox?: SandboxOptions | true | SandboxContext;
 }
 
 /** A tool the agent may call, run by `handler(args)` in this process. */
@@ -178,7 +186,37 @@ export function query(options: QueryOptions): Query {
     callbacks.push(failClosed.has(name) ? { name, failOpen: false } : name);
   }
   if (o.approver) callbacks.push("approval");
-  const tools = o.tools ?? [];
+  let tools = o.tools ?? [];
+  let onClose: (() => Promise<void>) | undefined;
+  if (o.sandbox) {
+    if (o.repo) throw new GitagentError("repo and sandbox options are mutually exclusive");
+    let sandbox: Promise<SandboxContext>;
+    if (typeof o.sandbox === "object" && "gitMachine" in o.sandbox) {
+      sandbox = Promise.resolve(o.sandbox);
+    } else {
+      const config: SandboxOptions = o.sandbox === true ? {} : o.sandbox;
+      const status = config.onStatus ?? (() => {});
+      sandbox = (async () => {
+        const ctx = await createSandboxContext(config, o.dir ?? process.cwd());
+        status("Starting sandbox VM...");
+        await ctx.gitMachine.start();
+        status(`Sandbox ready (repo: ${ctx.repoPath})`);
+        return ctx;
+      })();
+      onClose = async () => {
+        const ctx = await sandbox.catch(() => undefined);
+        if (!ctx) return;
+        status("Stopping sandbox...");
+        await ctx.gitMachine.stop().catch((e: Error) => status(`Stopping the sandbox failed: ${e.message}`));
+      };
+    }
+    // A VM that does not start fails each tool call with the reason.
+    sandbox.catch(() => {});
+    const remote = sandboxTools(sandbox);
+    const names = new Set(remote.map((t) => t.name));
+    tools = [...remote, ...tools.filter((t) => !names.has(t.name))];
+    wire.replaceBuiltinTools = true;
+  }
   const init = {
     type: "initialize",
     protocol: PROTOCOL,
@@ -186,7 +224,7 @@ export function query(options: QueryOptions): Query {
     callbacks,
     tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
   };
-  return new Query(binaryPath(o.binary), o.outDir, init, o.prompt, hooks, failClosed, tools, o.approver, o.abortController);
+  return new Query(binaryPath(o.binary), o.outDir, init, o.prompt, hooks, failClosed, tools, o.approver, o.abortController, onClose);
 }
 
 /**
@@ -214,6 +252,9 @@ export class Query implements AsyncIterable<GCMessage> {
   private idle = false;
   private ended = false;
   private closed = false;
+  /** Closed, and the work after closing (stopping a sandbox) is done. */
+  private settled = false;
+  private readonly onClose?: () => Promise<void>;
   private ready?: GCMessage;
   private lastTurn?: GCMessage;
   private sessionEnd?: GCMessage;
@@ -230,7 +271,9 @@ export class Query implements AsyncIterable<GCMessage> {
     tools: GCToolDefinition[],
     approver: QueryOptions["approver"],
     abortController?: AbortController,
+    onClose?: () => Promise<void>,
   ) {
+    this.onClose = onClose;
     const args = ["--ipc"];
     if (outDir) args.push("--out-dir", outDir);
     this.proc = spawn(binary, args, { stdio: ["pipe", "pipe", "pipe"] });
@@ -381,14 +424,19 @@ export class Query implements AsyncIterable<GCMessage> {
     if (this.closed) return;
     this.closed = true;
     this.toolAbort.abort();
-    this.readyResolve(this.ready !== undefined);
-    for (const w of this.wakers.splice(0)) w(null);
+    const settle = () => {
+      this.settled = true;
+      this.readyResolve(this.ready !== undefined);
+      for (const w of this.wakers.splice(0)) w(null);
+    };
+    if (this.onClose) void this.onClose().catch(() => {}).finally(settle);
+    else settle();
   }
 
   private take(): Promise<GCMessage | null> {
     const queued = this.waiting.shift();
     if (queued) return Promise.resolve(queued);
-    if (this.closed) return Promise.resolve(null);
+    if (this.settled) return Promise.resolve(null);
     return new Promise((resolve) => this.wakers.push(resolve));
   }
 
@@ -475,4 +523,6 @@ export class Query implements AsyncIterable<GCMessage> {
 }
 
 export { findBinary, PLATFORM_PACKAGES } from "./binary.js";
+export { createSandboxContext, sandboxTools } from "./sandbox.js";
+export type { SandboxConfig, SandboxContext, SandboxOptions } from "./sandbox.js";
 export * from "./compat.js";

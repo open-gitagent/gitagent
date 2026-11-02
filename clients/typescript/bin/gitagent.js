@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 // The `gitagent` command of the npm package: runs the binary installed for
-// this platform with the same arguments, and exits as it does.
+// this platform with the same arguments, and exits as it does. 1.x's remote
+// sandbox (--sandbox, -s, --sandbox-repo, --sandbox-token) runs here instead.
 
 import { spawn } from "node:child_process";
 import { findBinary, PLATFORM_PACKAGES } from "../dist/binary.js";
+
+const argv = process.argv.slice(2);
+const SANDBOX_FLAGS = ["-s", "--sandbox", "--sandbox-repo", "--sandbox-token"]; // as in src/sandbox-cli.ts
+if (argv.some((a) => SANDBOX_FLAGS.includes(a.split("=")[0]))) {
+  const { runSandbox } = await import("../dist/sandbox-cli.js");
+  process.exit(await runSandbox(argv));
+}
 
 const binary = findBinary();
 if (!binary) {
@@ -19,7 +27,7 @@ if (!binary) {
   process.exit(2);
 }
 
-const child = spawn(binary, process.argv.slice(2), { stdio: "inherit" });
+const child = spawn(binary, argv, { stdio: "inherit" });
 
 // Ctrl-C and Ctrl-\ reach the binary directly from the terminal, so the
 // launcher only waits; signals sent to the launcher alone are passed on.

@@ -777,6 +777,8 @@ async fn session(cli: Cli, out: Out) -> i32 {
                 .map(|t| t.name),
         );
         tool_denylist.push(gitagent_tools::MEMORY.into());
+        // The client's own tools replace them, also under the same names.
+        tool_denylist.retain(|n| !init.tools.iter().any(|t| t.name == *n));
     }
 
     let session_id =

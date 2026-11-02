@@ -40,6 +40,14 @@
     "@open-gitagent/gitagent-darwin-arm64": "3.0.0",
     "@open-gitagent/gitagent-darwin-x64": "3.0.0"
   },
+  "peerDependencies": {
+    "gitmachine": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "gitmachine": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.6.0"

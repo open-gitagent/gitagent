@@ -284,7 +284,7 @@ pub(crate) fn load_env_files(dir: Option<&std::path::Path>) {
 async fn async_main(mut cli: Cli) -> ExitCode {
     if cli.remote_sandbox || cli.sandbox_repo.is_some() || cli.sandbox_token.is_some() {
         return usage_error(anyhow::anyhow!(
-            "--sandbox (a remote sandbox) is not available in this version; local runs are sandboxed on Linux"
+            "--sandbox (a remote sandbox VM) is not available in this version of the binary; the npm command runs it: npm install -g @open-gitagent/gitagent gitmachine"
         ));
     }
     if cli.voice.is_some() {

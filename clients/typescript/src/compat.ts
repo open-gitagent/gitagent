@@ -20,8 +20,6 @@ const CONTEXT = "the binary manages the context (masking and compaction)";
 const TELEMETRY = "the binary exports traces and metrics when OTEL_EXPORTER_OTLP_ENDPOINT is set";
 const VOICE = "voice mode is not part of gitagent 3";
 
-/** @deprecated Not in gitagent 3: set `sandbox` in gitagent.yaml; the binary sandboxes the agent's shell. */
-export const createSandboxContext = removed("createSandboxContext", "set `sandbox` in gitagent.yaml; the binary sandboxes the agent's shell");
 /** @deprecated Not in gitagent 3: pass the `repo` option to query(). */
 export const initLocalSession = removed("initLocalSession", "pass the `repo` option to query()");
 /** @deprecated Not in gitagent 3: voice mode is not part of gitagent 3. */
@@ -109,7 +107,6 @@ export class CostTracker {
 
 // Types of the removed functions above, kept as plain objects so that code
 // naming them still compiles.
-/** @deprecated */ export type SandboxOptions = JsonObject;
 /** @deprecated */ export type AgentManifest = JsonObject;
 /** @deprecated */ export type LoadedAgent = JsonObject;
 /** @deprecated */ export type McpServerConfig = JsonObject;
@@ -118,8 +115,6 @@ export class CostTracker {
 /** @deprecated */ export type SubAgentMetadata = JsonObject;
 /** @deprecated */ export type ComplianceWarning = JsonObject;
 /** @deprecated */ export type EnvConfig = JsonObject;
-/** @deprecated */ export type SandboxConfig = JsonObject;
-/** @deprecated */ export type SandboxContext = JsonObject;
 /** @deprecated */ export type LocalSession = JsonObject;
 /** @deprecated */ export type PluginManifest = JsonObject;
 /** @deprecated */ export type PluginConfig = JsonObject;

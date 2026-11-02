@@ -9,6 +9,7 @@ gitagent 3 is a rewrite of gitagent in Rust. It ships as one static binary with 
 - **One loop everywhere.** The console, the SDKs, schedules and benchmark runs all run the same agent loop, so a benchmark result describes the product.
 - **A console in your terminal**, with slash commands, line editing and a live task board.
 - **Parallel work.** Sub-agents run concurrently. The `plan` tool splits a large job into phases of tasks, runs them in parallel and reconciles the results. A shared throttle adapts to the provider's rate limits.
+- **The remote sandbox stays.** `gitagent --sandbox` (with `gitmachine`) runs the agent's commands and edits in an E2B VM as before, through the npm command; `query({ sandbox })` does the same in the SDK.
 - **On npm.** `npm install -g @open-gitagent/gitagent` installs the binary for your platform and the `gitagent` command, so npm users update the way they always have. The same package is the TypeScript SDK.
 - **SDKs for any language.** The Python and TypeScript clients drive the binary over a JSON-lines protocol (`gitagent --ipc`), and any language that can start a process can do the same. The Rust crate `gitagent-sdk` runs the loop in your own process.
 - **Providers.** Anthropic, OpenAI, Google and any OpenAI-compatible endpoint, with a per-family profile (tools, effort, output shaping, caching) and fallbacks.
@@ -27,7 +28,6 @@ gitagent 3 is a rewrite of gitagent in Rust. It ships as one static binary with 
 - **Exit codes.** 0 when a run ends (including when it runs out of turns or time), 2 for usage and setup errors, 3 when the model provider fails, 130 when the run is stopped. Before, every error exited with 1.
 - **Not carried over:**
   - `--voice`;
-  - the remote `--sandbox`;
   - a plugin's `entry` JavaScript (plugins now contribute tools, skills, hooks and prompt text through files);
   - the 1.x telemetry adapter (OTLP export replaces it);
   - online skill learning (lessons from finished runs replace it).

@@ -1295,7 +1295,10 @@ pub fn offered_tools(
     if spec.workflows.iter().any(|w| !w.is_narrative()) {
         tools.push(gitagent_tools::workflow_spec(&spec.workflows));
     }
-    tools.extend(external.into_iter().flat_map(|e| e.specs()));
+    let external: Vec<_> = external.into_iter().flat_map(|e| e.specs()).collect();
+    // A tool the client declares takes the place of a built-in one of the same name.
+    tools.retain(|t| !external.iter().any(|e| e.name == t.name));
+    tools.extend(external);
     if let Some(allow) = allow {
         tools.retain(|t| allow.contains(&t.name) || t.name == gitagent_tools::TASK_COMPLETE);
     }
