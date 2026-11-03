@@ -1,0 +1,18 @@
+name: gitagent
+# model: anthropic:<model-id>      # provider:model; --model overrides
+fallback_models: []
+max_turns: 200
+# timeout_s: 1800                  # seconds; unset: 30 minutes for -p, schedules and the SDKs, no limit in the console
+profile: auto                      # auto = pick by model family, or a profile name/path
+sandbox: auto                      # auto | on | off; auto = on outside --bench on Linux
+skills: true
+hooks: true
+learning: off                      # off | online: learn lessons into .gitagent/ after each finished task (never in --bench)
+memory: false                      # memory/ and the memory tool (always on with an agent.yaml; never in --bench)
+memory_commit: true                # commit each memory save to git
+mcp_servers: {}                    # name: {command, args, env} or {url, headers}; added to agent.yaml's and .mcp.json's
+repo:
+  branch_prefix: gitagent/
+  commit_every_turns: 0
+  author: "gitagent <gitagent@localhost>"
+  push: false

@@ -1,0 +1,13 @@
+[package]
+name = "gitagent-guards"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+regex = "1.13.1"

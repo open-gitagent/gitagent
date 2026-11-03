@@ -1,0 +1,135 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: The tag matches every package's version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          npm=$(node -p "require('./clients/typescript/package.json').version")
+          python=$(sed -n 's/^version = "\(.*\)"/\1/p' clients/python/pyproject.toml | head -1)
+          echo "tag $tag; Cargo.toml $cargo; npm $npm; Python $python"
+          [ "$cargo" = "$tag" ] && [ "$npm" = "$tag" ] && [ "$python" = "$tag" ]
+
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: mlugg/setup-zig@v2
+      - run: cargo install --locked cargo-zigbuild
+      - run: scripts/package-release.sh x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+      - name: The binaries are static, and the x86_64 one starts with the tag's version
+        run: |
+          for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            tar -xzf "dist/gitagent-$t.tar.gz" -O gitagent > "$RUNNER_TEMP/gitagent-$t"
+            file "$RUNNER_TEMP/gitagent-$t" | tee /dev/stderr | grep -q 'statically linked'
+          done
+          chmod +x "$RUNNER_TEMP/gitagent-x86_64-unknown-linux-musl"
+          "$RUNNER_TEMP/gitagent-x86_64-unknown-linux-musl" --version | grep -F "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*.tar.gz
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - run: scripts/package-release.sh aarch64-apple-darwin x86_64-apple-darwin
+      - name: The arm64 binary starts with the tag's version
+        run: |
+          tar -xzf dist/gitagent-aarch64-apple-darwin.tar.gz -O gitagent > "$RUNNER_TEMP/gitagent"
+          chmod +x "$RUNNER_TEMP/gitagent"
+          "$RUNNER_TEMP/gitagent" --version | grep -F "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.tar.gz
+
+  publish:
+    needs: [linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum gitagent-*.tar.gz > SHA256SUMS
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # docs/RELEASE-NOTES-<version>.md (without a pre-release part) is the
+          # release text, with its relative links pointed at this tag.
+          notes="docs/RELEASE-NOTES-${version%%-*}.md"
+          blob="https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME"
+          args=(--title "gitagent $version")
+          if [ -f "$notes" ]; then
+            sed -e "s#](\./#]($blob/docs/#g" -e "s#](\.\./#]($blob/#g" "$notes" > "$RUNNER_TEMP/notes.md"
+            args+=(--notes-file "$RUNNER_TEMP/notes.md")
+          else
+            args+=(--generate-notes)
+          fi
+          case "$GITHUB_REF_NAME" in *-*) args+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" "${args[@]}"
+
+  npm:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+      - name: Platform packages
+        run: scripts/npm-packages.sh "$GITHUB_REF_NAME"
+      - name: Main package
+        working-directory: clients/typescript
+        run: npm install --no-audit --no-fund --omit=optional && npm run build
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # A version with a pre-release part (3.1.0-rc.1) goes to the "next" tag, not "latest".
+          tag=latest
+          case "$GITHUB_REF_NAME" in *-*) tag=next ;; esac
+          publish() {
+            name=$(node -p "require('./$1/package.json').name")
+            version=$(node -p "require('./$1/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already published"
+            else
+              npm publish "./$1" --access public --provenance --tag "$tag"
+            fi
+          }
+          # The platform packages first, so the main package's optional dependencies resolve.
+          for dir in npm/*/; do publish "${dir%/}"; done
+          publish clients/typescript

@@ -1,0 +1,20 @@
+[package]
+name = "gitagent-sandbox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[dependencies]
+anyhow.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.7"
+libc = "0.2"
+seccompiler = "0.5.0"
+
+[dev-dependencies]
+tempfile = "3.27.0"

@@ -1,0 +1,154 @@
+[
+  {
+    "description": "Run a shell command. By default it runs in the main shell (session 1), which keeps its working directory, environment variables and shell state between calls. Returns the output (stdout and stderr together) and the exit code. If the command is still running after `yield_ms`, returns the output so far and the session id: use write_stdin to wait for more output, send input or interrupt it. Running another command in the main shell first interrupts a command still running there.",
+    "input_schema": {
+      "properties": {
+        "background": {
+          "description": "Run in a new background session instead of the main shell (for servers, REPLs and watchers). It starts in the main shell's directory with its exported variables.",
+          "type": "boolean"
+        },
+        "cmd": {
+          "description": "The command to run. Multi-line scripts and heredocs are fine.",
+          "type": "string"
+        },
+        "yield_ms": {
+          "description": "How long to wait for the command to finish, in milliseconds (default 10000, max 600000). Use a longer wait for builds, installs and test suites.",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cmd"
+      ],
+      "type": "object"
+    },
+    "name": "exec"
+  },
+  {
+    "description": "Send input to a session whose command is still running, then return the new output. With empty `chars` it just waits for more output. Write control keys as escapes: \"\\x03\" is Ctrl-C (interrupt), \"\\x04\" is Ctrl-D (end of input), \"\\e\" is Escape, \"\\n\" is Enter.",
+    "input_schema": {
+      "properties": {
+        "chars": {
+          "description": "Text and keys to send; empty to only wait for output.",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "The session to write to, as reported by exec (1 is the main shell).",
+          "type": "integer"
+        },
+        "yield_ms": {
+          "description": "How long to wait for output, in milliseconds (default 2000 after input, 10000 when only waiting; max 600000).",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "name": "write_stdin"
+  },
+  {
+    "description": "Read a text file. Returns numbered lines.",
+    "input_schema": {
+      "properties": {
+        "limit": {
+          "description": "Maximum number of lines to show (default 2000).",
+          "type": "integer"
+        },
+        "offset": {
+          "description": "First line to show, starting at 1 (default 1).",
+          "type": "integer"
+        },
+        "path": {
+          "description": "Absolute path, or relative to the main shell's current directory.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "read_file"
+  },
+  {
+    "description": "Create a file with the given content, or replace a file completely. Parent directories are created. To change part of an existing file, edit it with a command instead.",
+    "input_schema": {
+      "properties": {
+        "content": {
+          "description": "The full content of the file.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Absolute path, or relative to the main shell's current directory.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "type": "object"
+    },
+    "name": "write_file"
+  },
+  {
+    "description": "Edit a file by replacing an exact piece of text. `old_str` must match the file exactly, including indentation, and appear once (or set replace_all). Include a few surrounding lines to make it unique.",
+    "input_schema": {
+      "properties": {
+        "new_str": {
+          "description": "The text to put in its place.",
+          "type": "string"
+        },
+        "old_str": {
+          "description": "The exact text to replace.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Absolute path, or relative to the main shell's current directory.",
+          "type": "string"
+        },
+        "replace_all": {
+          "description": "Replace every occurrence instead of requiring exactly one.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "old_str",
+        "new_str"
+      ],
+      "type": "object"
+    },
+    "name": "str_replace"
+  },
+  {
+    "description": "Look at an image file (PNG, JPEG, GIF or WebP, up to about 3.7 MB).",
+    "input_schema": {
+      "properties": {
+        "path": {
+          "description": "Absolute path, or relative to the main shell's current directory.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "name": "image_read"
+  },
+  {
+    "description": "Finish the task. Call this only after you have verified that every requirement is met.",
+    "input_schema": {
+      "properties": {
+        "summary": {
+          "description": "One or two sentences on what was done and how it was verified.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": "task_complete"
+  }
+]

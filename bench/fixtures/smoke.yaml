@@ -1,0 +1,12 @@
+# Scripted dry run for checking the Harbor integration without a model API.
+# It only looks around and then stops; it does not try to solve the task.
+- text: Looking at the environment.
+  tool_calls:
+    - name: exec
+      arguments: {cmd: "pwd && ls -la | head -20 && uname -m"}
+- tool_calls:
+    - name: read_file
+      arguments: {path: /etc/os-release, limit: 5}
+- tool_calls:
+    - name: task_complete
+      arguments: {summary: Integration dry run.}

@@ -1,0 +1,55 @@
+{
+  "name": "@open-gitagent/gitagent",
+  "version": "3.0.0",
+  "description": "The gitagent command and its TypeScript SDK: the agent that lives in a git repository.",
+  "author": "shreyaskapale",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/open-gitagent/gitagent.git",
+    "directory": "clients/typescript"
+  },
+  "homepage": "https://github.com/open-gitagent/gitagent",
+  "keywords": ["ai", "agent", "git", "cli", "sdk", "llm"],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "gitagent": "./bin/gitagent.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cli": "./bin/gitagent.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "bin", "README.md"],
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "optionalDependencies": {
+    "@open-gitagent/gitagent-linux-x64": "3.0.0",
+    "@open-gitagent/gitagent-linux-arm64": "3.0.0",
+    "@open-gitagent/gitagent-darwin-arm64": "3.0.0",
+    "@open-gitagent/gitagent-darwin-x64": "3.0.0"
+  },
+  "peerDependencies": {
+    "gitmachine": ">=0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "gitmachine": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

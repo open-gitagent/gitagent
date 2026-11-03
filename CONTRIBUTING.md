@@ -1,84 +1,87 @@
-# Contributing to GitAgent
+# Contributing to gitagent
 
-Thanks for your interest in contributing to GitAgent! Here's how to get started.
+Thanks for helping. This guide covers gitagent 3, the Rust binary.
 
-## Getting Started
+## Getting started
 
-1. Fork the repository
-2. Clone your fork:
-   ```bash
+1. Fork the repository and clone your fork:
+   ```sh
    git clone https://github.com/<your-username>/gitagent.git
    cd gitagent
    ```
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-4. Build the project:
-   ```bash
-   npm run build
-   ```
-5. Run tests:
-   ```bash
-   npm test
+2. Install Rust. The toolchain is pinned in `rust-toolchain.toml`, so `rustup` picks the right version on its own.
+3. Build and test:
+   ```sh
+   cargo build
+   cargo test --workspace
    ```
 
-## Development Workflow
+The tests need no network and no API keys. A scripted provider replays model replies from YAML (`--model scripted:<file>`), and the provider adapters are tested against local mock servers. To try a change by hand:
 
-1. Create a feature branch from `main`:
-   ```bash
-   git checkout -b feat/my-feature
-   ```
-2. Make your changes in `src/`
-3. Run `npm run build` to verify compilation
-4. Run `npm test` to ensure tests pass
-5. Commit your changes with a clear message
-6. Push and open a pull request
-
-## Project Structure
-
+```sh
+cargo run -p gitagent-cli -- -d path/to/agent -m scripted:path/to/script.yaml
 ```
-src/
-├── index.ts          # CLI entry point
-├── sdk.ts            # Core SDK (query function)
-├── exports.ts        # Public API surface
-├── loader.ts         # Agent config loader
-├── tools/            # Built-in tools (cli, read, write, memory)
-├── voice/            # Voice mode (OpenAI Realtime adapter)
-├── hooks.ts          # Script-based hooks
-├── sdk-hooks.ts      # Programmatic SDK hooks
-├── skills.ts         # Skill expansion
-├── workflows.ts      # Workflow metadata
-├── agents.ts         # Sub-agent metadata
-├── compliance.ts     # Compliance validation
-└── audit.ts          # Audit logging
+
+## Before you open a pull request
+
+Run all four; CI runs the same:
+
+```sh
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+bash scripts/integrity-audit.sh
 ```
+
+- **The benchmark guard must pass.** `bench_prompt_and_tools_match_the_published_run` fails if the system prompt or the tool list sent to the model in `--bench` mode changes at all. Features for agent folders, the console or the SDKs must never reach benchmark mode. If a change to the benchmark setup is intended, say so in the pull request; it needs a measured run before it is merged.
+- **Behaviour that changes results is a profile switch.** Add it to `profiles/*.yaml`, off by default, and describe it in `docs/HOW-IT-WORKS.md`.
+- **Agents written for the TypeScript gitagent must keep working.** Tool names, hook scripts, `agent.yaml` fields and SDK options from 1.x and 2.x are accepted; if you change how one is read, keep the old form working and cover it with a test.
+
+## Project structure
+
+The workspace is split into crates under `crates/`:
+
+| Crate | What it does |
+|---|---|
+| `cli` | The `gitagent` binary: flags, the console, the IPC protocol, subcommands (`init`, `validate`, `install`, `plugin`, `schedule`, `learn`) |
+| `core` | The agent loop, sub-agents, the `plan` tool, workflows, approvals and the audit log |
+| `loader` | Reads agent folders and configuration into one spec: `agent.yaml`, identity files, skills, tools, hooks, memory, knowledge, workflows, schedules, plugins, environments, compliance |
+| `provider` | Model adapters: Anthropic, OpenAI, Google, OpenAI-compatible, and the scripted provider for tests |
+| `tools` | Built-in tools: shell, files, edits, memory, skills |
+| `terminal` | Persistent shells on a pseudo-terminal |
+| `shaper` | Shapes command output before the model sees it |
+| `context` | Masking and compaction of the conversation |
+| `guards` | The stop check, the time budget and the loop detector |
+| `hooks` | Hook scripts and their protocol |
+| `mcp` | The Model Context Protocol client |
+| `record` | Trajectories, counters and events |
+| `repo` | Repo mode: clones, branches, commits, pushes |
+| `sandbox` | Landlock and seccomp for the agent's shell; `sandbox-exec` on macOS |
+| `learn` | Offline learning of lessons from finished runs |
+| `sdk` | The Rust library interface |
+
+The Python and TypeScript clients live under `clients/` and talk to the binary over the IPC protocol (`gitagent --ipc`).
 
 ## Guidelines
 
-- **TypeScript** — all code is written in strict TypeScript
-- **ESM** — the project uses ES modules (`"type": "module"`)
-- **Keep it simple** — avoid over-engineering; minimal dependencies
-- **Test your changes** — add or update tests in `test/` when applicable
-- **One concern per PR** — keep pull requests focused and reviewable
+- **No unsafe code.** The workspace forbids it.
+- **Small dependencies.** Prefer a few lines of code to a new crate.
+- **Test what you change.** Unit tests next to the code, end-to-end tests in `crates/cli/tests/`.
+- **One concern per pull request.** Keep it focused and reviewable.
+- **Write docs in plain language.** Short sentences, one idea each.
 
-## Commit Messages
+## Commit messages
 
-Use clear, descriptive commit messages:
+A short subject saying what changed, then a body saying why when it is not obvious:
 
-- `Add voice mode with OpenAI Realtime adapter`
-- `Fix memory tool path resolution on Windows`
-- `Update SDK query to support abort signals`
+- `Parallel tasks: the plan tool and a live task board`
+- `Hooks that crash are a warning, as in 1.x`
+- `Repo mode reuses an earlier clone of the same repository`
 
-## Reporting Issues
+## Reporting issues
 
-- Search existing issues before opening a new one
-- Include reproduction steps, expected vs actual behavior, and your environment (Node version, OS)
-
-## Code of Conduct
-
-Be respectful and constructive. We're all here to build something useful together.
+Search the existing issues first. Include what you ran, what you expected, what happened, `gitagent --version`, and your operating system. A trajectory (`trajectory.json` from the run's output folder) helps most.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the [MIT License](./LICENSE).
+By contributing, you agree that your contributions are licensed under the [MIT License](./LICENSE).
