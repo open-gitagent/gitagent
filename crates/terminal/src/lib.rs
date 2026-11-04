@@ -9,6 +9,7 @@
 mod buffer;
 mod keys;
 mod manager;
+mod stop;
 
 pub use keys::decode_keys;
 pub use manager::{Terminal, MAIN_SESSION, MAX_SESSIONS};
@@ -18,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
+use nix::unistd::Pid;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tokio::sync::mpsc;
 use tokio::time::timeout_at;
@@ -107,6 +109,14 @@ pub struct ExecResult {
 enum ReadEvent {
     Data(Vec<u8>),
     Eof,
+}
+
+/// What ending a shell stops besides the shell.
+enum Ending {
+    /// Every process in the shell's session, background jobs included.
+    Session,
+    /// Only the command in the terminal's foreground.
+    Foreground,
 }
 
 struct Shell {
@@ -287,9 +297,36 @@ impl Session {
         }
     }
 
-    /// Stops the shell and everything started from it.
+    /// Stops the shell and everything started from it: the running command
+    /// and background jobs, which job control puts in groups of their own.
     pub fn kill(&mut self) {
+        self.end_shell(Ending::Session);
+    }
+
+    /// Stops the shell and the command it is running. Background jobs get
+    /// the shell's SIGHUP, as when a terminal window closes, so jobs started
+    /// with `nohup` (e.g. a server) keep running, including one started just
+    /// before the hang-up.
+    pub(crate) fn hang_up(&mut self) {
+        self.end_shell(Ending::Foreground);
+    }
+
+    fn end_shell(&mut self, ending: Ending) {
         if let Some(mut shell) = self.shell.take() {
+            if let Some(pid) = shell.child.process_id().and_then(|p| i32::try_from(p).ok()) {
+                let pid = Pid::from_raw(pid);
+                let foreground = shell.master.process_group_leader().map(Pid::from_raw);
+                let tty = shell.master.tty_name();
+                match ending {
+                    Ending::Session => stop::stop_session(pid, tty.as_deref(), foreground),
+                    Ending::Foreground => {
+                        stop::stop_foreground(pid, foreground);
+                        stop::let_jobs_start(pid, tty.as_deref());
+                    }
+                }
+            }
+            // SIGHUP, then SIGKILL, to the shell. Errors only mean it already
+            // exited; `wait` then just reaps it.
             let _ = shell.child.kill();
             let _ = shell.child.wait();
         }
@@ -414,7 +451,7 @@ impl Session {
                 ]);
             }
         }
-        self.kill();
+        self.hang_up();
         Ok(vec![
             "The previous command did not stop on Ctrl-C, so its shell was killed.".into(),
         ])
