@@ -156,6 +156,58 @@ async fn a_failed_call_leaves_the_trials_for_next_time() {
     assert!(Store::load(&s.opts.store_path).unwrap().learned.is_empty());
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_provider_outage_stops_the_pass_after_two_units() {
+    let mut s = setup();
+    // Every trial is learnable: three units (heldout, other, serve pair).
+    s.opts.dev_tasks = None;
+    let provider = ScriptedProvider::from_yaml(
+        &"- error: transient
+"
+        .repeat(9),
+    )
+    .unwrap();
+    let report = learn(&spec(), &provider, &s.opts).await.unwrap();
+    // Two units use up their retries; the third is skipped without a call
+    // instead of retrying into the same outage.
+    assert_eq!(provider.requests().len(), 6);
+    assert_eq!(
+        (
+            report.model_calls,
+            report.model_errors,
+            report.provider_down_skips,
+            report.trials_learned
+        ),
+        (3, 3, 1, 0)
+    );
+    assert!(Store::load(&s.opts.store_path).unwrap().learned.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_recovered_call_keeps_the_pass_going() {
+    let mut s = setup();
+    s.opts.min_tasks = 1;
+    s.opts.dev_tasks = Some(["other-thing".to_string()].into());
+    let script = "- error: rate_limited
+- error: transient
+"
+    .to_string()
+        + &reply(&format!(
+            r#"{{"ops": [{{"op": "add", "text": "{NOHUP}"}}]}}"#
+        ));
+    let provider = ScriptedProvider::from_yaml(&script).unwrap();
+    let report = learn(&spec(), &provider, &s.opts).await.unwrap();
+    assert_eq!(provider.requests().len(), 3);
+    assert_eq!(
+        (
+            report.model_errors,
+            report.provider_down_skips,
+            report.lessons_added
+        ),
+        (0, 0, 1)
+    );
+}
+
 #[tokio::test]
 async fn dry_run_writes_nothing() {
     let mut s = setup();

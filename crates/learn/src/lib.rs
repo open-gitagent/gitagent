@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use gitagent_loader::AgentSpec;
 use gitagent_provider::Provider;
+use llm_resilience::CircuitBreaker;
 use serde::Serialize;
 
 pub use audit::check as audit_lesson;
@@ -55,6 +56,9 @@ pub struct LearnReport {
     pub trials_learned: usize,
     pub model_calls: usize,
     pub model_errors: usize,
+    /// Units skipped without a call because the provider kept failing
+    /// (also counted in `model_errors`; their trials stay unlearned).
+    pub provider_down_skips: usize,
     pub ops_proposed: usize,
     pub ops_rejected: usize,
     pub lessons_added: usize,
@@ -116,9 +120,10 @@ pub async fn learn(
         }
     }
 
+    let breaker = distill::breaker();
     for trials in by_task.values() {
         for unit in units(trials) {
-            learn_unit(spec, provider, &mut store, &unit, &mut report).await;
+            learn_unit(spec, provider, &breaker, &mut store, &unit, &mut report).await;
         }
     }
     report.lessons_total = store.lessons.len();
@@ -137,15 +142,19 @@ pub async fn learn(
 async fn learn_unit(
     spec: &AgentSpec,
     provider: &dyn Provider,
+    breaker: &CircuitBreaker,
     store: &mut Store,
     unit: &[&Trial],
     report: &mut LearnReport,
 ) {
     report.model_calls += 1;
-    let ops = match distill::propose(spec, provider, store, unit).await {
+    let ops = match distill::propose(spec, provider, breaker, store, unit).await {
         Ok(ops) => ops,
         Err(e) => {
             report.model_errors += 1;
+            if e.is::<distill::ProviderDown>() {
+                report.provider_down_skips += 1;
+            }
             eprintln!("gitagent learn: {}: {e:#}", ids(unit));
             return;
         }
@@ -232,7 +241,8 @@ pub async fn learn_from_run(
         trials_read: 1,
         ..Default::default()
     };
-    learn_unit(spec, provider, &mut store, &[&trial], &mut report).await;
+    let breaker = distill::breaker();
+    learn_unit(spec, provider, &breaker, &mut store, &[&trial], &mut report).await;
     report.lessons_total = store.lessons.len();
     report.rendered = store.render(PROJECT_MAX_CHARS, 2);
     report.lessons_shown = report.rendered.lines().count();
